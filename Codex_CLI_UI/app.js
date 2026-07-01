@@ -37,6 +37,8 @@ let config = {
   accessLevel: "danger-full-access",
   reasoningLevel: "low",
   webSearch: "live",
+  startupContext: null,
+  startupSummary: null,
   profiles: [],
   projects: [],
 };
@@ -210,11 +212,15 @@ function renderProjects() {
 function renderMessages() {
   const thread = currentThread();
   els.conversation.innerHTML = "";
+  els.conversation.appendChild(buildStartupCard(Boolean(thread.messages.length)));
 
   if (!thread.messages.length) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
-    empty.textContent = "Start a local Codex session.";
+    const name = config.startupSummary?.preferredName || config.startupContext?.preferredName || "";
+    empty.textContent = name && name !== "Friend"
+      ? `Welcome, ${name}. The startup inventory is loaded and ready.`
+      : "The startup inventory is loaded and ready.";
     els.conversation.appendChild(empty);
     return;
   }
@@ -227,12 +233,126 @@ function renderMessages() {
     role.textContent = message.role === "user" ? "You" : "Codex";
     const body = document.createElement("div");
     body.className = "message-body";
-    body.textContent = message.text || "Working...";
+
+    if (message.role === "assistant" && Array.isArray(message.thoughts) && message.thoughts.length) {
+      const thoughts = document.createElement("div");
+      thoughts.className = "thoughts-card";
+      const thoughtsTitle = document.createElement("div");
+      thoughtsTitle.className = "thoughts-title";
+      thoughtsTitle.textContent = "Working notes";
+      thoughts.appendChild(thoughtsTitle);
+      message.thoughts.slice(-8).forEach((thought) => {
+        const item = document.createElement("div");
+        item.className = "thought-item";
+        item.textContent = thought;
+        thoughts.appendChild(item);
+      });
+      body.appendChild(thoughts);
+    }
+
+    const answer = document.createElement("div");
+    answer.className = "answer-text";
+    answer.textContent = message.text || (message.thoughts?.length ? "" : "Working...");
+    body.appendChild(answer);
     node.append(role, body);
     els.conversation.appendChild(node);
   });
 
   els.conversation.scrollTop = els.conversation.scrollHeight;
+}
+
+function buildStartupCard(hasMessages) {
+  const context = config.startupContext || {};
+  const summary = config.startupSummary || {};
+  const details = document.createElement("details");
+  details.className = "startup-card";
+  details.open = !hasMessages;
+
+  const heading = document.createElement("summary");
+  heading.className = "startup-summary";
+  const name = summary.preferredName || context.preferredName || "Friend";
+  const tailnetCount = summary.tailnetHosts || 0;
+  heading.textContent = `${name}'s startup inventory: ${summary.machines || 0} machines, ${summary.sshHosts || 0} SSH aliases, ${tailnetCount} tailnet hosts, ${summary.resources || 0} Mac resources`;
+  details.appendChild(heading);
+
+  const body = document.createElement("div");
+  body.className = "startup-body";
+
+  const inventoryPath = summary.inventoryPath || context.inventoryPath;
+  if (inventoryPath) {
+    const pathLine = document.createElement("div");
+    pathLine.className = "startup-path";
+    pathLine.textContent = `Private inventory: ${inventoryPath}`;
+    body.appendChild(pathLine);
+  }
+
+  body.appendChild(startupSection("Machines", (context.machines || []).slice(0, 12).map((machine) => {
+    const services = Array.isArray(machine.services)
+      ? machine.services.map((service) => service.url || service.name).filter(Boolean).join(", ")
+      : "";
+    const ssh = machine.ssh || {};
+    const sshBits = [
+      ssh.alias ? `alias ${ssh.alias}` : "",
+      ssh.username ? `user ${ssh.username}` : "",
+      ssh.identity_file ? `key ${ssh.identity_file}` : "",
+      Array.isArray(ssh.remote_paths) && ssh.remote_paths.length ? `paths ${ssh.remote_paths.join(", ")}` : "",
+    ].filter(Boolean).join(", ");
+    const keychain = ssh.password_keychain_service ? `; Keychain ${ssh.password_keychain_service}` : "";
+    return `${machine.name || "Machine"}: ${machine.host || "host unknown"}${sshBits ? `; SSH ${sshBits}` : ""}${keychain}${services ? `; ${services}` : ""}`;
+  })));
+
+  body.appendChild(startupSection("SSH Config", (context.sshHosts || []).slice(0, 10).map((host) => {
+    const aliases = (host.aliases || []).join(", ");
+    const bits = [
+      host.hostname ? `host ${host.hostname}` : "",
+      host.user ? `user ${host.user}` : "",
+      host.port ? `port ${host.port}` : "",
+      host.identityfile ? `key ${host.identityfile}` : "",
+    ].filter(Boolean).join(", ");
+    return `${aliases}${bits ? `: ${bits}` : ""}`;
+  })));
+
+  body.appendChild(startupSection("Tailnet", (context.tailnetHosts || []).slice(0, 10).map((host) => {
+    const addresses = Array.isArray(host.addresses) ? host.addresses.join(", ") : "";
+    return `${host.name || "tailnet host"}: ${addresses || "address hidden"}${host.online ? "; online" : "; offline"}`;
+  })));
+
+  body.appendChild(startupSection("Mac Resources", (context.resources || []).slice(0, 14).map((resource) => {
+    return `${resource.name || "resource"}: ${resource.path || ""}${resource.version ? ` (${resource.version})` : ""}`;
+  })));
+
+  const passwordNote = document.createElement("div");
+  passwordNote.className = "startup-note";
+  passwordNote.textContent = "SSH passwords are not shown or injected into the model. Use SSH keys or Keychain references.";
+  body.appendChild(passwordNote);
+
+  details.appendChild(body);
+  return details;
+}
+
+function startupSection(title, items) {
+  const section = document.createElement("section");
+  section.className = "startup-section";
+  const heading = document.createElement("div");
+  heading.className = "startup-section-title";
+  heading.textContent = title;
+  section.appendChild(heading);
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "startup-empty";
+    empty.textContent = "None found yet.";
+    section.appendChild(empty);
+    return section;
+  }
+  const list = document.createElement("ul");
+  list.className = "startup-list";
+  items.forEach((text) => {
+    const item = document.createElement("li");
+    item.textContent = text;
+    list.appendChild(item);
+  });
+  section.appendChild(list);
+  return section;
 }
 
 function renderLogs() {
@@ -288,7 +408,7 @@ async function sendPrompt() {
   render();
   setRunning(true);
 
-  const pending = { role: "assistant", text: "", running: true };
+  const pending = { role: "assistant", text: "", running: true, thoughts: [] };
   thread.messages.push(pending);
   renderMessages();
 
@@ -334,6 +454,11 @@ async function sendPrompt() {
 }
 
 function handleEvent(event, pending) {
+  if (event.type === "thought") {
+    addThought(pending, event.text || "Working...");
+    return;
+  }
+
   if (event.type === "assistant") {
     pending.text = event.text || "";
     renderMessages();
@@ -356,6 +481,7 @@ function handleEvent(event, pending) {
   }
 
   if (event.type === "status") {
+    addThought(pending, "Starting the local Codex run.");
     appendLog(
       "event",
       `${event.message} mode=${event.mode || "careful"} profile=${event.profile} access=${event.accessLevel} reasoning=${event.reasoningLevel} web=${event.webSearch || "live"} cwd=${event.cwd}`
@@ -373,9 +499,23 @@ function handleEvent(event, pending) {
     if (inner.type === "turn.completed" && inner.usage) {
       appendLog("event", `tokens input=${inner.usage.input_tokens || 0} output=${inner.usage.output_tokens || 0}`);
     } else if (inner.type) {
+      if (inner.type === "turn.started") {
+        addThought(pending, "Handing the request to the local model.");
+      }
       appendLog("event", inner.type);
     }
   }
+}
+
+function addThought(pending, text) {
+  const clean = String(text || "").trim();
+  if (!clean) return;
+  pending.thoughts = pending.thoughts || [];
+  if (pending.thoughts[pending.thoughts.length - 1] !== clean) {
+    pending.thoughts.push(clean);
+    if (pending.thoughts.length > 8) pending.thoughts.splice(0, pending.thoughts.length - 8);
+  }
+  renderMessages();
 }
 
 async function readStream(body, onEvent) {

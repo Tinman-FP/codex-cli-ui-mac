@@ -1,13 +1,13 @@
-# Codex CLI UI for Mac v2026.07.01
+# Codex CLI UI for Mac v2026.07.01.1
 
-Initial public release.
+Patch release with startup inventory and working-note improvements.
 
 ## Download
 
 Download one file:
 
 ```text
-Codex_CLI_UI_Mac_v2026.07.01.dmg
+Codex_CLI_UI_Mac_v2026.07.01.1.dmg
 ```
 
 Open the DMG and double-click `Install Codex CLI UI.command`.
@@ -19,7 +19,9 @@ Open the DMG and double-click `Install Codex CLI UI.command`.
 - User LaunchAgent installer
 - Fast and Careful Codex local OSS profile setup
 - Web Access toggle support
-- Privacy-safe empty data/log folders
+- Startup inventory card for private machine records, SSH aliases, tailnet hosts, and local resources
+- Safe working notes while Codex CLI is running
+- Privacy-safe local data/log folders
 
 ## Requirements
 
@@ -29,5 +31,7 @@ Open the DMG and double-click `Install Codex CLI UI.command`.
 - `gpt-oss:20b`
 
 ## Notes
+
+No personal chat history, machine inventory, raw passwords, or local network details are bundled. The installer creates a local-only private inventory template on each Mac.
 
 This is an ad-hoc signed community package and is not Apple-notarized. Use right-click **Open** if macOS Gatekeeper blocks the installer or app.

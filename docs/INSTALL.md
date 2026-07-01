@@ -8,7 +8,7 @@
    ollama pull gpt-oss:20b
    ```
 
-4. Open `Codex_CLI_UI_Mac_v2026.07.01.dmg`.
+4. Open `Codex_CLI_UI_Mac_v2026.07.01.1.dmg`.
 5. Double-click `Install Codex CLI UI.command`.
 6. Open `Codex CLI UI.app` from `~/Applications`.
 

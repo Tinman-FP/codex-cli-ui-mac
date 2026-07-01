@@ -2,6 +2,7 @@
 import json
 import os
 import selectors
+import shutil
 import subprocess
 import tempfile
 import time
@@ -15,6 +16,8 @@ from urllib.parse import unquote, urlparse
 
 APP_DIR = Path(__file__).resolve().parent
 DATA_DIR = APP_DIR / "data"
+PRIVATE_DATA_DIR = DATA_DIR / "private"
+MACHINE_INVENTORY_PATH = PRIVATE_DATA_DIR / "machines.json"
 HISTORY_INDEX_PATH = DATA_DIR / "codex_history_index.jsonl"
 HISTORY_SUMMARY_PATH = DATA_DIR / "codex_history_summary.json"
 CODEX_BIN = os.environ.get(
@@ -109,6 +112,20 @@ STOP_WORDS = {
     "your",
 }
 history_cache = {"mtime": None, "documents": [], "summary": None}
+startup_cache = {"time": 0, "context": None}
+ASSISTANT_STYLE_CONTEXT = """Assistant style:
+- Be warm, personable, and collaborative, like a capable teammate sitting beside the user.
+- Stay practical and specific; mention files, commands, and outcomes when they matter.
+- When the user is asking for help, avoid cold disclaimers and generic helpdesk phrasing.
+- If you cannot do something, say exactly what blocked it and what would unblock it.
+- Keep final answers concise, but let a little personality and care come through.
+- This UI renders plain text, so avoid Markdown bold/heading markers. Use backticks for paths, commands, and exact values.
+- At the start of each run, quietly review the private startup inventory for machines, SSH aliases, tailnet hosts, and Mac resources. Use it when relevant; do not recite the whole inventory unless asked.
+- If the private startup inventory contains a preferred name, use it naturally when greeting, acknowledging, or clarifying.
+- Never reveal or request raw SSH passwords in chat. Use SSH keys, SSH config aliases, or macOS Keychain references.
+- Do not reveal hidden chain-of-thought. Share only useful summaries, progress, and conclusions.
+
+"""
 
 
 def json_line(handler, payload):
@@ -140,6 +157,302 @@ def compact(text, limit=1400):
     if len(text) > limit:
         return text[:limit].rstrip() + "..."
     return text
+
+
+def compact_command(command, limit=120):
+    command = " ".join(str(command or "").split())
+    prefix = "/bin/bash -lc "
+    if command.startswith(prefix):
+        command = command[len(prefix) :].strip()
+    if len(command) > limit:
+        return command[:limit].rstrip() + "..."
+    return command
+
+
+def run_capture(args, timeout=3):
+    try:
+        result = subprocess.run(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=timeout,
+            env={**os.environ, "PATH": PATH_FOR_CODEX},
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
+def command_version(command, version_args):
+    path = shutil.which(command, path=PATH_FOR_CODEX)
+    if not path:
+        return None
+    output = run_capture([path, *version_args], timeout=3)
+    first_line = output.splitlines()[0] if output else ""
+    return {"name": command, "path": path, "version": first_line}
+
+
+def read_json(path, default):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return default
+
+
+def sanitize_ssh_info(info):
+    info = dict(info or {})
+    for key in list(info):
+        lowered = key.lower()
+        if any(token in lowered for token in ["password", "passwd", "passphrase"]) and key not in {
+            "password_keychain_service",
+            "password_keychain_account",
+        }:
+            info[key] = "[not loaded]"
+    return info
+
+
+def load_machine_inventory():
+    PRIVATE_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    data = read_json(MACHINE_INVENTORY_PATH, {"preferred_name": "Friend", "machines": []})
+    data.setdefault("preferred_name", "Friend")
+    data.setdefault("machines", [])
+    sanitized = []
+    for machine in data.get("machines", []):
+        if not isinstance(machine, dict):
+            continue
+        safe_machine = dict(machine)
+        safe_machine["ssh"] = sanitize_ssh_info(safe_machine.get("ssh", {}))
+        sanitized.append(safe_machine)
+    data["machines"] = sanitized
+    return data
+
+
+def parse_ssh_config():
+    config_path = Path.home() / ".ssh" / "config"
+    try:
+        lines = config_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+
+    hosts = []
+    current = None
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split(None, 1)
+        if not parts:
+            continue
+        key = parts[0].lower()
+        value = parts[1].strip() if len(parts) > 1 else ""
+        if key == "host":
+            if current:
+                hosts.append(current)
+            aliases = [item for item in value.split() if "*" not in item and "?" not in item]
+            current = {"aliases": aliases, "source": str(config_path)}
+            continue
+        if not current:
+            continue
+        if key in {"hostname", "user", "port", "identityfile", "proxyjump"}:
+            current[key] = value
+    if current:
+        hosts.append(current)
+    return hosts
+
+
+def detect_tailnet_hosts(limit=24):
+    if not shutil.which("tailscale", path=PATH_FOR_CODEX):
+        return []
+    raw = run_capture(["tailscale", "status", "--json"], timeout=4)
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    hosts = []
+    self_node = data.get("Self")
+    if isinstance(self_node, dict):
+        hosts.append(
+            {
+                "name": self_node.get("HostName") or self_node.get("DNSName") or "this-mac",
+                "addresses": self_node.get("TailscaleIPs", []),
+                "online": True,
+                "source": "tailnet self",
+            }
+        )
+    for peer in (data.get("Peer") or {}).values():
+        if not isinstance(peer, dict):
+            continue
+        hosts.append(
+            {
+                "name": peer.get("HostName") or peer.get("DNSName") or "tailnet-peer",
+                "addresses": peer.get("TailscaleIPs", []),
+                "online": bool(peer.get("Online")),
+                "source": "tailnet",
+            }
+        )
+        if len(hosts) >= limit:
+            break
+    return hosts
+
+
+def detect_program_resources():
+    resources = []
+    codex_path = CODEX_BIN if Path(CODEX_BIN).exists() else shutil.which("codex", path=PATH_FOR_CODEX)
+    if codex_path:
+        resources.append(
+            {
+                "name": "Codex CLI",
+                "path": codex_path,
+                "version": run_capture([codex_path, "--version"], timeout=4),
+            }
+        )
+    for command, args in [
+        ("ollama", ["--version"]),
+        ("git", ["--version"]),
+        ("gh", ["--version"]),
+        ("tailscale", ["version"]),
+        ("ssh", ["-V"]),
+        ("curl", ["--version"]),
+        ("python3", ["--version"]),
+    ]:
+        item = command_version(command, args)
+        if item:
+            resources.append(item)
+
+    node_path = Path("/Applications/Codex.app/Contents/Resources/cua_node/bin/node")
+    if node_path.exists():
+        resources.append(
+            {
+                "name": "node",
+                "path": str(node_path),
+                "version": run_capture([str(node_path), "--version"], timeout=3),
+            }
+        )
+
+    for app_path in [
+        "/Applications/Codex.app",
+        str(Path.home() / "Applications" / "Codex CLI UI.app"),
+        "/Applications/Codex CLI UI.app",
+    ]:
+        if Path(app_path).exists():
+            resources.append({"name": Path(app_path).name, "path": app_path, "version": ""})
+
+    if shutil.which("ollama", path=PATH_FOR_CODEX):
+        models = []
+        output = run_capture(["ollama", "list"], timeout=4)
+        for line in output.splitlines()[1:]:
+            cols = line.split()
+            if cols:
+                models.append(cols[0])
+        if models:
+            resources.append({"name": "Ollama models", "path": "ollama", "version": ", ".join(models[:8])})
+    return resources
+
+
+def build_startup_context():
+    now = time.time()
+    if startup_cache["context"] and now - startup_cache["time"] < 30:
+        return startup_cache["context"]
+
+    inventory = load_machine_inventory()
+    context = {
+        "preferredName": inventory.get("preferred_name", "Friend"),
+        "inventoryPath": str(MACHINE_INVENTORY_PATH),
+        "machines": inventory.get("machines", []),
+        "sshHosts": parse_ssh_config(),
+        "tailnetHosts": detect_tailnet_hosts(),
+        "resources": detect_program_resources(),
+        "updatedAt": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    startup_cache.update({"time": now, "context": context})
+    return context
+
+
+def summarize_startup_context(context):
+    return {
+        "preferredName": context.get("preferredName", "Friend"),
+        "inventoryPath": context.get("inventoryPath", ""),
+        "machines": len(context.get("machines", [])),
+        "sshHosts": len(context.get("sshHosts", [])),
+        "tailnetHosts": len(context.get("tailnetHosts", [])),
+        "resources": len(context.get("resources", [])),
+        "updatedAt": context.get("updatedAt", ""),
+    }
+
+
+def format_startup_context(context):
+    lines = [
+        "Private startup inventory:",
+        f"- Preferred name: {context.get('preferredName', 'Friend')}",
+        f"- Inventory file: {context.get('inventoryPath', '')}",
+        "- Password rule: raw SSH passwords are not loaded into model context; use SSH keys or Keychain references.",
+    ]
+    machines = context.get("machines", [])
+    if machines:
+        lines.append("- Machines:")
+        for machine in machines[:20]:
+            ssh = sanitize_ssh_info(machine.get("ssh", {}))
+            services = machine.get("services") or []
+            service_text = ", ".join(
+                item.get("url") or item.get("name", "") for item in services if isinstance(item, dict)
+            )
+            ssh_parts = []
+            if ssh.get("alias"):
+                ssh_parts.append(f"alias={ssh.get('alias')}")
+            if ssh.get("username"):
+                ssh_parts.append(f"user={ssh.get('username')}")
+            if ssh.get("port"):
+                ssh_parts.append(f"port={ssh.get('port')}")
+            if ssh.get("identity_file"):
+                ssh_parts.append(f"key={ssh.get('identity_file')}")
+            remote_paths = ssh.get("remote_paths")
+            if isinstance(remote_paths, list) and remote_paths:
+                ssh_parts.append("paths=" + ", ".join(str(path) for path in remote_paths[:5]))
+            if ssh.get("password_keychain_service"):
+                ssh_parts.append(
+                    f"keychain={ssh.get('password_keychain_service')}/{ssh.get('password_keychain_account', '')}"
+                )
+            line = f"  - {machine.get('name', 'machine')}: host={machine.get('host', '')}"
+            if ssh_parts:
+                line += "; ssh " + ", ".join(ssh_parts)
+            if service_text:
+                line += f"; services={service_text}"
+            if machine.get("notes"):
+                line += f"; notes={compact(machine.get('notes'), 180)}"
+            lines.append(line)
+    ssh_hosts = context.get("sshHosts", [])
+    if ssh_hosts:
+        lines.append("- SSH config aliases:")
+        for host in ssh_hosts[:20]:
+            aliases = ", ".join(host.get("aliases", []))
+            details = []
+            for key in ["hostname", "user", "port", "identityfile", "proxyjump"]:
+                if host.get(key):
+                    details.append(f"{key}={host[key]}")
+            lines.append(f"  - {aliases}: " + ", ".join(details))
+    tailnet_hosts = context.get("tailnetHosts", [])
+    if tailnet_hosts:
+        lines.append("- Tailnet hosts:")
+        for host in tailnet_hosts[:20]:
+            addresses = ", ".join(host.get("addresses", []))
+            state = "online" if host.get("online") else "offline"
+            lines.append(f"  - {host.get('name', 'tailnet-host')}: {addresses} ({state})")
+    resources = context.get("resources", [])
+    if resources:
+        lines.append("- Mac program resources:")
+        for resource in resources[:30]:
+            version = resource.get("version", "")
+            text = f"  - {resource.get('name')}: {resource.get('path', '')}"
+            if version:
+                text += f" ({compact(version, 120)})"
+            lines.append(text)
+    lines.append("")
+    return "\n".join(lines)
 
 
 def query_terms(messages):
@@ -340,7 +653,7 @@ def build_local_context(messages):
             f"- Configured Moonraker endpoint: {MOONRAKER_URL}",
             "- For read-only status questions, use the live Moonraker data below before saying access is unavailable.",
             "- For writes, uploads, restarts, or movement, verify standby state and ask before taking action.",
-            "Live Qidi Plus 4 status JSON:",
+            "Live Moonraker status JSON:",
             json.dumps(status, separators=(",", ":")),
             "",
         ]
@@ -358,6 +671,8 @@ def build_prompt(messages, fast=False, web_search="live"):
     if not clean_messages:
         return ""
 
+    startup_context = build_startup_context()
+    startup_context_text = format_startup_context(startup_context)
     web_context = (
         build_web_context(messages)
         if web_search == "live"
@@ -367,12 +682,22 @@ def build_prompt(messages, fast=False, web_search="live"):
     history_context = build_history_context(messages, fast=fast)
 
     if len(clean_messages) == 1:
-        context = web_context + local_context + history_context
+        context = (
+            ASSISTANT_STYLE_CONTEXT
+            + startup_context_text
+            + web_context
+            + local_context
+            + history_context
+        )
         if context:
             return f"{context}User:\n{clean_messages[0][1]}".strip()
         return clean_messages[0][1]
 
     blocks = [
+        ASSISTANT_STYLE_CONTEXT.strip(),
+        "",
+        startup_context_text.strip(),
+        "",
         "Continue this local Codex CLI conversation. Answer the latest user request.",
         "Use the prior messages only as context.",
         "",
@@ -403,6 +728,7 @@ class CodexUIHandler(BaseHTTPRequestHandler):
         path = unquote(parsed.path)
         if path == "/api/config":
             _, history_summary = load_history()
+            startup_context = build_startup_context()
             self.send_json(
                 {
                     "codexBin": CODEX_BIN,
@@ -414,6 +740,8 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                         DEFAULT_WEB_SEARCH, WEB_SEARCH_LEVELS, "live"
                     ),
                     "moonrakerUrl": MOONRAKER_URL,
+                    "startupContext": startup_context,
+                    "startupSummary": summarize_startup_context(startup_context),
                     "history": history_summary,
                     "profiles": [
                         {
@@ -546,6 +874,7 @@ class CodexUIHandler(BaseHTTPRequestHandler):
         )
 
         assistant_messages = []
+        reasoning_note_sent = False
         try:
             proc = subprocess.Popen(
                 cmd,
@@ -585,7 +914,33 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                         continue
 
                     item = event.get("item") if isinstance(event, dict) else None
-                    if isinstance(item, dict) and item.get("type") == "agent_message":
+                    if isinstance(item, dict) and item.get("type") == "reasoning":
+                        if not reasoning_note_sent:
+                            json_line(
+                                self,
+                                {
+                                    "type": "thought",
+                                    "text": "Thinking through the request and choosing the next step.",
+                                },
+                            )
+                            reasoning_note_sent = True
+                    elif isinstance(item, dict) and item.get("type") == "command_execution":
+                        command = compact_command(item.get("command", "shell command"))
+                        event_type = event.get("type") if isinstance(event, dict) else ""
+                        status = item.get("status")
+                        exit_code = item.get("exit_code")
+                        if event_type == "item.started" or status == "in_progress":
+                            json_line(
+                                self,
+                                {"type": "thought", "text": f"Running `{command}`."},
+                            )
+                        elif event_type == "item.completed":
+                            if exit_code == 0:
+                                text = f"Finished `{command}` successfully."
+                            else:
+                                text = f"`{command}` finished with exit code {exit_code}."
+                            json_line(self, {"type": "thought", "text": text})
+                    elif isinstance(item, dict) and item.get("type") == "agent_message":
                         text = item.get("text") or ""
                         assistant_messages.append(text)
                         json_line(self, {"type": "assistant", "text": text})

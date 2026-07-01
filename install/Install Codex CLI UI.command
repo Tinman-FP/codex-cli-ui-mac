@@ -37,7 +37,19 @@ fi
 echo "Copying runtime to $RUNTIME_DEST"
 rm -rf "$RUNTIME_DEST"
 /usr/bin/ditto "$RUNTIME_SRC" "$RUNTIME_DEST"
-mkdir -p "$RUNTIME_DEST/data" "$RUNTIME_DEST/logs"
+mkdir -p "$RUNTIME_DEST/data/private" "$RUNTIME_DEST/logs"
+
+PRIVATE_INVENTORY="$RUNTIME_DEST/data/private/machines.json"
+if [ ! -f "$PRIVATE_INVENTORY" ]; then
+  cat > "$PRIVATE_INVENTORY" <<'JSON'
+{
+  "preferred_name": "",
+  "password_policy": "Do not store raw SSH passwords here. Store passwords in macOS Keychain and reference the Keychain service/account fields instead.",
+  "machines": []
+}
+JSON
+  chmod 600 "$PRIVATE_INVENTORY"
+fi
 
 echo "Copying app to $APP_DEST"
 rm -rf "$APP_DEST"

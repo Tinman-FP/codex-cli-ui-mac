@@ -9,7 +9,7 @@ This is a community package for Mac users who want a simple local Codex-style ch
 Download the DMG from the `release/` folder or the GitHub Release:
 
 ```text
-Codex_CLI_UI_Mac_v2026.07.01.dmg
+Codex_CLI_UI_Mac_v2026.07.01.1.dmg
 ```
 
 Open the DMG and double-click:
@@ -47,11 +47,21 @@ codex --profile local-fast --search
 - Stationary prompt bar with compact controls for Mode, Access, Reasoning, and Web
 - Fast and Careful local Codex profiles
 - Red rounded app icon to distinguish it from the official Codex app
+- Startup inventory card for private machine records, SSH aliases, tailnet hosts, and local tool resources
+- Safe working notes while Codex CLI is running
 - Optional local history importer for your own `~/.codex/sessions`
 
 ## Privacy
 
-No personal Codex chat history is bundled in this release. The installer creates empty local `data/` and `logs/` folders on each Mac.
+No personal Codex chat history or machine inventory is bundled in this release. The installer creates local `data/` and `logs/` folders on each Mac.
+
+Each install gets a private startup inventory at:
+
+```text
+~/Applications/Codex_CLI_UI/data/private/machines.json
+```
+
+Use that file for machine names, hostnames, SSH aliases, usernames, key paths, and macOS Keychain references. Do not store raw SSH passwords in it.
 
 ## Gatekeeper
 
