@@ -1,0 +1,68 @@
+# Codex CLI UI for Mac
+
+A local browser UI for Codex CLI in local OSS mode with Ollama.
+
+This is a community package for Mac users who want a simple local Codex-style chat UI around the Codex CLI. It installs a small Python web UI, a LaunchAgent, local Codex profiles, and a red `Codex CLI UI.app` launcher.
+
+## One-File Download
+
+Download the DMG from the `release/` folder or the GitHub Release:
+
+```text
+Codex_CLI_UI_Mac_v2026.07.01.dmg
+```
+
+Open the DMG and double-click:
+
+```text
+Install Codex CLI UI.command
+```
+
+The installer copies files into your user account:
+
+- `~/Applications/Codex CLI UI.app`
+- `~/Applications/Codex_CLI_UI`
+- `~/Library/LaunchAgents/com.tinmanfp.codex-cli-ui.plist`
+- `~/.codex/local-fast.config.toml`
+- `~/.codex/local-oss.config.toml`
+
+## Requirements
+
+- macOS
+- Codex Desktop installed at `/Applications/Codex.app`
+- Ollama installed
+- The `gpt-oss:20b` model pulled in Ollama
+
+Helpful commands:
+
+```bash
+ollama pull gpt-oss:20b
+codex --profile local-fast --search
+```
+
+## What You Get
+
+- Local web UI at `http://127.0.0.1:8765`
+- New Chat, Projects, and Chats sidebar
+- Stationary prompt bar with compact controls for Mode, Access, Reasoning, and Web
+- Fast and Careful local Codex profiles
+- Red rounded app icon to distinguish it from the official Codex app
+- Optional local history importer for your own `~/.codex/sessions`
+
+## Privacy
+
+No personal Codex chat history is bundled in this release. The installer creates empty local `data/` and `logs/` folders on each Mac.
+
+## Gatekeeper
+
+This package is ad-hoc signed, not Apple-notarized. If macOS blocks the app, right-click the app or installer and choose **Open**, or allow it in System Settings.
+
+## Uninstall
+
+Open the DMG and run:
+
+```text
+Uninstall Codex CLI UI.command
+```
+
+The uninstaller removes the app, runtime, and LaunchAgent. It intentionally leaves Codex profiles and shell shims in place.

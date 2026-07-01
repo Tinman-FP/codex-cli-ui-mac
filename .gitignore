@@ -1,0 +1,7 @@
+.DS_Store
+*.log
+__pycache__/
+Codex_CLI_UI/data/*
+!Codex_CLI_UI/data/.gitkeep
+Codex_CLI_UI/logs/*
+!Codex_CLI_UI/logs/.gitkeep

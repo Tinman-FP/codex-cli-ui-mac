@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Codex CLI</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand-row">
+          <div class="brand-mark" aria-hidden="true">C</div>
+          <div>
+            <div class="brand-title">Codex CLI</div>
+            <div class="brand-subtitle" id="profileLabel">local-oss</div>
+          </div>
+        </div>
+
+        <div class="sidebar-menu" aria-label="Sidebar">
+          <button class="sidebar-option primary" id="newThreadButton" title="New chat">
+            <span class="button-icon">+</span>
+            <span>New Chat</span>
+          </button>
+          <button class="sidebar-option" id="projectsNavButton" type="button">
+            <span class="nav-icon">▦</span>
+            <span>Projects</span>
+          </button>
+          <button class="sidebar-option active" id="chatsNavButton" type="button">
+            <span class="nav-icon">≡</span>
+            <span>Chats</span>
+          </button>
+        </div>
+
+        <section class="sidebar-section" id="projectsSection" hidden>
+          <div class="section-title">Projects</div>
+          <div class="project-list" id="projectList"></div>
+        </section>
+
+        <section class="sidebar-section" id="chatsSection">
+          <div class="section-title-row">
+            <div class="section-title">Chats</div>
+            <button class="mini-icon-button" id="clearThreadsButton" title="Clear chats" aria-label="Clear chats">
+              <span>×</span>
+            </button>
+          </div>
+          <nav class="thread-list" id="threadList" aria-label="Chats"></nav>
+        </section>
+
+        <div class="sidebar-footer">
+          <label class="field-label" for="cwdInput">Workspace</label>
+          <input class="path-input" id="cwdInput" type="text" spellcheck="false" />
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <h1 id="threadTitle">New thread</h1>
+            <div class="thread-meta" id="threadMeta">Ready</div>
+          </div>
+          <div class="topbar-actions">
+            <button class="icon-button" id="copyButton" title="Copy transcript" aria-label="Copy transcript">
+              <span>□</span>
+            </button>
+            <button class="icon-button" id="toggleLogButton" title="Toggle log" aria-label="Toggle log">
+              <span>≡</span>
+            </button>
+          </div>
+        </header>
+
+        <section class="conversation" id="conversation" aria-live="polite"></section>
+
+        <section class="composer-wrap">
+          <div class="composer">
+            <textarea id="promptInput" rows="1" placeholder="Ask Codex"></textarea>
+            <button class="send-button" id="sendButton" title="Send" aria-label="Send">
+              <span>↑</span>
+            </button>
+          </div>
+          <div class="run-controls" aria-label="Codex run settings">
+            <label class="control-chip" for="modeSelect">
+              <span>Mode</span>
+              <select id="modeSelect" aria-label="Codex mode">
+                <option value="local-fast" data-reasoning="low">Fast</option>
+                <option value="local-oss" data-reasoning="medium">Careful</option>
+              </select>
+            </label>
+            <label class="control-chip" for="accessSelect">
+              <span>Access</span>
+              <select id="accessSelect" aria-label="Codex access level">
+                <option value="read-only">Read</option>
+                <option value="workspace-write">Workspace</option>
+                <option value="danger-full-access">Full</option>
+              </select>
+            </label>
+            <label class="control-chip" for="reasoningSelect">
+              <span>Reasoning</span>
+              <select id="reasoningSelect" aria-label="Reasoning level">
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <div class="control-chip web-chip">
+              <span>Web</span>
+              <button class="switch-button" id="webAccessToggle" type="button" role="switch" aria-checked="true">
+                <span class="switch-track" aria-hidden="true">
+                  <span class="switch-thumb"></span>
+                </span>
+                <span class="switch-text" id="webAccessLabel">On</span>
+              </button>
+            </div>
+          </div>
+          <div class="run-state" id="runState">Idle</div>
+        </section>
+      </main>
+
+      <aside class="log-panel" id="logPanel" aria-label="Execution log">
+        <div class="log-header">
+          <div>
+            <div class="log-title">Run Log</div>
+            <div class="log-subtitle" id="logSubtitle">No active run</div>
+          </div>
+          <button class="icon-button" id="clearLogButton" title="Clear log" aria-label="Clear log">
+            <span>×</span>
+          </button>
+        </div>
+        <pre class="log-output" id="logOutput"></pre>
+      </aside>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
