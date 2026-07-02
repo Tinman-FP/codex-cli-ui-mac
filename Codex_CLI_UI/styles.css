@@ -722,7 +722,8 @@ h1 {
 }
 
 .admin-summary-grid,
-.improvement-summary-grid {
+.improvement-summary-grid,
+.self-healing-summary-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
@@ -799,7 +800,9 @@ h1 {
 .admin-topic-list,
 .benchmark-list,
 .package-health-list,
-.improvement-list {
+.improvement-list,
+.self-healing-list,
+.self-patch-list {
   display: grid;
   gap: 9px;
 }
@@ -809,7 +812,9 @@ h1 {
 .benchmark-row,
 .package-health-row,
 .package-health-summary,
-.improvement-row {
+.improvement-row,
+.self-healing-row,
+.self-patch-row {
   border: 1px solid #dbe4ee;
   border-radius: 8px;
   background: #f8fafc;
@@ -1084,7 +1089,23 @@ h1 {
   color: var(--danger);
 }
 
-.improvement-row {
+.self-healing-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.8fr);
+  gap: 12px;
+}
+
+.self-healing-card h4 {
+  margin: 0 0 8px;
+  color: var(--muted-strong);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.improvement-row,
+.self-healing-row,
+.self-patch-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
@@ -1092,20 +1113,29 @@ h1 {
 }
 
 .improvement-row.high,
-.improvement-row.critical {
+.improvement-row.critical,
+.self-patch-row.high,
+.self-patch-row.critical,
+.self-healing-row.failed-validation {
   border-color: rgba(189, 44, 44, 0.28);
 }
 
-.improvement-row.medium {
+.improvement-row.medium,
+.self-patch-row.medium,
+.self-healing-row.needs-approval {
   border-color: rgba(161, 92, 3, 0.24);
 }
 
-.improvement-row.reviewed {
+.improvement-row.reviewed,
+.self-patch-row.reviewed,
+.self-healing-row.recovered,
+.self-healing-row.validated {
   border-color: rgba(24, 134, 91, 0.26);
   background: rgba(24, 134, 91, 0.06);
 }
 
-.improvement-copy {
+.improvement-copy,
+.self-healing-copy {
   min-width: 0;
   display: grid;
   gap: 5px;
@@ -1132,7 +1162,8 @@ h1 {
   text-transform: uppercase;
 }
 
-.improvement-copy strong {
+.improvement-copy strong,
+.self-healing-copy strong {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1141,14 +1172,17 @@ h1 {
 }
 
 .improvement-copy p,
-.improvement-copy em {
+.improvement-copy em,
+.self-healing-copy p,
+.self-healing-copy em {
   margin: 0;
   color: var(--muted-strong);
   font-size: 12px;
   line-height: 1.45;
 }
 
-.improvement-copy em {
+.improvement-copy em,
+.self-healing-copy em {
   color: var(--muted);
   font-style: normal;
 }
@@ -2147,11 +2181,13 @@ input:focus {
   .test-summary-grid,
   .admin-summary-grid,
   .benchmark-summary-grid,
-  .improvement-summary-grid {
+  .improvement-summary-grid,
+  .self-healing-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .admin-layout {
+  .admin-layout,
+  .self-healing-layout {
     grid-template-columns: 1fr;
   }
 
@@ -2163,7 +2199,9 @@ input:focus {
     justify-items: start;
   }
 
-  .improvement-row {
+  .improvement-row,
+  .self-healing-row,
+  .self-patch-row {
     grid-template-columns: 1fr;
   }
 

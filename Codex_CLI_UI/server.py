@@ -48,6 +48,8 @@ CAPABILITY_TOOL_LOG_PATH = DATA_DIR / "capability_tool_log.jsonl"
 AUTONOMY_SUPERVISOR_LOG_PATH = DATA_DIR / "autonomy_supervisor.jsonl"
 TOOL_INVENTORY_JSON_PATH = DATA_DIR / "tool_inventory_latest.json"
 TOOL_INVENTORY_MARKDOWN_PATH = DATA_DIR / "tool_inventory_latest.md"
+SELF_HEALING_JOURNAL_PATH = DATA_DIR / "self_healing_journal.jsonl"
+SELF_PATCH_QUEUE_PATH = DATA_DIR / "self_patch_queue.json"
 MIN_FREE_BYTES_FOR_AUTO_INSTALL = int(
     os.environ.get("CODEX_MIN_FREE_BYTES_FOR_AUTO_INSTALL", str(20 * 1024 * 1024 * 1024))
 )
@@ -3110,6 +3112,7 @@ def admin_summary():
     knowledge = load_stable_knowledge()
     quality = quality_feedback_summary()
     improvement = improvement_lab_summary()
+    self_healing = self_healing_summary()
     golden = golden_test_summary()
     projects = []
     for project_id, project in state.get("projects", {}).items():
@@ -3149,6 +3152,9 @@ def admin_summary():
         "recentQualityFeedback": quality["recent"],
         "improvementLab": improvement,
         "improvementCount": improvement["openCount"],
+        "selfHealing": self_healing,
+        "selfHealingCount": self_healing.get("count", 0),
+        "selfPatchOpenCount": self_healing.get("queue", {}).get("openCount", 0),
         "goldenTestSummary": golden,
         "goldenTestCount": golden["totalCount"],
         "projectCount": len(projects),
@@ -5436,6 +5442,521 @@ def quality_gate_synthetic_check():
     )
 
 
+SELF_HEALING_RECIPES = [
+    {
+        "id": "missing-free-tool",
+        "trigger": "missing command or missing capability",
+        "safeAction": "install free allowlisted tools when storage and policy checks pass",
+        "boundary": "ask before paid, unknown, large, low-storage, or non-allowlisted tools",
+    },
+    {
+        "id": "language-quality-gate",
+        "trigger": "generated code/config/file needs validation",
+        "safeAction": "run read-only syntax/static checks for code, Klipper, G-code, and CAD scripts",
+        "boundary": "do not flash firmware, upload printer configs, or move CNC/printer hardware",
+    },
+    {
+        "id": "cad-artifact-recovery",
+        "trigger": "CAD/design answer lacks artifact path or runtime failed",
+        "safeAction": "stage local Fusion/OpenSCAD/STL artifacts and verify files exist",
+        "boundary": "do not claim CFD or fit validation unless those checks actually ran",
+    },
+    {
+        "id": "web-evidence-recovery",
+        "trigger": "answer needs current public evidence",
+        "safeAction": "route to local research when Web Access is enabled",
+        "boundary": "do not invent sources or claim web access when disabled",
+    },
+    {
+        "id": "live-machine-safety",
+        "trigger": "printer/CNC write, upload, restart, motion, probing, spindle, or firmware action",
+        "safeAction": "stop and require verified standby/ready state plus Tinman approval",
+        "boundary": "never perform live-machine movement/write/destructive actions autonomously",
+    },
+]
+
+
+def self_healing_now():
+    return time.time()
+
+
+def self_healing_event_id(*parts):
+    key = "\n".join(str(part or "") for part in parts)
+    return hashlib.sha1(key.encode("utf-8")).hexdigest()[:18]
+
+
+def read_self_healing_journal(limit=200):
+    records = []
+    if not SELF_HEALING_JOURNAL_PATH.exists():
+        return records
+    try:
+        with SELF_HEALING_JOURNAL_PATH.open("r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(item, dict):
+                    records.append(item)
+    except OSError:
+        return records
+    if limit and len(records) > limit:
+        records = records[-int(limit):]
+    return records
+
+
+def append_self_healing_event(event):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "id": event.get("id") or self_healing_event_id(event.get("signature"), self_healing_now()),
+        "time": event.get("time") or self_healing_now(),
+        **event,
+    }
+    with SELF_HEALING_JOURNAL_PATH.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n")
+    return payload
+
+
+def default_self_patch_queue():
+    now = self_healing_now()
+    return {"version": 1, "createdAt": now, "updatedAt": now, "items": []}
+
+
+def load_self_patch_queue():
+    data = read_json(SELF_PATCH_QUEUE_PATH, default_self_patch_queue())
+    if not isinstance(data, dict):
+        data = default_self_patch_queue()
+    data.setdefault("version", 1)
+    data.setdefault("createdAt", self_healing_now())
+    data.setdefault("updatedAt", self_healing_now())
+    if not isinstance(data.get("items"), list):
+        data["items"] = []
+    return data
+
+
+def save_self_patch_queue(data):
+    data["updatedAt"] = self_healing_now()
+    write_json_atomic(SELF_PATCH_QUEUE_PATH, data)
+    return data
+
+
+def self_patch_item_summary(item):
+    return {
+        "id": item.get("id"),
+        "status": item.get("status", "queued"),
+        "severity": item.get("severity", "medium"),
+        "title": item.get("title", "Self patch candidate"),
+        "signature": item.get("signature", ""),
+        "evidence": item.get("evidence", ""),
+        "recommendation": item.get("recommendation", ""),
+        "nextAction": item.get("nextAction", ""),
+        "count": int(item.get("count") or 1),
+        "createdAt": item.get("createdAt"),
+        "updatedAt": item.get("updatedAt"),
+        "reviewedAt": item.get("reviewedAt"),
+        "archivedAt": item.get("archivedAt"),
+    }
+
+
+def queue_self_patch_candidate(signature, title, evidence="", recommendation="", severity="medium", next_action=""):
+    if not signature:
+        return None
+    now = self_healing_now()
+    data = load_self_patch_queue()
+    item_id = improvement_item_id("self-patch", signature)
+    items = data.get("items", [])
+    existing = next((item for item in items if item.get("id") == item_id), None)
+    fields = {
+        "id": item_id,
+        "signature": compact(signature, 240),
+        "severity": safe_choice(severity, {"critical", "high", "medium", "low"}, "medium"),
+        "title": compact(redact_quality_text(title or "Self patch candidate"), 140),
+        "evidence": compact(redact_quality_text(evidence or ""), 800),
+        "recommendation": compact(redact_quality_text(recommendation or ""), 900),
+        "nextAction": compact(
+            redact_quality_text(
+                next_action
+                or "Implement a small code patch, run package health, commit locally, then publish only after checks pass."
+            ),
+            500,
+        ),
+    }
+    if existing:
+        status = safe_choice(existing.get("status"), {"queued", "reviewed", "archived"}, "queued")
+        existing.update(fields)
+        existing["status"] = status if status != "archived" else "queued"
+        existing["count"] = int(existing.get("count") or 1) + 1
+        existing["updatedAt"] = now
+        result = existing
+    else:
+        result = {
+            **fields,
+            "status": "queued",
+            "count": 1,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        items.append(result)
+    data["items"] = sorted(
+        items,
+        key=lambda item: (
+            {"queued": 0, "reviewed": 1, "archived": 2}.get(item.get("status"), 0),
+            improvement_severity_rank(item.get("severity")),
+            -float(item.get("updatedAt") or item.get("createdAt") or 0),
+        ),
+    )
+    save_self_patch_queue(data)
+    store_improvement_item(
+        {
+            "id": improvement_item_id("self-healing-patch", item_id),
+            "type": "self-healing",
+            "severity": fields["severity"],
+            "source": "Self-Healing Supervisor",
+            "projectId": "codex-cli-ui-local-agent",
+            "project": "Codex CLI UI Local Agent",
+            "title": fields["title"],
+            "evidence": fields["evidence"],
+            "recommendation": fields["recommendation"],
+            "nextAction": fields["nextAction"],
+        }
+    )
+    return self_patch_item_summary(result)
+
+
+def update_self_patch_queue_item(item_id, action):
+    data = load_self_patch_queue()
+    item = next((candidate for candidate in data.get("items", []) if candidate.get("id") == item_id), None)
+    if not item:
+        return {"ok": False, "error": "Self-patch queue item not found.", "queue": self_patch_queue_summary()}
+    action = str(action or "").strip().lower()
+    now = self_healing_now()
+    if action == "review":
+        item["status"] = "reviewed"
+        item["reviewedAt"] = now
+    elif action == "archive":
+        item["status"] = "archived"
+        item["archivedAt"] = now
+    elif action == "reopen":
+        item["status"] = "queued"
+        item.pop("archivedAt", None)
+        item.pop("reviewedAt", None)
+    else:
+        return {"ok": False, "error": "Unsupported self-patch queue action.", "queue": self_patch_queue_summary()}
+    item["updatedAt"] = now
+    save_self_patch_queue(data)
+    return {"ok": True, "item": self_patch_item_summary(item), "queue": self_patch_queue_summary()}
+
+
+def self_patch_queue_summary(limit=20):
+    data = load_self_patch_queue()
+    items = [item for item in data.get("items", []) if isinstance(item, dict)]
+    visible = [item for item in items if item.get("status") != "archived"]
+    visible.sort(
+        key=lambda item: (
+            {"queued": 0, "reviewed": 1, "archived": 2}.get(item.get("status"), 0),
+            improvement_severity_rank(item.get("severity")),
+            -float(item.get("updatedAt") or item.get("createdAt") or 0),
+        )
+    )
+    return {
+        "path": str(SELF_PATCH_QUEUE_PATH),
+        "count": len(items),
+        "openCount": sum(1 for item in visible if item.get("status", "queued") == "queued"),
+        "reviewedCount": sum(1 for item in visible if item.get("status") == "reviewed"),
+        "archivedCount": len(items) - len(visible),
+        "items": [self_patch_item_summary(item) for item in visible[:limit]],
+    }
+
+
+def self_healing_signature(kind, messages=None, error_text="", answer_text=""):
+    prompt = compact(latest_user_text(messages or []), 140)
+    signal = compact(error_text or answer_text or "", 240)
+    return "|".join([str(kind or "unknown"), prompt, signal]).lower()
+
+
+def self_healing_recent_repeat_count(signature):
+    if not signature:
+        return 0
+    records = read_self_healing_journal(limit=500)
+    return sum(1 for record in records if record.get("signature") == signature)
+
+
+def self_healing_record_from_gap(gap):
+    if not isinstance(gap, dict):
+        return {}
+    return {
+        "kind": gap.get("kind", "gap"),
+        "severity": gap.get("severity", "medium"),
+        "reason": compact(gap.get("reason") or "", 280),
+        "recovery": compact(gap.get("recovery") or "", 280),
+        "boundary": bool(gap.get("boundary")),
+    }
+
+
+def self_healing_supervise(payload=None, record=True):
+    payload = payload or {}
+    messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+    cwd = str(payload.get("cwd") or "")
+    route = payload.get("route") if isinstance(payload.get("route"), dict) else {}
+    answer_text = str(payload.get("answerText") or payload.get("answer") or "")
+    error_text = str(payload.get("error") or payload.get("errorText") or "")
+    web_search = safe_choice(payload.get("webSearch"), WEB_SEARCH_LEVELS, "live")
+    trigger = compact(payload.get("trigger") or "manual", 120)
+    auto_recover = bool(payload.get("autoRecover", True))
+    auto_install = bool(payload.get("autoInstall", True))
+    approved = bool(payload.get("approved", False))
+    actions = []
+    validations = []
+    gaps = []
+    status = "observed"
+    recovered = False
+    needs_approval = False
+    hard_boundary = False
+    patch_item = None
+
+    if messages or answer_text or error_text:
+        supervisor = autonomy_supervisor_status(
+            messages,
+            route=route,
+            answer_text=answer_text,
+            error_text=error_text,
+            cwd=cwd,
+            web_search=web_search,
+            stage=safe_choice(payload.get("stage"), {"preflight", "post"}, "post"),
+        )
+        gaps = [self_healing_record_from_gap(gap) for gap in supervisor.get("gaps", [])]
+        hard_boundary = bool(supervisor.get("hardBoundary"))
+        if gaps:
+            status = "diagnosed"
+
+    recovery = None
+    if error_text or any(gap.get("kind") == "missing-tool" for gap in gaps):
+        recovery = tool_recovery_plan(
+            {
+                "messages": messages,
+                "error": error_text or answer_text,
+                "cwd": cwd,
+                "route": route,
+                "autoInstall": auto_install,
+                "approved": approved,
+            },
+            record=True,
+        )
+        issue = recovery.get("issue") or {}
+        decision = recovery.get("decision") or {}
+        if issue.get("kind") != "unknown":
+            actions.append(
+                {
+                    "recipe": "missing-free-tool" if issue.get("kind") == "missing-command" else issue.get("kind"),
+                    "status": recovery.get("status"),
+                    "detail": compact(recovery.get("nextAction") or issue.get("nextAction") or "", 360),
+                    "issue": issue,
+                    "decision": decision,
+                }
+            )
+        if decision.get("needsApproval") or recovery.get("status") == "needs-approval":
+            needs_approval = True
+        if decision.get("installed") or recovery.get("status") == "installed":
+            recovered = True
+            status = "recovered"
+
+    language_payload = {}
+    for key in ("language", "lang", "code", "text", "path", "file"):
+        if payload.get(key) is not None:
+            language_payload[key] = payload.get(key)
+    if language_payload:
+        gate = quality_gate(language_payload)
+        validations.append(
+            {
+                "recipe": "language-quality-gate",
+                "status": gate.get("status"),
+                "language": gate.get("language"),
+                "checks": gate.get("checks", []),
+            }
+        )
+        if gate.get("status") == "fail":
+            status = "failed-validation"
+        elif status == "observed":
+            status = "validated"
+
+    if auto_recover and any(gap.get("kind") == "cad-artifact-missing" for gap in gaps):
+        try:
+            artifact = stage_cad_artifact(
+                latest_user_text(messages),
+                artifact_name=slugify(latest_user_text(messages), "cad-design")[:48],
+            )
+            files_ok = (
+                artifact.get("ok")
+                and Path(artifact.get("fusionScriptPath", "")).exists()
+                and Path(artifact.get("openScadPath", "")).exists()
+                and Path(artifact.get("readmePath", "")).exists()
+            )
+            actions.append(
+                {
+                    "recipe": "cad-artifact-recovery",
+                    "status": "recovered" if files_ok else "failed",
+                    "detail": artifact.get("targetDir") or artifact.get("error") or "",
+                    "artifact": artifact,
+                }
+            )
+            validations.append(
+                {
+                    "recipe": "cad-artifact-files",
+                    "status": "pass" if files_ok else "fail",
+                    "checks": [
+                        quality_check("cad:fusion-script", "pass" if Path(artifact.get("fusionScriptPath", "")).exists() else "fail", artifact.get("fusionScriptPath", "")),
+                        quality_check("cad:openscad-model", "pass" if Path(artifact.get("openScadPath", "")).exists() else "fail", artifact.get("openScadPath", "")),
+                        quality_check("cad:readme", "pass" if Path(artifact.get("readmePath", "")).exists() else "fail", artifact.get("readmePath", "")),
+                    ],
+                }
+            )
+            if files_ok:
+                recovered = True
+                status = "recovered"
+        except Exception as exc:
+            actions.append({"recipe": "cad-artifact-recovery", "status": "failed", "detail": str(exc)})
+            status = "needs-action"
+
+    if bool(payload.get("packageHealth")):
+        report = package_health_report()
+        validations.append(
+            {
+                "recipe": "package-health",
+                "status": report.get("status"),
+                "checks": report.get("checks", []),
+                "durationMs": report.get("durationMs"),
+            }
+        )
+        if report.get("status") == "fail":
+            status = "failed-validation"
+        elif status == "observed":
+            status = "validated"
+
+    if hard_boundary or needs_approval:
+        status = "needs-approval"
+    elif status == "diagnosed" and not recovered:
+        status = "needs-action"
+
+    primary_kind = (
+        (gaps[0].get("kind") if gaps else "")
+        or (recovery or {}).get("issue", {}).get("kind", "")
+        or ("quality-gate" if language_payload else "")
+        or ("package-health" if payload.get("packageHealth") else "manual")
+    )
+    signature = self_healing_signature(primary_kind, messages, error_text, answer_text)
+    repeat_count = self_healing_recent_repeat_count(signature) + 1
+    if repeat_count >= 2 and status in {"needs-action", "failed-validation", "needs-approval"}:
+        patch_item = queue_self_patch_candidate(
+            signature,
+            title=f"Repeated self-healing issue: {primary_kind}",
+            evidence=error_text or answer_text or json.dumps(gaps[:2], separators=(",", ":")),
+            recommendation="Turn the repeated failure into a deterministic route, recovery recipe, validator, or safer fallback.",
+            severity="high" if status == "failed-validation" else "medium",
+        )
+
+    event = {
+        "id": self_healing_event_id(signature, self_healing_now()),
+        "time": self_healing_now(),
+        "trigger": trigger,
+        "status": status,
+        "recovered": recovered,
+        "needsApproval": needs_approval or hard_boundary,
+        "hardBoundary": hard_boundary,
+        "signature": signature,
+        "repeatCount": repeat_count,
+        "projectId": route.get("projectId", "general") if isinstance(route, dict) else "general",
+        "prompt": compact(redact_quality_text(latest_user_text(messages)), 500),
+        "error": compact(redact_quality_text(error_text), 900),
+        "answer": compact(redact_quality_text(answer_text), 900),
+        "gaps": gaps,
+        "actions": actions,
+        "validations": validations,
+        "patchQueued": patch_item,
+    }
+    if record:
+        event = append_self_healing_event(event)
+    return {"ok": True, "event": event, "summary": self_healing_summary(), "queue": self_patch_queue_summary()}
+
+
+def self_healing_summary(limit=14):
+    records = read_self_healing_journal(limit=500)
+    recent = list(reversed(records[-limit:]))
+    by_status = {}
+    recovered_count = 0
+    approval_count = 0
+    for record in records:
+        status = record.get("status", "observed")
+        by_status[status] = by_status.get(status, 0) + 1
+        if record.get("recovered"):
+            recovered_count += 1
+        if record.get("needsApproval"):
+            approval_count += 1
+    queue = self_patch_queue_summary(limit=limit)
+    return {
+        "path": str(SELF_HEALING_JOURNAL_PATH),
+        "count": len(records),
+        "recent": [
+            {
+                "id": item.get("id"),
+                "time": item.get("time"),
+                "trigger": item.get("trigger", ""),
+                "status": item.get("status", "observed"),
+                "recovered": bool(item.get("recovered")),
+                "needsApproval": bool(item.get("needsApproval")),
+                "projectId": item.get("projectId", "general"),
+                "prompt": item.get("prompt", ""),
+                "gaps": item.get("gaps", [])[:3],
+                "actions": item.get("actions", [])[:3],
+                "validations": item.get("validations", [])[:2],
+                "patchQueued": item.get("patchQueued"),
+            }
+            for item in recent
+        ],
+        "byStatus": by_status,
+        "recoveredCount": recovered_count,
+        "approvalCount": approval_count,
+        "recipeCount": len(SELF_HEALING_RECIPES),
+        "recipes": SELF_HEALING_RECIPES,
+        "queue": queue,
+    }
+
+
+def self_healing_synthetic_check():
+    ok_gate = self_healing_supervise(
+        {
+            "trigger": "synthetic-quality-gate",
+            "language": "python",
+            "code": "def add(a, b):\n    return a + b\n",
+        },
+        record=False,
+    )
+    bad_gate = self_healing_supervise(
+        {
+            "trigger": "synthetic-bad-quality-gate",
+            "language": "python",
+            "code": "def bad(:\n    pass\n",
+        },
+        record=False,
+    )
+    missing = self_healing_supervise(
+        {
+            "trigger": "synthetic-missing-command",
+            "messages": [{"role": "user", "text": "Parse Moonraker JSON."}],
+            "error": "/bin/bash: jq: command not found",
+            "autoInstall": False,
+        },
+        record=False,
+    )
+    return (
+        ok_gate.get("event", {}).get("status") == "validated"
+        and bad_gate.get("event", {}).get("status") == "failed-validation"
+        and bool(missing.get("event", {}).get("actions"))
+    )
+
+
 def append_autonomy_supervisor_log(record):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -5800,6 +6321,12 @@ def local_tool_catalog():
             "check": "POST /api/tools/quality-gate",
             "description": "Read-only syntax/static validation for Python, C, C++, Klipper config/macros, G-code, Bash, JavaScript, JSON, YAML, TOML, and OpenSCAD.",
         },
+        "selfHealingSupervisor": {
+            "summary": "GET /api/self-healing",
+            "run": "POST /api/self-healing",
+            "queueUpdate": "POST /api/self-healing/queue",
+            "description": "Diagnose failures, run safe recovery recipes, validate the result, journal receipts, and queue repeated issues for self-patches.",
+        },
         "toolRecovery": {
             "plan": "POST /api/tools/recover",
             "description": "Classify a local failure, choose a free/safe tool or local endpoint, and return the retry path.",
@@ -5836,6 +6363,7 @@ def build_local_tools_context():
             "- If a command or capability is missing, inspect `GET http://127.0.0.1:8765/api/tools/capabilities`.",
             "- To see the full Mac tool inventory, call `GET http://127.0.0.1:8765/api/tools/inventory`. It lists visible commands, app bundles, Python modules, Homebrew packages, Docker images, and Ollama models.",
             "- Before claiming generated code/config is done, run `POST http://127.0.0.1:8765/api/tools/quality-gate` with JSON like `{\"language\":\"python\",\"code\":\"print('ok')\"}` or `{\"path\":\"/path/to/file.cpp\"}`. Use it for Python, C, C++, Klipper, G-code, Bash, JavaScript, JSON, YAML, TOML, and OpenSCAD.",
+            "- When a task fails, stalls, returns no final answer, misses a tool, or fails validation, call `POST http://127.0.0.1:8765/api/self-healing` with the messages, error/answer text, cwd, route, and optional code/path. Use the returned receipt before giving Tinman a blocker report.",
             "- To install a free allowlisted missing tool, call `POST http://127.0.0.1:8765/api/tools/install-free-tool` with JSON like `{\"tool\":\"jq\",\"reason\":\"parse printer API JSON\"}`.",
             "- To recover from a failure, call `POST http://127.0.0.1:8765/api/tools/recover` with the original messages, cwd, and error text. Use its recovery status before giving up.",
             "- To check whether a draft answer needs help before finalizing, call `POST http://127.0.0.1:8765/api/tools/autonomy-supervisor` with the messages, route, answerText, cwd, and webSearch.",
@@ -9370,6 +9898,15 @@ def package_health_report():
         add("tools:language-quality-gate", "fail", str(exc))
 
     try:
+        add(
+            "tools:self-healing-supervisor",
+            "pass" if self_healing_synthetic_check() else "fail",
+            "diagnoses failures, validates safe fixes, and returns receipts",
+        )
+    except Exception as exc:
+        add("tools:self-healing-supervisor", "fail", str(exc))
+
+    try:
         discovery = discover_klipper_config_dirs("klipper")
         candidates = discovery.get("candidates", [])
         add(
@@ -10611,6 +11148,10 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             self.send_json({"ok": True, **improvement_lab_summary()})
             return
 
+        if path == "/api/self-healing":
+            self.send_json({"ok": True, **self_healing_summary()})
+            return
+
         if path == "/api/warmup":
             params = urllib.parse.parse_qs(parsed.query)
             if params.get("run"):
@@ -10772,6 +11313,31 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 str(payload.get("id") or "").strip(),
             )
             self.send_json({**result, "admin": admin_summary(), "improvementLab": improvement_lab_summary()})
+            return
+
+        if parsed.path == "/api/self-healing":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self.send_error(400, "Invalid JSON")
+                return
+            result = self_healing_supervise(payload, record=True)
+            self.send_json({**result, "admin": admin_summary()})
+            return
+
+        if parsed.path == "/api/self-healing/queue":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self.send_error(400, "Invalid JSON")
+                return
+            result = update_self_patch_queue_item(
+                str(payload.get("id") or "").strip(),
+                str(payload.get("action") or "").strip().lower(),
+            )
+            self.send_json({**result, "admin": admin_summary()})
             return
 
         if parsed.path == "/api/test-bench/result":
