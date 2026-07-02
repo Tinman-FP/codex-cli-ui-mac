@@ -1,29 +1,29 @@
-# Codex CLI UI for Mac v2026.07.05
+# Codex CLI UI for Mac v2026.07.06
 
-Bugfix and capability release for CAD/design routing and local CAD artifact staging.
+Capability release for the Autonomy Supervisor help reflex.
 
 ## Download
 
 Download one file:
 
 ```text
-Codex_CLI_UI_Mac_v2026.07.05.dmg
+Codex_CLI_UI_Mac_v2026.07.06.dmg
 ```
 
 Open the DMG and double-click `Install Codex CLI UI.command`.
 
 ## Fixed
 
-- CAD/CPAP duct design prompts no longer get mistaken for live printer status or Moonraker checks.
-- CAD design requests now route to the CAD/Modeling specialist with the local artifact-capable engine.
-- Printer-status context is suppressed when the request is clearly about CAD geometry, Fusion 360, STEP/STL, ducts, CFD, or part-cooling design.
+- Draft answers that say web access is unavailable while Web Access is enabled are now flagged before final delivery.
+- CAD design drafts that drift into live-printer/Moonraker status are intercepted and recovered with local CAD artifact staging.
+- Missing-command and no-final-answer patterns are classified as help-needed conditions instead of cold failures.
 
 ## Added
 
-- Local CAD artifact endpoint: `POST /api/tools/cad-artifact`.
-- Fusion 360 Python script, OpenSCAD model, and README staging for CPAP duct design requests.
-- OpenSCAD and FreeCAD entries in the free-tool capability catalog, with storage and approval rules.
-- Package-health checks for CAD routing, CAD prompt context, and CAD artifact generation.
+- Autonomy Supervisor prompt context in worker, reviewer, finalizer, and quality-coach paths.
+- Local supervisor endpoint: `POST /api/tools/autonomy-supervisor`.
+- Deterministic post-answer checks for web evidence, source links, CAD artifacts, missing tools, unfinished runtimes, and unsupported refusal answers.
+- Package-health checks for the self-rescue reflex.
 
 ## Included
 
@@ -34,6 +34,7 @@ Open the DMG and double-click `Install Codex CLI UI.command`.
 - Web Access, access level, reasoning, friendliness, and humor controls
 - Admin Improvement Lab, Golden Test Generator, Test Bench history, and package health checks
 - Tool Recovery Engine and Capability Manager
+- Autonomy Supervisor help-needed checker
 - Klipper config discovery and macro-staging helpers
 - CAD artifact staging helper for Fusion 360/OpenSCAD workflows
 - Privacy-safe local data/log folders

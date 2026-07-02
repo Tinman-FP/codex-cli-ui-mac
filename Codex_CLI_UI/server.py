@@ -39,6 +39,7 @@ MODEL_WARMUP_STATE_PATH = DATA_DIR / "model_warmup_state.json"
 LOCAL_TOOL_OUTPUT_DIR = DATA_DIR / "generated" / "printer-macros"
 LOCAL_CAD_OUTPUT_DIR = DATA_DIR / "generated" / "cad"
 CAPABILITY_TOOL_LOG_PATH = DATA_DIR / "capability_tool_log.jsonl"
+AUTONOMY_SUPERVISOR_LOG_PATH = DATA_DIR / "autonomy_supervisor.jsonl"
 MIN_FREE_BYTES_FOR_AUTO_INSTALL = int(
     os.environ.get("CODEX_MIN_FREE_BYTES_FOR_AUTO_INSTALL", str(20 * 1024 * 1024 * 1024))
 )
@@ -4624,6 +4625,331 @@ def tool_recovery_synthetic_check():
     )
 
 
+def append_autonomy_supervisor_log(record):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "time": time.time(),
+        **record,
+    }
+    with AUTONOMY_SUPERVISOR_LOG_PATH.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(payload, separators=(",", ":")) + "\n")
+
+
+def answer_has_source_url(text):
+    return bool(re.search(r"https?://", str(text or "")))
+
+
+def answer_refuses_web(text):
+    lower = str(text or "").lower()
+    refusal_terms = (
+        "can't browse",
+        "cannot browse",
+        "can't access the web",
+        "cannot access the web",
+        "unable to access the web",
+        "not able to hit the public web",
+        "no internet access",
+        "web is unavailable",
+    )
+    return any(term in lower for term in refusal_terms)
+
+
+def answer_has_cad_artifact(text):
+    lower = str(text or "").lower()
+    artifact_terms = (
+        "data/generated/cad",
+        "/generated/cad/",
+        ".scad",
+        ".step",
+        ".stp",
+        ".stl",
+        "fusion360.py",
+        "fusion 360 python",
+        "cad-artifact",
+    )
+    return any(term in lower for term in artifact_terms)
+
+
+def answer_mentions_wrong_printer_status_for_cad(text):
+    lower = str(text or "").lower()
+    status_terms = (
+        "moonraker",
+        "configured printer endpoint",
+        "printer fleet status",
+        "offline/unreachable",
+        "read-only status probe",
+        "live reading",
+    )
+    return any(term in lower for term in status_terms)
+
+
+def autonomy_supervisor_find_gaps(
+    messages,
+    route=None,
+    answer_text="",
+    error_text="",
+    cwd="",
+    web_search="live",
+    stage="post",
+):
+    query = latest_user_text(messages).lower()
+    answer = str(answer_text or "")
+    combined_error = "\n".join([str(error_text or ""), answer])
+    route = route or {}
+    gaps = []
+
+    needs_current_evidence = (
+        wants_web_context(messages)
+        or wants_material_shopping_context(messages)
+        or wants_public_printer_research(messages)
+        or is_volatile_query_text(query)
+    )
+    if needs_current_evidence:
+        if web_search != "live":
+            gaps.append(
+                {
+                    "kind": "web-disabled",
+                    "severity": "high",
+                    "reason": "The request needs current/public evidence, but Web Access is disabled.",
+                    "recovery": "Ask Tinman to turn Web Access on or rerun in Local Research.",
+                    "boundary": True,
+                }
+            )
+        elif stage == "post" and (answer_refuses_web(answer) or not answer_has_source_url(answer)):
+            gaps.append(
+                {
+                    "kind": "web-evidence-missing",
+                    "severity": "high" if answer_refuses_web(answer) else "medium",
+                    "reason": "The answer needs public evidence or citations before it is trustworthy.",
+                    "recovery": "Run the Local Research path with live web evidence, then answer from sources.",
+                }
+            )
+
+    if is_cad_design_request(messages):
+        if stage == "post" and (answer_mentions_wrong_printer_status_for_cad(answer) or not answer_has_cad_artifact(answer)):
+            gaps.append(
+                {
+                    "kind": "cad-artifact-missing",
+                    "severity": "high",
+                    "reason": "The request is CAD/design work and needs an artifact path or importable file plan, not live printer status.",
+                    "recovery": "Stage a CAD artifact package and answer from its paths, assumptions, and validation limits.",
+                }
+            )
+
+    missing_command = missing_command_from_error(combined_error)
+    if missing_command:
+        recovery = tool_recovery_plan(
+            {
+                "messages": messages,
+                "error": combined_error,
+                "cwd": cwd,
+                "route": route,
+            },
+            record=False,
+        )
+        issue = recovery.get("issue") or {}
+        decision = recovery.get("decision") or {}
+        gaps.append(
+            {
+                "kind": "missing-tool",
+                "severity": "medium" if issue.get("freeToolId") else "high",
+                "reason": issue.get("reason") or f"The command `{missing_command}` is missing.",
+                "recovery": recovery.get("nextAction") or "Check the capability catalog, install if free/safe, then retry.",
+                "toolRecovery": recovery,
+                "boundary": bool(decision.get("needsApproval")),
+            }
+        )
+
+    lower_answer = answer.lower()
+    if stage == "post" and any(term in lower_answer for term in ("load failed", "no final message", "no final response")):
+        gaps.append(
+            {
+                "kind": "unfinished-runtime",
+                "severity": "high",
+                "reason": "The runtime failed or returned no final answer.",
+                "recovery": "Retry with a narrower path, preserve any primary draft, or produce a local fallback.",
+            }
+        )
+
+    if stage == "post" and "i don't know" in lower_answer and not any(
+        term in lower_answer for term in ("checked", "searched", "source", "tool", "because")
+    ):
+        gaps.append(
+            {
+                "kind": "unsupported-unknown",
+                "severity": "medium",
+                "reason": "The answer gives up before using available evidence or tools.",
+                "recovery": "Search local context, web sources, or the capability catalog before asking Tinman.",
+            }
+        )
+
+    return gaps
+
+
+def autonomy_supervisor_status(messages, route=None, answer_text="", error_text="", cwd="", web_search="live", stage="post"):
+    gaps = autonomy_supervisor_find_gaps(
+        messages,
+        route=route,
+        answer_text=answer_text,
+        error_text=error_text,
+        cwd=cwd,
+        web_search=web_search,
+        stage=stage,
+    )
+    hard_boundaries = [gap for gap in gaps if gap.get("boundary")]
+    return {
+        "ok": True,
+        "stage": stage,
+        "needsHelp": bool(gaps),
+        "hardBoundary": bool(hard_boundaries),
+        "gaps": gaps,
+        "policy": (
+            "Self-rescue with local files, web evidence, allowlisted free tools, and local endpoints. "
+            "Ask Tinman before paid services, unknown/large downloads, low storage, credentials, live-machine writes, or destructive actions."
+        ),
+    }
+
+
+def autonomy_supervisor_recover_answer(
+    messages,
+    route,
+    answer_text,
+    cwd="",
+    web_search="live",
+    emit=None,
+    friendliness_level=None,
+    humor_level=None,
+):
+    answer = str(answer_text or "").strip()
+    status = autonomy_supervisor_status(
+        messages,
+        route=route,
+        answer_text=answer,
+        cwd=cwd,
+        web_search=web_search,
+        stage="post",
+    )
+    gaps = status.get("gaps") or []
+    if not gaps:
+        return {"text": answer, "status": status, "recovered": False}
+
+    if emit:
+        kinds = ", ".join(gap.get("kind", "gap") for gap in gaps[:3])
+        emit(f"Autonomy Supervisor caught a help-needed condition: {kinds}.")
+
+    if any(gap.get("kind") == "cad-artifact-missing" for gap in gaps):
+        try:
+            artifact = stage_cad_artifact(latest_user_text(messages), artifact_name=slugify(latest_user_text(messages), "cad-design")[:48])
+            recovered = "\n\n".join(
+                [
+                    "This is a CAD/design task, not a live printer-status task. I staged a first-pass CAD package for it.",
+                    f"Fusion 360 script: `{artifact.get('fusionScriptPath')}`",
+                    f"OpenSCAD model: `{artifact.get('openScadPath')}`",
+                    f"Design README: `{artifact.get('readmePath')}`",
+                    (
+                        "This is why: the prompt gives dimensions, airflow, clearance, and Fusion 360/import requirements, "
+                        "so the useful next step is an importable artifact plus clear assumptions rather than a Moonraker check."
+                    ),
+                    (
+                        "You should also consider: no full CFD solver was run here. The staged geometry uses first-order airflow sizing "
+                        "and should be refined with fit checks, flow visualization, outlet aiming, and CFD if the design becomes final."
+                    ),
+                ]
+            )
+            append_autonomy_supervisor_log(
+                {
+                    "action": "cad-artifact-recovery",
+                    "route": route,
+                    "gaps": gaps,
+                    "artifact": artifact,
+                }
+            )
+            return {"text": recovered, "status": status, "recovered": True, "artifact": artifact}
+        except Exception as exc:
+            if emit:
+                emit(f"CAD artifact recovery failed: {compact(exc, 140)}")
+
+    web_gap = next((gap for gap in gaps if gap.get("kind") == "web-evidence-missing"), None)
+    if web_gap and web_search == "live" and (route or {}).get("engine") != "local-research":
+        try:
+            if emit:
+                emit("Autonomy Supervisor is switching to Local Research for web evidence.")
+            research = run_local_research(
+                messages,
+                route or {},
+                web_search=web_search,
+                emit=emit,
+                friendliness_level=friendliness_level,
+                humor_level=humor_level,
+            )
+            research_text = str(research.get("text") or "").strip()
+            if research_text:
+                append_autonomy_supervisor_log(
+                    {
+                        "action": "local-research-recovery",
+                        "route": route,
+                        "gaps": gaps,
+                        "model": research.get("model", ""),
+                    }
+                )
+                return {"text": research_text, "status": status, "recovered": True, "research": research}
+        except Exception as exc:
+            if emit:
+                emit(f"Local Research recovery failed: {compact(exc, 140)}")
+
+    append_autonomy_supervisor_log({"action": "needs-help", "route": route, "gaps": gaps})
+    return {"text": answer, "status": status, "recovered": False}
+
+
+def build_autonomy_supervisor_context(messages, route=None, web_search="live"):
+    preflight = autonomy_supervisor_status(
+        messages,
+        route=route or {},
+        web_search=web_search,
+        stage="preflight",
+    )
+    lines = [
+        "Autonomy Supervisor:",
+        "- Before answering, decide whether you need help. Help can mean local files, web sources, capability tools, a local artifact endpoint, or a second-pass reviewer.",
+        "- Define done: direct answer, source-backed recommendation, live status, file/artifact, code change, Git push, or safe blocker report.",
+        "- If evidence is current, volatile, price/spec/availability-based, or explicitly web-search based, use live web evidence when Web Access is on.",
+        "- If a tool is missing, inspect the capability catalog, install only free allowlisted storage-safe tools, then retry. Ask Tinman before paid, unknown, large, low-storage, credential, live-machine write, or destructive steps.",
+        "- If confidence is low because the domain/platform is unclear, classify the platform first and ask only one tight question if no safe tool can resolve it.",
+        "- If the answer would be `I cannot`, first try local files, web evidence, safe endpoints, or tool recovery. Only stop at a real hard boundary.",
+        "- Never pretend a source, file, command, tool, install, CFD run, or machine access happened.",
+    ]
+    if preflight.get("gaps"):
+        lines.append("- Preflight help flags: " + "; ".join(gap.get("kind", "gap") for gap in preflight["gaps"][:4]) + ".")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def autonomy_supervisor_synthetic_check():
+    web_status = autonomy_supervisor_status(
+        [{"role": "user", "text": "Search the web for current PET-CF prices."}],
+        route={"projectId": "tinmanx-slicer-research", "engine": "local"},
+        answer_text="I cannot access the web from here.",
+        web_search="live",
+    )
+    cad_status = autonomy_supervisor_status(
+        [{"role": "user", "text": "Design a CPAP cooling duct in CAD for Fusion 360."}],
+        route={"projectId": "cad-modeling-projects", "engine": "local"},
+        answer_text="I checked the configured printer endpoint and Moonraker is offline.",
+        web_search="live",
+    )
+    missing_status = autonomy_supervisor_status(
+        [{"role": "user", "text": "Parse this JSON."}],
+        route={"projectId": "general", "engine": "local"},
+        answer_text="/bin/bash: jq: command not found",
+        web_search="disabled",
+    )
+    return (
+        any(gap.get("kind") == "web-evidence-missing" for gap in web_status.get("gaps", []))
+        and any(gap.get("kind") == "cad-artifact-missing" for gap in cad_status.get("gaps", []))
+        and any(gap.get("kind") == "missing-tool" for gap in missing_status.get("gaps", []))
+    )
+
+
 def local_tool_catalog():
     return {
         "capabilityManager": {
@@ -4634,6 +4960,10 @@ def local_tool_catalog():
         "toolRecovery": {
             "plan": "POST /api/tools/recover",
             "description": "Classify a local failure, choose a free/safe tool or local endpoint, and return the retry path.",
+        },
+        "autonomySupervisor": {
+            "check": "POST /api/tools/autonomy-supervisor",
+            "description": "Check whether a draft answer needs help, web evidence, tools, artifacts, or a hard-boundary question before finalizing.",
         },
         "klipperConfigDiscovery": {
             "list": "GET /api/tools/klipper-configs?hint=qidi",
@@ -4659,6 +4989,7 @@ def build_local_tools_context():
             "- If a command or capability is missing, inspect `GET http://127.0.0.1:8765/api/tools/capabilities`.",
             "- To install a free allowlisted missing tool, call `POST http://127.0.0.1:8765/api/tools/install-free-tool` with JSON like `{\"tool\":\"jq\",\"reason\":\"parse printer API JSON\"}`.",
             "- To recover from a failure, call `POST http://127.0.0.1:8765/api/tools/recover` with the original messages, cwd, and error text. Use its recovery status before giving up.",
+            "- To check whether a draft answer needs help before finalizing, call `POST http://127.0.0.1:8765/api/tools/autonomy-supervisor` with the messages, route, answerText, cwd, and webSearch.",
             "- If the install response says `needsApproval`, ask Tinman before downloading. Do this for storage pressure, large installs, unknown tools, or anything not confirmed free.",
             "- After a successful install, retry the original task instead of stopping at `command not found`.",
             "- For local Klipper config discovery, call `GET http://127.0.0.1:8765/api/tools/klipper-configs?hint=qidi` or use another machine hint. Add `&scan=1` only when known paths are not enough.",
@@ -5506,6 +5837,7 @@ def build_prompt(
     research_context = build_research_quality_context(messages)
     local_context = build_local_context(messages)
     local_tools_context = build_local_tools_context()
+    autonomy_context = build_autonomy_supervisor_context(messages, route or {}, web_search=web_search)
     cad_design_context = build_cad_design_context(messages, route or {})
     analytical_context = build_analytical_context(
         messages,
@@ -5529,6 +5861,7 @@ def build_prompt(
             + research_context
             + local_context
             + local_tools_context
+            + autonomy_context
             + cad_design_context
             + analytical_context
             + direct_answer_context
@@ -5566,6 +5899,8 @@ def build_prompt(
         blocks.append(local_context)
     if local_tools_context:
         blocks.append(local_tools_context)
+    if autonomy_context:
+        blocks.append(autonomy_context)
     if cad_design_context:
         blocks.append(cad_design_context)
     if analytical_context:
@@ -5638,6 +5973,10 @@ def build_cloud_research_prompt(
     research_context = build_research_quality_context(messages)
     if research_context:
         blocks.append(research_context.strip())
+        blocks.append("")
+    autonomy_context = build_autonomy_supervisor_context(messages, route or {}, web_search=web_search)
+    if autonomy_context:
+        blocks.append(autonomy_context.strip())
         blocks.append("")
     cad_design_context = build_cad_design_context(messages, route or {})
     if cad_design_context:
@@ -6444,6 +6783,15 @@ def package_health_report():
         add("tools:recovery-engine", "fail", str(exc))
 
     try:
+        add(
+            "tools:autonomy-supervisor",
+            "pass" if autonomy_supervisor_synthetic_check() else "fail",
+            "detects web evidence gaps, CAD artifact gaps, and missing tools",
+        )
+    except Exception as exc:
+        add("tools:autonomy-supervisor", "fail", str(exc))
+
+    try:
         discovery = discover_klipper_config_dirs("klipper")
         candidates = discovery.get("candidates", [])
         add(
@@ -6791,6 +7139,7 @@ def local_review_prompt(messages, route, friendliness_level=None, humor_level=No
     blocks = [
         "You are Tinman's local Review specialist running fully locally through Ollama.",
         build_assistant_style_context(friendliness_level, humor_level).strip(),
+        build_autonomy_supervisor_context(messages, route=route, web_search="live").strip(),
         build_analytical_context(messages, route=route, web_search="live", local_tools=True).strip(),
         build_response_quality_context(messages, route).strip(),
         "You are a second-pass teammate, not a command runner.",
@@ -6882,6 +7231,36 @@ def emit_assistant_answer(handler, messages, route, admin_topic, text, normalize
     return answer
 
 
+def supervise_answer_before_emit(
+    messages,
+    route,
+    admin_topic,
+    answer_text,
+    cwd="",
+    web_search="live",
+    emit=None,
+    friendliness_level=None,
+    humor_level=None,
+):
+    answer = str(answer_text or "").strip()
+    if not answer or (admin_topic or {}).get("testRun"):
+        return answer
+    result = autonomy_supervisor_recover_answer(
+        messages,
+        route or {},
+        answer,
+        cwd=cwd,
+        web_search=web_search,
+        emit=emit,
+        friendliness_level=friendliness_level,
+        humor_level=humor_level,
+    )
+    recovered = str(result.get("text") or answer).strip()
+    if result.get("recovered") and emit:
+        emit("Autonomy Supervisor recovered the answer before final delivery.")
+    return recovered or answer
+
+
 def run_local_review(
     messages,
     route,
@@ -6925,6 +7304,7 @@ def manager_final_prompt(
     blocks = [
         "You are Tinman's local Manager finalizer.",
         build_assistant_style_context(friendliness_level, humor_level).strip(),
+        build_autonomy_supervisor_context(messages, route=route, web_search="live").strip(),
         build_response_quality_context(messages, route).strip(),
         "Use the primary worker answer and the local review to produce the final answer for Tinman.",
         "Return only the final answer. Do not mention that a review or finalizer ran.",
@@ -7012,6 +7392,7 @@ def quality_coach_prompt(
     blocks = [
         "You are Tinman's final Quality Coach.",
         build_assistant_style_context(friendliness_level, humor_level).strip(),
+        build_autonomy_supervisor_context(messages, route=route, web_search="live").strip(),
         build_analytical_context(messages, route=route, web_search="live", local_tools=True).strip(),
         build_response_quality_context(messages, route).strip(),
         "Your job is to return the final answer Tinman should see.",
@@ -7565,6 +7946,33 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             self.send_json(result)
             return
 
+        if parsed.path == "/api/tools/autonomy-supervisor":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self.send_error(400, "Invalid JSON")
+                return
+            result = autonomy_supervisor_status(
+                payload.get("messages") if isinstance(payload.get("messages"), list) else [],
+                route=payload.get("route") if isinstance(payload.get("route"), dict) else {},
+                answer_text=payload.get("answerText") or payload.get("answer") or "",
+                error_text=payload.get("error") or payload.get("errorText") or "",
+                cwd=str(payload.get("cwd") or ""),
+                web_search=safe_choice(payload.get("webSearch"), WEB_SEARCH_LEVELS, "live"),
+                stage=safe_choice(payload.get("stage"), {"preflight", "post"}, "post"),
+            )
+            append_autonomy_supervisor_log(
+                {
+                    "action": "endpoint-check",
+                    "needsHelp": result.get("needsHelp"),
+                    "hardBoundary": result.get("hardBoundary"),
+                    "gaps": result.get("gaps", []),
+                }
+            )
+            self.send_json(result)
+            return
+
         if parsed.path == "/api/tools/install-free-tool":
             length = int(self.headers.get("Content-Length", "0") or "0")
             try:
@@ -8024,6 +8432,17 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                                 "text": f"Manager review failed, so I am returning the research answer directly: {compact(exc, 120)}",
                             },
                         )
+                answer_text = supervise_answer_before_emit(
+                    messages,
+                    route,
+                    admin_topic,
+                    answer_text,
+                    cwd=cwd,
+                    web_search=web_search,
+                    emit=emit_local_research,
+                    friendliness_level=friendliness_level,
+                    humor_level=humor_level,
+                )
                 emit_assistant_answer(self, messages, route, admin_topic, answer_text)
                 json_line(self, {"type": "done", "returnCode": 0})
             else:
@@ -8100,6 +8519,20 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                                 "text": f"Manager review failed, so I am returning the cloud answer directly: {compact(exc, 120)}",
                             },
                         )
+                def emit_cloud_supervisor(text):
+                    json_line(self, {"type": "thought", "text": text})
+
+                answer_text = supervise_answer_before_emit(
+                    messages,
+                    route,
+                    admin_topic,
+                    answer_text,
+                    cwd=cwd,
+                    web_search=web_search,
+                    emit=emit_cloud_supervisor,
+                    friendliness_level=friendliness_level,
+                    humor_level=humor_level,
+                )
                 emit_assistant_answer(self, messages, route, admin_topic, answer_text)
                 json_line(self, {"type": "done", "returnCode": 0})
             else:
@@ -8255,7 +8688,15 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                                 )
                                 primary_draft_note_sent = True
                         else:
-                            emit_assistant_answer(self, messages, route, admin_topic, text)
+                            if not primary_draft_note_sent:
+                                json_line(
+                                    self,
+                                    {
+                                        "type": "thought",
+                                        "text": "Primary worker drafted an answer; Autonomy Supervisor will check it before final delivery.",
+                                    },
+                                )
+                                primary_draft_note_sent = True
                     elif isinstance(item, dict) and item.get("type") == "error":
                         error_message = item.get("message", "")
                         if non_fatal_codex_warning(error_message):
@@ -8315,6 +8756,17 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                         },
                     )
                     answer_text = primary_answer
+                answer_text = supervise_answer_before_emit(
+                    messages,
+                    route,
+                    admin_topic,
+                    answer_text,
+                    cwd=cwd,
+                    web_search=web_search,
+                    emit=emit_manager_codex,
+                    friendliness_level=friendliness_level,
+                    humor_level=humor_level,
+                )
                 emit_assistant_answer(
                     self,
                     messages,
@@ -8323,8 +8775,36 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                     answer_text,
                 )
             elif final_text and final_text not in assistant_messages:
+                def emit_final_supervisor(text):
+                    json_line(self, {"type": "thought", "text": text})
+
+                final_text = supervise_answer_before_emit(
+                    messages,
+                    route,
+                    admin_topic,
+                    final_text,
+                    cwd=cwd,
+                    web_search=web_search,
+                    emit=emit_final_supervisor,
+                    friendliness_level=friendliness_level,
+                    humor_level=humor_level,
+                )
                 emit_assistant_answer(self, messages, route, admin_topic, final_text)
-            elif manager_mode and primary_answer:
+            elif primary_answer:
+                def emit_primary_supervisor(text):
+                    json_line(self, {"type": "thought", "text": text})
+
+                primary_answer = supervise_answer_before_emit(
+                    messages,
+                    route,
+                    admin_topic,
+                    primary_answer,
+                    cwd=cwd,
+                    web_search=web_search,
+                    emit=emit_primary_supervisor,
+                    friendliness_level=friendliness_level,
+                    humor_level=humor_level,
+                )
                 emit_assistant_answer(self, messages, route, admin_topic, primary_answer)
             elif not primary_answer:
                 json_line(
@@ -8343,6 +8823,20 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 )
                 fallback_text = str(fallback.get("text") or "").strip()
                 if fallback_text:
+                    def emit_fallback_supervisor(text):
+                        json_line(self, {"type": "thought", "text": text})
+
+                    fallback_text = supervise_answer_before_emit(
+                        messages,
+                        route,
+                        admin_topic,
+                        fallback_text,
+                        cwd=cwd,
+                        web_search=web_search,
+                        emit=emit_fallback_supervisor,
+                        friendliness_level=friendliness_level,
+                        humor_level=humor_level,
+                    )
                     emit_assistant_answer(self, messages, route, admin_topic, fallback_text)
                 else:
                     tool_recovery = tool_recovery_plan(
@@ -8377,6 +8871,20 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                             "type": "thought",
                             "text": f"Final manager step failed, so I am returning the primary worker draft: {compact(exc, 120)}",
                         },
+                    )
+                    def emit_exception_supervisor(text):
+                        json_line(self, {"type": "thought", "text": text})
+
+                    primary_answer = supervise_answer_before_emit(
+                        messages,
+                        route,
+                        admin_topic,
+                        primary_answer,
+                        cwd=cwd,
+                        web_search=web_search,
+                        emit=emit_exception_supervisor,
+                        friendliness_level=friendliness_level,
+                        humor_level=humor_level,
                     )
                     emit_assistant_answer(self, messages, route, admin_topic, primary_answer)
                     json_line(self, {"type": "done", "returnCode": 0})

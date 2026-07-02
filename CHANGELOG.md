@@ -1,5 +1,13 @@
 # Changelog
 
+## v2026.07.06
+
+- Adds the Autonomy Supervisor help reflex before final answer delivery.
+- Detects missing web evidence, wrong CAD/printer-status behavior, missing tools, unfinished runtimes, and weak unsupported refusals.
+- Adds `POST /api/tools/autonomy-supervisor` so local workers can check draft answers for help-needed conditions.
+- Lets the supervisor recover CAD design mistakes by staging Fusion 360/OpenSCAD artifacts before answering.
+- Adds package-health regressions for web-evidence gaps, CAD artifact gaps, and missing-tool detection.
+
 ## v2026.07.05
 
 - Fixes CAD/CPAP duct design prompts being mistaken for live printer status checks.
