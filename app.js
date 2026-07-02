@@ -374,6 +374,7 @@ function renderAdmin() {
       ["Projects", `${admin.projectCount || projects.length}`],
       ["Stable Notes", `${admin.knowledgeCount || knowledge.length}`],
       ["Quality Lessons", `${admin.qualityFeedbackCount || 0}`],
+      ["Answer Examples", `${admin.responseExampleCount || 0}`],
       ["Improvements", `${improvement.openCount || 0}`],
       ["Self-Heal", `${selfHealing.count || 0}`],
       ["Patch Queue", `${selfPatchQueue.openCount || 0}`],
@@ -1102,6 +1103,8 @@ function renderMessages() {
     answer.className = "answer-text";
     renderMessageText(answer, message);
     body.appendChild(answer);
+    const responsePackage = buildResponsePackagePanel(message);
+    if (responsePackage) body.appendChild(responsePackage);
     const thoughts = buildThoughtsCard(message);
     if (thoughts) body.appendChild(thoughts);
     if (message.role === "assistant" && !message.running && String(message.text || "").trim()) {
@@ -1137,6 +1140,139 @@ function buildThoughtsCard(message) {
     thoughts.appendChild(item);
   });
   return thoughts;
+}
+
+function responsePackageItems(message, key) {
+  return Array.isArray(message?.[key]) ? message[key].filter(Boolean) : [];
+}
+
+function buildResponsePackagePanel(message) {
+  if (message.role !== "assistant") return null;
+  const deliverables = responsePackageItems(message, "deliverables");
+  const assumptions = responsePackageItems(message, "assumptions");
+  const contract = message.taskContract || null;
+  const roleStyle = message.roleStyle || null;
+  const scorecard = message.scorecard || null;
+  if (!deliverables.length && !assumptions.length && !contract && !roleStyle && !scorecard) return null;
+
+  const wrap = document.createElement("div");
+  wrap.className = "response-package";
+
+  if (deliverables.length) {
+    const card = document.createElement("section");
+    card.className = "deliverables-card";
+    const title = document.createElement("div");
+    title.className = "package-title";
+    title.textContent = `Deliverables · ${deliverables.length}`;
+    card.appendChild(title);
+
+    deliverables.forEach((deliverable) => {
+      const row = document.createElement("div");
+      row.className = `deliverable-row ${deliverable.exists ? "exists" : "missing"}`;
+      const main = document.createElement("div");
+      main.className = "deliverable-main";
+      const label = document.createElement("div");
+      label.className = "deliverable-label";
+      label.textContent = deliverable.label || "Output file";
+      const path = document.createElement("div");
+      path.className = "deliverable-path";
+      path.appendChild(buildLocalPathLink(deliverable.path, deliverable.path));
+      main.append(label, path);
+
+      const meta = document.createElement("div");
+      meta.className = "deliverable-meta";
+      const kind = document.createElement("span");
+      kind.textContent = deliverable.kind || "file";
+      const status = document.createElement("span");
+      status.className = deliverable.exists ? "deliverable-status ok" : "deliverable-status missing";
+      status.textContent = deliverable.exists ? "Found" : "Missing";
+      meta.append(kind, status);
+      row.append(main, meta);
+      card.appendChild(row);
+    });
+    wrap.appendChild(card);
+  }
+
+  const hasChecks = scorecard && Array.isArray(scorecard.checks) && scorecard.checks.length;
+  if (contract || roleStyle || assumptions.length || hasChecks) {
+    const details = document.createElement("details");
+    details.className = `answer-check-card ${scorecard?.status || "pass"}`;
+    details.open = scorecard?.status === "review";
+    const summary = document.createElement("summary");
+    const summaryTitle = document.createElement("span");
+    summaryTitle.className = "answer-check-title";
+    summaryTitle.textContent = "Answer check";
+    const score = document.createElement("span");
+    score.className = `score-pill ${scorecard?.status || "pass"}`;
+    score.textContent = Number.isFinite(scorecard?.score) ? `${scorecard.score}%` : "Ready";
+    summary.append(summaryTitle, score);
+    details.appendChild(summary);
+
+    if (contract || roleStyle) {
+      const grid = document.createElement("div");
+      grid.className = "answer-check-grid";
+      if (contract?.kind) grid.appendChild(buildAnswerCheckFact("Task", contract.kind));
+      if (contract?.doneMeans) grid.appendChild(buildAnswerCheckFact("Done means", contract.doneMeans));
+      if (contract?.role || roleStyle?.title) grid.appendChild(buildAnswerCheckFact("Role", contract?.role || roleStyle.title));
+      if (roleStyle?.voice) grid.appendChild(buildAnswerCheckFact("Voice", roleStyle.voice));
+      if (Array.isArray(roleStyle?.checklist) && roleStyle.checklist.length) {
+        grid.appendChild(buildAnswerCheckFact("Checklist", roleStyle.checklist.join(", ")));
+      }
+      details.appendChild(grid);
+    }
+
+    if (assumptions.length) {
+      const group = document.createElement("div");
+      group.className = "ledger-group";
+      const title = document.createElement("div");
+      title.className = "ledger-title";
+      title.textContent = "Assumptions and validation";
+      group.appendChild(title);
+      assumptions.forEach((item) => {
+        const row = document.createElement("div");
+        row.className = `ledger-row ${item.status || "noted"}`;
+        const tag = document.createElement("span");
+        tag.className = "ledger-tag";
+        tag.textContent = item.kind || "Note";
+        const text = document.createElement("span");
+        text.textContent = item.text || "";
+        row.append(tag, text);
+        group.appendChild(row);
+      });
+      details.appendChild(group);
+    }
+
+    if (hasChecks) {
+      const group = document.createElement("div");
+      group.className = "check-group";
+      scorecard.checks.forEach((check) => {
+        const row = document.createElement("div");
+        row.className = `check-row ${check.passed ? "pass" : "fail"}`;
+        const mark = document.createElement("span");
+        mark.className = "check-mark";
+        mark.textContent = check.passed ? "OK" : "Needs work";
+        const copy = document.createElement("span");
+        copy.textContent = check.detail ? `${check.label}: ${check.detail}` : check.label;
+        row.append(mark, copy);
+        group.appendChild(row);
+      });
+      details.appendChild(group);
+    }
+    wrap.appendChild(details);
+  }
+
+  return wrap.childElementCount ? wrap : null;
+}
+
+function buildAnswerCheckFact(label, value) {
+  const item = document.createElement("div");
+  item.className = "answer-check-fact";
+  const small = document.createElement("span");
+  small.textContent = label;
+  const strong = document.createElement("strong");
+  strong.textContent = compactLabel(value, 180);
+  item.append(small, strong);
+  return item;
 }
 
 function buildFeedbackActions(message) {
@@ -2844,6 +2980,11 @@ function handleEvent(event, pending) {
     if (event.adminTopic) {
       pending.adminTopic = event.adminTopic;
     }
+    pending.taskContract = event.taskContract || null;
+    pending.roleStyle = event.roleStyle || null;
+    pending.deliverables = Array.isArray(event.deliverables) ? event.deliverables : [];
+    pending.assumptions = Array.isArray(event.assumptions) ? event.assumptions : [];
+    pending.scorecard = event.scorecard || null;
     renderMessages();
     return;
   }
