@@ -1,5 +1,13 @@
 # Changelog
 
+## v2026.07.13
+
+- Adds OpenVSP/VSPAERO, XFOIL, SU2, QBlade Linux launcher, and CalculiX to the free-tool capability catalog.
+- Adds mechanical/structural design detection for brackets, mounts, holders, loads, stress, deflection, FEA, FEM, and safety-factor prompts.
+- Adds a structural FEA preflight endpoint that captures load/material/safety-factor assumptions, resolves attached geometry, stages a CalculiX input deck, and runs a solver seed case when `ccx` is available.
+- Routes mechanical and structural design prompts into CAD/Modeling instead of printer status or generic CAD fallbacks.
+- Adds package-health regressions for aero toolchain visibility, structural toolchain visibility, structural preflight output, and structural routing.
+
 ## v2026.07.12
 
 - Upgrades STL/CPAP duct handling from preflight-only to a real inferred design worker.

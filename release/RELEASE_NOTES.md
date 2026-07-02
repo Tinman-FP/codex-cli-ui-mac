@@ -1,29 +1,29 @@
-# Codex CLI UI for Mac v2026.07.12
+# Codex CLI UI for Mac v2026.07.13
 
-Design-worker release for STL-based CPAP cooling duct requests.
+Aero and mechanical/structural design-pack release.
 
 ## Download
 
 Download one file:
 
 ```text
-Codex_CLI_UI_Mac_v2026.07.12.dmg
+Codex_CLI_UI_Mac_v2026.07.13.dmg
 ```
 
 Open the DMG and double-click `Install Codex CLI UI.command`.
 
 ## Fixed
 
-- STL-based CPAP duct prompts no longer stop at a preflight report.
-- The CAD path now attempts a real inferred duct design when mesh geometry is available.
-- Package health now fails if STL duct prompts return only generic CAD or preflight-only output.
+- Mechanical and structural design prompts now route to CAD/Modeling instead of printer status or generic fallbacks.
+- Package health now catches structural-routing regressions before release.
 
 ## Added
 
-- Inferred CPAP inlet/outlet body detection from STL connected components.
-- Generated duct STL, editable OpenSCAD source, internal-airway STL, inferred-port JSON, and design-preview PNG.
-- OpenFOAM Docker `surfaceCheck` for generated duct STL when Docker/OpenFOAM images are present.
-- A flattened split-duct strategy for tight Y-growth constraints.
+- OpenVSP/VSPAERO, XFOIL, SU2, QBlade Linux launcher, and CalculiX tool visibility in the local capability catalog.
+- Structural FEA preflight endpoint for brackets, mounts, holders, loads, stress, deflection, FEA/FEM, and safety-factor prompts.
+- Load/material/safety-factor assumption capture before claiming strength.
+- CalculiX seed input deck generation and solver smoke run when `ccx` is available.
+- Package-health checks for aero toolchain visibility, structural toolchain visibility, structural preflight output, and structural routing.
 
 ## Included
 
@@ -37,6 +37,8 @@ Open the DMG and double-click `Install Codex CLI UI.command`.
 - Autonomy Supervisor help-needed checker
 - Klipper config discovery and macro-staging helpers
 - CAD artifact staging helper for Fusion 360/OpenSCAD workflows
+- Aero/CFD preflight helpers for OpenFOAM/OpenVSP/XFOIL/SU2 workflows
+- Mechanical/structural preflight helper for CalculiX-backed FEA workflows
 - Privacy-safe local data/log folders
 
 ## Requirements
@@ -52,6 +54,8 @@ Optional local models for the fuller free workflow:
 ollama pull qwen2.5-coder:7b
 ollama pull deepseek-r1:8b
 ```
+
+Optional engineering tools are detected when present. QBlade CE's Linux package must be downloaded from the official QBlade site and extracted locally before the `qblade-linux` launcher can run it.
 
 ## Notes
 

@@ -43,6 +43,7 @@ MODEL_WARMUP_STATE_PATH = DATA_DIR / "model_warmup_state.json"
 LOCAL_TOOL_OUTPUT_DIR = DATA_DIR / "generated" / "printer-macros"
 LOCAL_CAD_OUTPUT_DIR = DATA_DIR / "generated" / "cad"
 LOCAL_AERO_OUTPUT_DIR = DATA_DIR / "generated" / "aero-cfd"
+LOCAL_STRUCTURAL_OUTPUT_DIR = DATA_DIR / "generated" / "structural-fea"
 LOCAL_QUALITY_OUTPUT_DIR = DATA_DIR / "generated" / "quality-gates"
 UPLOAD_DIR = DATA_DIR / "uploads"
 CAPABILITY_TOOL_LOG_PATH = DATA_DIR / "capability_tool_log.jsonl"
@@ -62,7 +63,7 @@ CODEX_BIN = os.environ.get(
     "CODEX_BIN", "/Applications/Codex.app/Contents/Resources/codex"
 )
 DEFAULT_PROFILE = os.environ.get("CODEX_PROFILE", "manager")
-DEFAULT_CWD = os.environ.get("CODEX_CWD", "/Users/williamtinney/Documents/Codex")
+DEFAULT_CWD = os.environ.get("CODEX_CWD", str(Path.home() / "Documents" / "Codex"))
 DEFAULT_HOST = os.environ.get("CODEX_UI_HOST", "127.0.0.1")
 DEFAULT_PORT = int(os.environ.get("CODEX_UI_PORT", "8765"))
 DEFAULT_ACCESS_LEVEL = os.environ.get("CODEX_ACCESS_LEVEL", "danger-full-access")
@@ -81,7 +82,7 @@ FREE_ONLY = os.environ.get("CODEX_FREE_ONLY", "1").strip().lower() not in {
     "false",
     "no",
 }
-QIDI_MOONRAKER_URL = os.environ.get("QIDI_MOONRAKER_URL", "http://192.168.50.145:7125")
+QIDI_MOONRAKER_URL = os.environ.get("QIDI_MOONRAKER_URL", "").strip()
 PYTHON_USER_BIN = (
     Path.home()
     / "Library"
@@ -90,10 +91,10 @@ PYTHON_USER_BIN = (
     / "bin"
 )
 PATH_FOR_CODEX = (
-    f"/Users/williamtinney/.local/bin:{PYTHON_USER_BIN}:/usr/local/bin:/opt/homebrew/bin:/Applications/Codex.app/Contents/Resources:"
+    f"{Path.home() / '.local' / 'bin'}:{PYTHON_USER_BIN}:/usr/local/bin:/opt/homebrew/bin:/Applications/Codex.app/Contents/Resources:"
     "/Applications/Codex.app/Contents/Resources/cua_node/bin:"
     "/usr/bin:/bin:/usr/sbin:/sbin:"
-    "/Users/williamtinney/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin"
+    f"{Path.home() / '.cache' / 'codex-runtimes' / 'codex-primary-runtime' / 'dependencies' / 'bin'}"
 )
 ACCESS_LEVELS = {"read-only", "workspace-write", "danger-full-access"}
 REASONING_LEVELS = {"low", "medium", "high"}
@@ -131,7 +132,7 @@ QIDI_CONTEXT_TERMS = {
     "qidi",
     "plus 4",
     "plus4",
-    "makersvpn",
+    "vpn",
     "tailscale",
     "moonraker",
     "printer",
@@ -475,6 +476,20 @@ PROJECT_QUERY_HINTS = {
         "openfoam",
         "paraview",
         "vspaero",
+        "stress",
+        "strain",
+        "deflection",
+        "fea",
+        "fem",
+        "finite element",
+        "calculix",
+        "mechanical",
+        "structural",
+        "bracket",
+        "mount",
+        "holder",
+        "load",
+        "safety factor",
         "cooling duct",
         "part cooling",
     ),
@@ -607,13 +622,17 @@ PROJECT_PLAYBOOKS = {
             "rudder", "stl", ".step", "step file", "stp", "printable", "3d model",
             "duct", "cpap", "cfd", "aero", "aerodynamic", "airfoil", "drag",
             "lift", "downforce", "pressure drop", "openfoam", "paraview",
-            "vspaero", "cooling duct", "part cooling", "imported into fusion",
+            "vspaero", "stress", "strain", "deflection", "fea", "fem",
+            "finite element", "calculix", "mechanical", "structural",
+            "bracket", "mount", "holder", "load", "safety factor",
+            "cooling duct", "part cooling", "imported into fusion",
         ),
         "rules": (
             "Keep manufacturability and print orientation in view, not only geometry.",
             "When converting or designing files, verify dimensions and exported artifacts.",
             "For CAD design requests, create a concrete artifact path whenever feasible and state assumptions, dimensions, and import route.",
             "For aerodynamic or CFD requests, run geometry/toolchain preflight first, stage OpenFOAM-ready files when geometry is available, and never claim solved CFD unless the solver actually ran.",
+            "For mechanical or structural requests, identify loads, constraints, material, process, print orientation, safety factor, and likely failure modes before creating geometry or claiming strength.",
         ),
     },
     "research-parts-reference": {
@@ -704,7 +723,7 @@ GOLDEN_TESTS = [
         "webSearch": "disabled",
         "expectedProjectId": "general",
         "directAnswer": True,
-        "requiredTerms": ["/Users/williamtinney"],
+        "requiredTerms": [str(Path.home())],
         "forbiddenTerms": ["cannot access", "i do not have"],
         "goal": "Prove local command work returns a final answer.",
     },
@@ -1279,6 +1298,46 @@ FREE_TOOL_MANIFEST = {
         "capabilities": ["airfoil estimates", "aerodynamic sizing calculations", "engineering optimization", "design trade studies"],
         "free": True,
         "autoInstall": True,
+    },
+    "openvsp": {
+        "label": "OpenVSP/VSPAERO",
+        "commands": ["vsp", "vspaero", "vspscript"],
+        "estimatedBytes": 900 * MIB,
+        "capabilities": ["aircraft/vehicle parametric geometry", "VSPAERO vortex-lattice/panel analysis", "geometry export"],
+        "free": True,
+        "autoInstall": False,
+    },
+    "xfoil": {
+        "label": "XFOIL",
+        "commands": ["xfoil"],
+        "estimatedBytes": 25 * MIB,
+        "capabilities": ["2D airfoil viscous/inviscid analysis", "airfoil polar generation", "airfoil redesign"],
+        "free": True,
+        "autoInstall": False,
+    },
+    "su2": {
+        "label": "SU2 CFD",
+        "commands": ["SU2_CFD"],
+        "estimatedBytes": 150 * MIB,
+        "capabilities": ["compressible/incompressible CFD", "SU2 mesh/config solving", "shape optimization workflows"],
+        "free": True,
+        "autoInstall": False,
+    },
+    "qblade-linux": {
+        "label": "QBlade Linux",
+        "commands": ["qblade-linux"],
+        "estimatedBytes": 80 * MIB,
+        "capabilities": ["wind turbine design", "blade/aeroelastic simulation", "QBlade CE manual Linux package launcher"],
+        "free": True,
+        "autoInstall": False,
+    },
+    "calculix": {
+        "label": "CalculiX",
+        "commands": ["ccx"],
+        "estimatedBytes": 60 * MIB,
+        "capabilities": ["structural finite element analysis", "static stress/deflection", "thermal/mechanical solver input decks"],
+        "free": True,
+        "autoInstall": False,
     },
 }
 COMMAND_TO_FREE_TOOL = {
@@ -2130,7 +2189,7 @@ def is_printer_machine(machine):
     name = str(machine.get("name", "")).lower()
     notes = str(machine.get("notes", "")).lower()
     text = f"{name} {notes}"
-    if any(term in name for term in ("router", "makersvpn", "netgear")):
+    if any(term in name for term in ("router", "vpn gateway", "netgear")):
         return False
     printer_terms = (
         "qidi",
@@ -6706,6 +6765,10 @@ def local_tool_catalog():
             "run": "POST /api/tools/aero-cfd-preflight or automatic on aerodynamic/CFD geometry-analysis requests",
             "description": "Resolve STL/STEP/STP/OBJ/3MF geometry, convert to solver STL when possible, inspect mesh scale/watertightness, stage an OpenFOAM external-flow scaffold, and run surfaceCheck when OpenFOAM Docker is available.",
         },
+        "structuralFeaPreflight": {
+            "run": "POST /api/tools/structural-fea-preflight or automatic on mechanical/structural design requests",
+            "description": "Capture load/material/safety-factor assumptions, resolve geometry when available, stage a mechanical design brief, create a CalculiX seed input deck, and run a solver smoke/seed case when ccx is available.",
+        },
     }
 
 
@@ -6728,6 +6791,7 @@ def build_local_tools_context():
             "- For CAD artifact staging, call `POST http://127.0.0.1:8765/api/tools/cad-artifact` with JSON like `{\"prompt\":\"design a CPAP cooling duct for Fusion 360\"}`.",
             "- For STL-based CPAP/part-cooling duct requests, use the automatic STL duct designer first. Find the STL, inspect the mesh, infer or ask for ports, generate an editable CAD/STL artifact, and stage CFD validation files before considering a generic CPAP CAD artifact path.",
             "- For aerodynamic/CFD component analysis, call `POST http://127.0.0.1:8765/api/tools/aero-cfd-preflight` with the messages/cwd. Use it before claiming CFD readiness; it stages OpenFOAM external-flow files and surface checks when geometry is available.",
+            "- For mechanical/structural part design, call `POST http://127.0.0.1:8765/api/tools/structural-fea-preflight` with the messages/cwd. Identify loads, constraints, material/process, safety factor, and failure modes before claiming strength.",
             "",
         ]
     )
@@ -6897,15 +6961,9 @@ def candidate_matches_hint(candidate, hint):
 
 def discover_klipper_config_dirs(hint="", scan=False):
     known = [
-        ("/Users/williamtinney/Downloads/ratrig_config", "current-klipper-config-ratrig"),
-        (
-            "/Users/williamtinney/Documents/Codex/2026-05-22/on-the-qidi-i-am-attempting/ratrig_audit/config",
-            "known-klipper-config-ratrig-audit",
-        ),
-        (
-            "/Users/williamtinney/Applications/Flightops_Tracker/docs/ratrig_baseline_20260314_190144/ratrig_config",
-            "known-klipper-config-ratrig-baseline",
-        ),
+        (Path.home() / "Downloads" / "ratrig_config", "current-klipper-config-ratrig"),
+        (Path.home() / "Documents" / "Codex", "user-codex-documents"),
+        (Path.home() / "Applications", "user-applications"),
     ]
     candidates = []
     seen = set()
@@ -6917,9 +6975,9 @@ def discover_klipper_config_dirs(hint="", scan=False):
 
     if scan:
         scan_roots = [
-            Path("/Users/williamtinney/Downloads"),
-            Path("/Users/williamtinney/Documents/Codex/2026-05-22/on-the-qidi-i-am-attempting"),
-            Path("/Users/williamtinney/Applications/Flightops_Tracker/docs"),
+            Path.home() / "Downloads",
+            Path.home() / "Documents" / "Codex",
+            Path.home() / "Applications",
         ]
         for root in scan_roots:
             if not root.exists():
@@ -8077,10 +8135,15 @@ def cfd_toolchain_status():
         "pvpython": command_path("pvpython"),
         "vsp": command_path("vsp"),
         "vspaero": command_path("vspaero"),
+        "vspscript": command_path("vspscript"),
         "xfoil": command_path("xfoil"),
         "SU2_CFD": command_path("SU2_CFD"),
+        "SU2_DEF": command_path("SU2_DEF"),
+        "SU2_DOT": command_path("SU2_DOT"),
+        "qblade-linux": command_path("qblade-linux"),
         "openmdao": command_path("openmdao"),
         "wingproj": command_path("wingproj"),
+        "ccx": command_path("ccx"),
     }
     modules = {
         "numpy": python_module_available("numpy"),
@@ -8111,6 +8174,9 @@ def cfd_toolchain_status():
         "cadKernelAvailable": bool(commands["freecad"] or modules["cadquery"] or modules["OCP"]),
         "airfoilToolsAvailable": bool(commands["xfoil"]),
         "aircraftToolsAvailable": bool(commands["vsp"] or commands["vspaero"]),
+        "su2Available": bool(commands["SU2_CFD"]),
+        "qbladeLinuxLauncherAvailable": bool(commands["qblade-linux"]),
+        "structuralFeaAvailable": bool(commands["ccx"]),
         "aeroModelingAvailable": bool(modules["aerosandbox"] or modules["neuralfoil"]),
         "optimizationAvailable": bool(commands["openmdao"] or modules["openmdao"]),
     }
@@ -9425,6 +9491,381 @@ def format_aero_cfd_preflight_answer(result):
             "You should also consider: this is not solved CFD yet. The next engineering step is domain meshing, patch naming, `checkMesh`, solver convergence, and force/pressure/velocity review.",
         ]
     )
+
+
+STRUCTURAL_MATERIAL_LIBRARY = {
+    "pla": {"label": "PLA printed part", "elasticModulusMpa": 3000, "poisson": 0.35, "yieldMpa": 35, "notes": "Good stiffness, poor heat/creep resistance; design conservatively for outdoor or hot environments."},
+    "petg": {"label": "PETG printed part", "elasticModulusMpa": 2100, "poisson": 0.38, "yieldMpa": 28, "notes": "Tougher than PLA but more flexible; watch creep under sustained load."},
+    "asa": {"label": "ASA printed part", "elasticModulusMpa": 2200, "poisson": 0.35, "yieldMpa": 30, "notes": "Better UV/weather resistance; good default for outdoor printed parts."},
+    "abs": {"label": "ABS printed part", "elasticModulusMpa": 2100, "poisson": 0.35, "yieldMpa": 30, "notes": "Tough and heat tolerant, but enclosure/warping matter."},
+    "pctg": {"label": "PCTG printed part", "elasticModulusMpa": 1900, "poisson": 0.38, "yieldMpa": 32, "notes": "Tough ductile option; usually more flexible than PLA or fiber-filled materials."},
+    "nylon": {"label": "Nylon printed part", "elasticModulusMpa": 1600, "poisson": 0.39, "yieldMpa": 45, "notes": "Tough and fatigue-friendly, but moisture and creep must be managed."},
+    "pa-cf": {"label": "PA-CF printed part", "elasticModulusMpa": 5500, "poisson": 0.34, "yieldMpa": 70, "notes": "Stiff engineering filament; anisotropy and layer adhesion still control design."},
+    "pet-cf": {"label": "PET-CF printed part", "elasticModulusMpa": 6500, "poisson": 0.34, "yieldMpa": 75, "notes": "Stiff and dimensionally stable; excellent candidate for structural printed brackets when dry and printed correctly."},
+    "aluminum 6061": {"label": "Aluminum 6061-T6", "elasticModulusMpa": 69000, "poisson": 0.33, "yieldMpa": 276, "notes": "Good all-around machined structural material."},
+    "steel": {"label": "Mild steel", "elasticModulusMpa": 200000, "poisson": 0.30, "yieldMpa": 250, "notes": "High stiffness and ductility; corrosion protection may matter."},
+}
+
+
+def structural_material_from_text(text):
+    lower = str(text or "").lower()
+    aliases = [
+        ("aluminum 6061", ("6061", "aluminum", "aluminium")),
+        ("pet-cf", ("pet-cf", "pet cf")),
+        ("pa-cf", ("pa-cf", "pa cf", "nylon cf", "nylon-cf", "carbon fiber nylon")),
+        ("pctg", ("pctg",)),
+        ("asa", ("asa",)),
+        ("abs", ("abs",)),
+        ("petg", ("petg",)),
+        ("nylon", ("nylon", "pa6", "pa12")),
+        ("steel", ("steel", "mild steel")),
+        ("pla", ("pla",)),
+    ]
+    for key, terms in aliases:
+        if any(term in lower for term in terms):
+            return {**STRUCTURAL_MATERIAL_LIBRARY[key], "key": key}
+    return {**STRUCTURAL_MATERIAL_LIBRARY["aluminum 6061"], "key": "aluminum 6061", "assumed": True}
+
+
+def structural_analysis_parameters(messages):
+    text = latest_user_text(messages)
+    lower = text.lower()
+    load_n = cad_number_any((r"([0-9]+(?:\.[0-9]+)?)\s*n\b", r"([0-9]+(?:\.[0-9]+)?)\s*newtons?\b"), lower, 100.0)
+    lbf_match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*(?:lbf|lb|lbs|pounds?)\b", lower)
+    if lbf_match:
+        load_n = float(lbf_match.group(1)) * 4.44822
+    kg_match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*kg\b", lower)
+    if kg_match:
+        load_n = float(kg_match.group(1)) * 9.80665
+    safety_factor = cad_number_any(
+        (
+            r"safety\s+factor[^0-9]{0,16}([0-9]+(?:\.[0-9]+)?)",
+            r"\bsf[^0-9]{0,8}([0-9]+(?:\.[0-9]+)?)",
+        ),
+        lower,
+        2.5,
+    )
+    dims = None
+    dim_match = re.search(
+        r"([0-9]+(?:\.[0-9]+)?)\s*(?:mm|millimeters?)?\s*x\s*([0-9]+(?:\.[0-9]+)?)\s*(?:mm|millimeters?)?\s*x\s*([0-9]+(?:\.[0-9]+)?)\s*(?:mm|millimeters?)?",
+        lower,
+    )
+    if dim_match:
+        dims = [float(dim_match.group(i)) for i in range(1, 4)]
+    return {
+        "loadN": round(load_n, 3),
+        "safetyFactor": safety_factor,
+        "material": structural_material_from_text(text),
+        "dimensionsMm": dims,
+        "promptExcerpt": compact(text, 1000),
+    }
+
+
+def is_structural_mechanical_design_request(messages):
+    query = latest_user_text(messages).lower()
+    if not query:
+        return False
+    if re.match(r"\s*what\s+is\s+the\s+best\s+filament\b", query):
+        return False
+    structural_terms = (
+        "stress", "strain", "deflection", "fea", "fem", "finite element",
+        "calculix", "safety factor", "factor of safety", "load", "force",
+        "torque", "bending", "bracket", "mount", "holder", "fixture",
+        "cantilever", "rib", "gusset", "boss", "bolt", "fastener",
+        "fatigue", "vibration", "structural", "mechanical",
+    )
+    action_terms = (
+        "design", "analyze", "analysis", "simulate", "simulation", "validate",
+        "check", "optimize", "create", "make", "model", "engineer",
+        "will it hold", "strong enough", "support",
+    )
+    has_geometry_hint = bool(geometry_names_from_text(query)) or any(
+        str(item.get("name") or item.get("path") or "").lower().endswith(GEOMETRY_FILE_EXTENSIONS)
+        for item in message_attachments(messages)
+    )
+    high_signal = text_has_any(query, ("fea", "fem", "stress", "deflection", "calculix", "finite element", "safety factor"))
+    return high_signal or (text_has_any(query, structural_terms) and (text_has_any(query, action_terms) or has_geometry_hint))
+
+
+def structural_toolchain_status():
+    commands = {
+        "freecad": command_path("FreeCADCmd") or command_path("freecad"),
+        "ccx": command_path("ccx"),
+        "gmsh": command_path("gmsh"),
+        "paraview": command_path("paraview"),
+    }
+    modules = {
+        "trimesh": python_module_available("trimesh"),
+        "meshio": python_module_available("meshio"),
+        "cadquery": python_module_available("cadquery"),
+        "OCP": python_module_available("OCP"),
+        "numpy": python_module_available("numpy"),
+        "scipy": python_module_available("scipy"),
+        "pyvista": python_module_available("pyvista"),
+    }
+    return {
+        "commands": commands,
+        "pythonModules": modules,
+        "solverAvailable": bool(commands["ccx"]),
+        "cadAvailable": bool(commands["freecad"] or modules["cadquery"] or modules["OCP"]),
+        "meshAvailable": bool(commands["gmsh"] or modules["meshio"] or modules["trimesh"]),
+        "visualizationAvailable": bool(commands["paraview"] or modules["pyvista"]),
+    }
+
+
+def structural_box_dimensions(params, geometry=None):
+    if geometry and geometry.get("ok") and geometry.get("extents"):
+        extents = [max(1.0, float(value or 1.0)) for value in geometry.get("extents", [])[:3]]
+        while len(extents) < 3:
+            extents.append(10.0)
+        return extents
+    if params.get("dimensionsMm"):
+        return [max(1.0, float(value or 1.0)) for value in params["dimensionsMm"][:3]]
+    return [60.0, 20.0, 8.0]
+
+
+def calculix_identifier(value, fallback="MATERIAL"):
+    name = sanitize_filename(value, fallback=fallback)
+    name = re.sub(r"[^A-Za-z0-9_]+", "_", name).strip("_").upper()
+    return name or fallback
+
+
+def write_calculix_seed_case(target, params, geometry=None, source_label="first-pass bounding box"):
+    target = Path(target)
+    case_dir = target / "calculix_static_seed"
+    case_dir.mkdir(parents=True, exist_ok=True)
+    length, width, height = structural_box_dimensions(params, geometry)
+    material = params.get("material") or STRUCTURAL_MATERIAL_LIBRARY["aluminum 6061"]
+    load = float(params.get("loadN") or 100.0)
+    per_node = -load / 4.0
+    material_name = calculix_identifier(material.get("key", "material"))
+    inp = case_dir / "structural_seed.inp"
+    inp.write_text(
+        f"""*HEADING
+Codex CLI UI structural seed case - {source_label}
+*NODE
+1,0,0,0
+2,{length:.6g},0,0
+3,{length:.6g},{width:.6g},0
+4,0,{width:.6g},0
+5,0,0,{height:.6g}
+6,{length:.6g},0,{height:.6g}
+7,{length:.6g},{width:.6g},{height:.6g}
+8,0,{width:.6g},{height:.6g}
+*ELEMENT, TYPE=C3D8, ELSET=EALL
+1,1,2,3,4,5,6,7,8
+*MATERIAL, NAME={material_name}
+*ELASTIC
+{float(material.get('elasticModulusMpa') or 69000):.6g},{float(material.get('poisson') or 0.33):.6g}
+*SOLID SECTION, ELSET=EALL, MATERIAL={material_name}
+*NSET, NSET=FIXED
+1,4,5,8
+*BOUNDARY
+FIXED,1,3,0
+*STEP
+*STATIC
+*CLOAD
+2,3,{per_node:.6g}
+3,3,{per_node:.6g}
+6,3,{per_node:.6g}
+7,3,{per_node:.6g}
+*NODE FILE
+U
+*EL FILE
+S
+*END STEP
+""",
+        encoding="utf-8",
+    )
+    ccx = command_path("ccx")
+    run = {"ran": False, "ok": False, "error": "CalculiX ccx is not available."}
+    if ccx:
+        started = time.time()
+        try:
+            proc = subprocess.run(
+                [ccx, "-i", "structural_seed"],
+                cwd=case_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=120,
+                env={**os.environ, "PATH": PATH_FOR_CODEX},
+            )
+            run = {
+                "ran": True,
+                "ok": proc.returncode == 0 and (case_dir / "structural_seed.frd").exists(),
+                "returnCode": proc.returncode,
+                "durationMs": round((time.time() - started) * 1000),
+                "stdout": compact(proc.stdout, 1200),
+                "stderr": compact(proc.stderr, 1200),
+                "frdPath": str(case_dir / "structural_seed.frd") if (case_dir / "structural_seed.frd").exists() else "",
+            }
+        except Exception as exc:
+            run = {"ran": True, "ok": False, "error": str(exc), "durationMs": round((time.time() - started) * 1000)}
+    return {"caseDir": str(case_dir), "inputPath": str(inp), "run": run}
+
+
+def structural_precheck_text(result):
+    params = result.get("params") or {}
+    material = params.get("material") or {}
+    geometry = result.get("geometry") or {}
+    toolchain = result.get("toolchain") or {}
+    lines = [
+        "# Mechanical/Structural Preflight",
+        "",
+        "This is a first-pass engineering package. It does not claim final strength until real loads, constraints, material/process data, mesh quality, and solver results are validated.",
+        "",
+        "## Request",
+        "",
+        result.get("promptExcerpt") or params.get("promptExcerpt") or "",
+        "",
+        "## Design Inputs",
+        "",
+        f"- Load assumption: {params.get('loadN', 100.0):.3f} N.",
+        f"- Safety factor target: {params.get('safetyFactor', 2.5):.2f}.",
+        f"- Material: {material.get('label', 'unknown')} ({'assumed' if material.get('assumed') else 'from prompt'}).",
+        f"- Elastic modulus: {material.get('elasticModulusMpa')} MPa.",
+        f"- Nominal yield/allowable reference: {material.get('yieldMpa')} MPa before safety factor/process knockdowns.",
+        f"- Material note: {material.get('notes', '')}",
+        "",
+        "## Geometry",
+        "",
+        f"- Source geometry: `{result.get('geometryPath') or 'not found'}`",
+        f"- Solver/preflight STL: `{result.get('solverStlPath') or 'not generated'}`",
+        f"- Mesh read: faces={geometry.get('faces', 0)} vertices={geometry.get('vertices', 0)} extents={geometry.get('extents')} watertight={geometry.get('watertight')}",
+        "",
+        "## Toolchain",
+        "",
+        f"- FreeCAD: {toolchain.get('commands', {}).get('freecad') or 'missing'}",
+        f"- CalculiX ccx: {toolchain.get('commands', {}).get('ccx') or 'missing'}",
+        f"- Gmsh/mesh tools: gmsh={toolchain.get('commands', {}).get('gmsh') or 'missing'} meshio={toolchain.get('pythonModules', {}).get('meshio')}",
+        f"- Visualization: paraview={toolchain.get('commands', {}).get('paraview') or 'missing'} pyvista={toolchain.get('pythonModules', {}).get('pyvista')}",
+        "",
+        "## Required Engineering Questions",
+        "",
+        "1. Where is the part fixed, clamped, bolted, or constrained?",
+        "2. What is the real load magnitude, direction, and whether it is static, shock, vibration, or fatigue?",
+        "3. What material, process, infill/walls, layer orientation, or machining direction will be used?",
+        "4. What deflection limit matters, not just whether it breaks?",
+        "5. What safety factor is required for people, equipment, heat, UV, creep, and consequence of failure?",
+    ]
+    seed = result.get("calculixSeed") or {}
+    if seed:
+        run = seed.get("run") or {}
+        lines.extend(
+            [
+                "",
+                "## CalculiX Seed Case",
+                "",
+                f"- Input deck: `{seed.get('inputPath')}`",
+                f"- Case folder: `{seed.get('caseDir')}`",
+                f"- Solver ran: {run.get('ran', False)}",
+                f"- Solver passed: {run.get('ok', False)}",
+                f"- Result FRD: `{run.get('frdPath') or 'not generated'}`",
+                "",
+                "The seed case is a bounding-box sanity case, not the final FEA mesh. Its purpose is to verify the local solver path and give the agent a concrete CalculiX starting point.",
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
+def stage_structural_fea_preflight(messages, cwd="", target_path=None):
+    params = structural_analysis_parameters(messages)
+    slug = slugify(latest_user_text(messages), fallback="structural-fea")[:48]
+    target = Path(target_path).expanduser() if target_path else LOCAL_STRUCTURAL_OUTPUT_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}-{slug}"
+    target.mkdir(parents=True, exist_ok=True)
+    resolved = resolve_geometry_file(messages, cwd=cwd)
+    toolchain = structural_toolchain_status()
+    result = {
+        "ok": False,
+        "targetDir": str(target),
+        "geometryPath": "",
+        "geometrySource": resolved.get("source", ""),
+        "searched": resolved.get("searched", [])[:30],
+        "params": params,
+        "promptExcerpt": compact(latest_user_text(messages), 1000),
+        "toolchain": toolchain,
+    }
+    analysis = {}
+    if resolved.get("path"):
+        source = Path(resolved["path"]).expanduser()
+        copied_name = sanitize_filename(source.name, fallback="source-geometry")
+        copied_source = target / copied_name
+        shutil.copy2(source, copied_source)
+        solver_stl = target / f"{slug or 'structural-fea'}_preflight_surface.stl"
+        conversion = convert_geometry_to_stl(copied_source, solver_stl)
+        result.update(
+            {
+                "geometryPath": str(source),
+                "copiedGeometryPath": str(copied_source),
+                "solverStlPath": str(solver_stl) if solver_stl.exists() else "",
+                "conversion": conversion,
+            }
+        )
+        if conversion.get("ok"):
+            analysis = analyze_stl_geometry(solver_stl)
+            result["geometry"] = analysis
+    seed = write_calculix_seed_case(
+        target,
+        params,
+        analysis if analysis.get("ok") else None,
+        source_label="geometry bounding box" if result.get("geometryPath") else "dimension/default bounding box",
+    )
+    result["calculixSeed"] = seed
+    result["ok"] = bool(toolchain.get("solverAvailable") and seed.get("run", {}).get("ran"))
+    result["precheckPath"] = str(target / "STRUCTURAL_FEA_PRECHECK.md")
+    result["caseSetupPath"] = str(target / "case_setup.json")
+    (target / "case_setup.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (target / "STRUCTURAL_FEA_PRECHECK.md").write_text(structural_precheck_text(result), encoding="utf-8")
+    return result
+
+
+def structural_fea_preflight_working_notes(result):
+    notes = ["Classified this as a mechanical/structural design request, so I am checking loads, material, geometry, and FEA readiness first."]
+    material = (result.get("params") or {}).get("material") or {}
+    notes.append(f"Material basis: {material.get('label', 'unknown')} with safety factor target {(result.get('params') or {}).get('safetyFactor', 2.5)}.")
+    if result.get("geometryPath"):
+        geometry = result.get("geometry") or {}
+        notes.append(f"Resolved geometry: {result.get('geometryPath')} with extents {geometry.get('extents')} mm.")
+    else:
+        notes.append("No geometry was found, so I staged the preflight and a default/dimension-based CalculiX seed case instead of inventing final stress results.")
+    seed = result.get("calculixSeed") or {}
+    run = seed.get("run") or {}
+    notes.append("Ran CalculiX seed case." if run.get("ran") else "CalculiX seed case was staged but not run.")
+    return notes
+
+
+def format_structural_fea_preflight_answer(result):
+    params = result.get("params") or {}
+    material = params.get("material") or {}
+    seed = result.get("calculixSeed") or {}
+    run = seed.get("run") or {}
+    lines = [
+        "I staged a mechanical/structural preflight package for that part.",
+        "",
+        f"- Preflight: `{result.get('precheckPath')}`",
+        f"- Case setup: `{result.get('caseSetupPath')}`",
+        f"- CalculiX input deck: `{seed.get('inputPath')}`",
+        f"- CalculiX case folder: `{seed.get('caseDir')}`",
+        f"- CalculiX result: `{run.get('frdPath') or 'not generated'}`",
+    ]
+    if result.get("geometryPath"):
+        geometry = result.get("geometry") or {}
+        lines.extend(
+            [
+                f"- Source geometry: `{result.get('geometryPath')}`",
+                f"- Mesh read: {geometry.get('faces', 0)} faces, {geometry.get('vertices', 0)} vertices, extents {geometry.get('extents')} mm, watertight={geometry.get('watertight')}",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            f"Engineering basis: load assumption {params.get('loadN', 100.0):.1f} N, safety factor {params.get('safetyFactor', 2.5):.2f}, material {material.get('label', 'unknown')}.",
+            f"This is why: mechanical design needs loads, constraints, material/process data, and failure modes before geometry is trustworthy. CalculiX available={result.get('toolchain', {}).get('solverAvailable')}, mesh tools available={result.get('toolchain', {}).get('meshAvailable')}, CAD available={result.get('toolchain', {}).get('cadAvailable')}.",
+            "You should also consider: this is not final validated FEA yet. The seed case proves the solver path and creates a starting deck; the next pass needs real constraints, bolt/contact details, print orientation or machining process, mesh refinement, and result review.",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def stage_inferred_cpap_duct_design(target, stl_path, constraints, analysis, toolchain, case_dir):
@@ -11154,6 +11595,64 @@ def package_health_report():
         add("tools:aero-cfd-preflight", "fail", str(exc))
 
     try:
+        toolchain = structural_toolchain_status()
+        ok = (
+            toolchain.get("solverAvailable")
+            and toolchain.get("cadAvailable")
+            and toolchain.get("meshAvailable")
+        )
+        add(
+            "tools:structural-fea-toolchain",
+            "pass" if ok else "fail",
+            f"ccx={toolchain.get('solverAvailable')} cad={toolchain.get('cadAvailable')} mesh={toolchain.get('meshAvailable')} visualization={toolchain.get('visualizationAvailable')}",
+        )
+    except Exception as exc:
+        add("tools:structural-fea-toolchain", "fail", str(exc))
+
+    try:
+        import trimesh
+
+        LOCAL_STRUCTURAL_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="health-structural-", dir=str(LOCAL_STRUCTURAL_OUTPUT_DIR)) as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            source_stl = tmp_path / "health bracket.stl"
+            trimesh.creation.box(extents=(60, 20, 8)).export(source_stl)
+            structural_messages = [
+                {
+                    "role": "user",
+                    "text": "Design and analyze this PET-CF bracket STL for a 100 N load with safety factor 3.",
+                    "attachments": [
+                        {
+                            "name": source_stl.name,
+                            "path": str(source_stl),
+                            "size": source_stl.stat().st_size,
+                        }
+                    ],
+                }
+            ]
+            result = stage_structural_fea_preflight(structural_messages, cwd=tmp_dir, target_path=tmp_path / "case")
+            answer = format_structural_fea_preflight_answer(result)
+            seed = result.get("calculixSeed") or {}
+            run = seed.get("run") or {}
+            ok = (
+                is_structural_mechanical_design_request(structural_messages)
+                and result.get("ok")
+                and Path(result.get("precheckPath", "")).exists()
+                and Path(result.get("caseSetupPath", "")).exists()
+                and Path(seed.get("inputPath", "")).exists()
+                and run.get("ran")
+                and "mechanical/structural preflight package" in answer
+                and "not final validated FEA yet" in answer
+            )
+        add(
+            "tools:structural-fea-preflight",
+            "pass" if ok else "fail",
+            "structural requests stage CalculiX seed case and validation limits",
+        )
+    except Exception as exc:
+        add("tools:structural-fea-preflight", "fail", str(exc))
+
+    try:
         hose_messages = [
             {
                 "role": "user",
@@ -11375,6 +11874,27 @@ def package_health_report():
         )
     except Exception as exc:
         add("analysis:aero-cfd-routing", "fail", str(exc))
+
+    try:
+        structural_messages = [
+            {
+                "role": "user",
+                "text": "Design a PET-CF bracket mount and analyze whether it will hold a 100 N load with safety factor 3.",
+            }
+        ]
+        structural_route = route_manager(structural_messages, requested_profile="manager", web_search="live")
+        ok = (
+            is_structural_mechanical_design_request(structural_messages)
+            and structural_route.get("projectId") == "cad-modeling-projects"
+            and structural_route.get("engine") == "local"
+        )
+        add(
+            "analysis:structural-fea-routing",
+            "pass" if ok else "fail",
+            f"{structural_route.get('projectId')} via {structural_route.get('engine')}",
+        )
+    except Exception as exc:
+        add("analysis:structural-fea-routing", "fail", str(exc))
 
     try:
         cad_prompt = (
@@ -11887,6 +12407,9 @@ def task_contract(messages, route=None):
     elif is_aero_cfd_analysis_request(messages):
         kind = "Aero/CFD preflight"
         done = "Resolve geometry, inspect mesh readiness, stage OpenFOAM-ready analysis files, and clearly separate preflight from solved CFD."
+    elif is_structural_mechanical_design_request(messages):
+        kind = "Mechanical/structural preflight"
+        done = "Identify loads, constraints, material/process assumptions, failure modes, and stage CalculiX-ready files without claiming final strength."
     elif is_cad_design_request(messages) or is_cad_artifact_tool_request(messages):
         kind = "CAD/design deliverable"
         done = "Create or specify importable CAD artifacts, explain design choices, list assumptions, and state validation status."
@@ -11978,7 +12501,7 @@ def extract_assumption_ledger(messages, route, answer, contract=None):
     if "assume" in lower or "assumes" in lower:
         match = re.search(r"(?is)([^.\n]*assum(?:e|es|ed|ption)[^.\n]*(?:[.\n]|$))", str(answer or ""))
         add("Assumption", match.group(1).strip() if match else "The answer includes an explicit assumption.", "assumed")
-    if "no full cfd" in lower or "not pretending this is validated" in lower or "not validated" in lower or "not solved cfd" in lower or "not a completed cfd" in lower:
+    if "no full cfd" in lower or "not pretending this is validated" in lower or "not validated" in lower or "not solved cfd" in lower or "not a completed cfd" in lower or "not final validated fea" in lower or "not final strength" in lower:
         add("Validation", "Full validation was not claimed; the answer marks the remaining validation work.", "limited")
     if "offline" in lower or "unreachable" in lower or "blocked" in lower:
         add("Blocker", "The answer identifies a blocker or unreachable dependency.", "blocked")
@@ -12020,11 +12543,11 @@ def response_scorecard(messages, route, answer, contract=None, deliverables=None
         (not direct_needed) or ("this is why:" in lower and "you should also consider:" in lower),
         "Direct answers should include why and what to consider.",
     )
-    if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable", "Aero/CFD preflight", "File/action", "Code/config"}:
+    if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable", "Aero/CFD preflight", "Mechanical/structural preflight", "File/action", "Code/config"}:
         add("Deliverables visible", bool(deliverables), "Created or referenced files should be visible and clickable.")
     else:
         add("No wrong artifact route", not (contract.get("kind") == "CAD reference" and answer_has_cad_artifact(text)), "Reference questions should not stage artifacts.")
-    if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable", "Aero/CFD preflight"}:
+    if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable", "Aero/CFD preflight", "Mechanical/structural preflight"}:
         add("Assumptions/validation shown", bool(assumptions), "Engineering work should show assumptions or validation limits.")
     score = int(round(100 * sum(1 for check in checks if check["passed"]) / max(1, len(checks))))
     return {"score": score, "status": "pass" if score >= 80 else "review", "checks": checks}
@@ -12955,6 +13478,24 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             self.send_json(result)
             return
 
+        if parsed.path == "/api/tools/structural-fea-preflight":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self.send_error(400, "Invalid JSON")
+                return
+            try:
+                result = stage_structural_fea_preflight(
+                    payload.get("messages") if isinstance(payload.get("messages"), list) else [],
+                    cwd=safe_cwd(payload.get("cwd")),
+                    target_path=payload.get("targetPath") or payload.get("targetDir"),
+                )
+            except Exception as exc:
+                result = {"ok": False, "error": str(exc)}
+            self.send_json(result)
+            return
+
         if parsed.path == "/api/files/open":
             length = int(self.headers.get("Content-Length", "0") or "0")
             try:
@@ -13477,6 +14018,77 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 route,
                 admin_topic,
                 format_aero_cfd_preflight_answer(tool_result),
+                normalize=False,
+            )
+            json_line(self, {"type": "done", "returnCode": 0 if tool_result.get("ok") else 1})
+            return
+
+        if is_structural_mechanical_design_request(messages):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            json_line(
+                self,
+                {
+                    "type": "status",
+                    "message": "starting",
+                    "cwd": cwd,
+                    "profile": profile,
+                    "effectiveProfile": effective_profile,
+                    "accessLevel": "local-files",
+                    "reasoningLevel": reasoning_level,
+                    "webSearch": web_search,
+                    "managerDepth": manager_depth,
+                    "friendlinessLevel": friendliness_level,
+                    "humorLevel": humor_level,
+                    "mode": "structural-fea-preflight",
+                    "engine": "local-tool",
+                    "model": "",
+                    "freeOnlyRedirect": free_only_redirect,
+                    "route": route,
+                    "adminTopic": admin_topic,
+                },
+            )
+            json_line(
+                self,
+                {
+                    "type": "thought",
+                    "text": "Recognized this as mechanical/structural design, so I am checking loads, constraints, materials, and solver readiness first.",
+                },
+            )
+            json_line(
+                self,
+                {
+                    "type": "thought",
+                    "text": "Staging a CalculiX-backed structural preflight instead of claiming strength from geometry alone.",
+                },
+            )
+            try:
+                tool_result = stage_structural_fea_preflight(messages, cwd=cwd)
+                for note in structural_fea_preflight_working_notes(tool_result):
+                    json_line(self, {"type": "thought", "text": note})
+            except Exception as exc:
+                tool_result = {
+                    "ok": False,
+                    "error": str(exc),
+                    "targetDir": str(LOCAL_STRUCTURAL_OUTPUT_DIR),
+                    "searched": [],
+                }
+                json_line(
+                    self,
+                    {
+                        "type": "thought",
+                        "text": f"Mechanical/structural preflight failed before finalizing: {exc}",
+                    },
+                )
+            emit_assistant_answer(
+                self,
+                messages,
+                route,
+                admin_topic,
+                format_structural_fea_preflight_answer(tool_result),
                 normalize=False,
             )
             json_line(self, {"type": "done", "returnCode": 0 if tool_result.get("ok") else 1})
