@@ -1282,6 +1282,61 @@ h1 {
   background: #f7faff;
 }
 
+.message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  gap: 6px;
+  border: 1px solid #cdd9e8;
+  border-radius: 8px;
+  padding: 5px 8px;
+  background: #f7fafc;
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.25;
+}
+
+.attachment-name {
+  overflow: hidden;
+  max-width: 360px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-size {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.attachment-remove {
+  display: grid;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.attachment-remove:hover {
+  background: #e9eff7;
+  color: var(--text);
+}
+
 .message.assistant .message-body {
   border-color: #d7e2dc;
 }
@@ -1551,6 +1606,24 @@ h1 {
   box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.04);
 }
 
+.composer-wrap.drop-active {
+  background: #eef6ff;
+  box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.22), 0 -8px 24px rgba(15, 23, 42, 0.04);
+}
+
+.attachment-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+  max-width: 940px;
+  margin: 7px auto 0;
+}
+
+.attachment-tray[hidden] {
+  display: none;
+}
+
 .run-controls {
   display: flex;
   flex-wrap: nowrap;
@@ -1715,7 +1788,7 @@ h1 {
 
 .composer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 44px;
+  grid-template-columns: 36px minmax(0, 1fr) 44px;
   gap: 10px;
   width: 100%;
   max-width: 940px;
@@ -1749,7 +1822,27 @@ input:focus {
   font-size: 21px;
 }
 
+.attach-button {
+  width: 36px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--muted-strong);
+  font-size: 20px;
+  font-weight: 800;
+  box-shadow: var(--shadow);
+}
+
+.attach-button:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
 .send-button:disabled,
+.attach-button:disabled,
 .icon-text-button:disabled,
 .icon-button:disabled,
 .switch-button:disabled {

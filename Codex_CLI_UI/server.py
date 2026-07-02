@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+import base64
 import concurrent.futures
+import importlib.util
 import json
 import hashlib
 import html
@@ -38,6 +40,7 @@ GOLDEN_TEST_RESULTS_PATH = DATA_DIR / "golden_test_results.json"
 MODEL_WARMUP_STATE_PATH = DATA_DIR / "model_warmup_state.json"
 LOCAL_TOOL_OUTPUT_DIR = DATA_DIR / "generated" / "printer-macros"
 LOCAL_CAD_OUTPUT_DIR = DATA_DIR / "generated" / "cad"
+UPLOAD_DIR = DATA_DIR / "uploads"
 CAPABILITY_TOOL_LOG_PATH = DATA_DIR / "capability_tool_log.jsonl"
 AUTONOMY_SUPERVISOR_LOG_PATH = DATA_DIR / "autonomy_supervisor.jsonl"
 MIN_FREE_BYTES_FOR_AUTO_INSTALL = int(
@@ -46,6 +49,7 @@ MIN_FREE_BYTES_FOR_AUTO_INSTALL = int(
 MAX_AUTO_INSTALL_BYTES = int(
     os.environ.get("CODEX_MAX_AUTO_INSTALL_BYTES", str(2 * 1024 * 1024 * 1024))
 )
+MAX_UPLOAD_BYTES = int(os.environ.get("CODEX_MAX_UPLOAD_BYTES", str(250 * 1024 * 1024)))
 CODEX_BIN = os.environ.get(
     "CODEX_BIN", "/Applications/Codex.app/Contents/Resources/codex"
 )
@@ -2412,6 +2416,46 @@ def write_json_atomic(path, value):
 def slugify(value, fallback="topic"):
     slug = re.sub(r"[^a-z0-9]+", "-", str(value or "").lower()).strip("-")
     return slug[:80] or fallback
+
+
+def sanitize_filename(value, fallback="attachment.bin"):
+    name = Path(str(value or fallback)).name
+    name = re.sub(r"[^A-Za-z0-9._ -]+", "_", name).strip(" .")
+    return name[:180] or fallback
+
+
+def save_uploaded_file(payload):
+    name = sanitize_filename(payload.get("name"), fallback="attachment.bin")
+    raw_size = int(payload.get("size") or 0)
+    data_text = str(payload.get("dataBase64") or "")
+    if "," in data_text and data_text.lower().startswith("data:"):
+        data_text = data_text.split(",", 1)[1]
+    if raw_size > MAX_UPLOAD_BYTES:
+        raise ValueError(f"Upload is too large: {human_bytes(raw_size)} > {human_bytes(MAX_UPLOAD_BYTES)}")
+    try:
+        data = base64.b64decode(data_text, validate=True)
+    except Exception as exc:
+        raise ValueError(f"Attachment data is not valid base64: {exc}") from exc
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise ValueError(f"Upload is too large: {human_bytes(len(data))} > {human_bytes(MAX_UPLOAD_BYTES)}")
+    if raw_size and abs(raw_size - len(data)) > 1:
+        raise ValueError("Attachment size did not match the uploaded data.")
+
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    target = UPLOAD_DIR / f"{stamp}-{name}"
+    suffix = 1
+    while target.exists():
+        target = UPLOAD_DIR / f"{stamp}-{suffix}-{name}"
+        suffix += 1
+    target.write_bytes(data)
+    return {
+        "ok": True,
+        "name": name,
+        "path": str(target),
+        "size": len(data),
+        "contentType": str(payload.get("type") or "application/octet-stream"),
+    }
 
 
 def default_admin_state():
@@ -5177,6 +5221,10 @@ def local_tool_catalog():
             "stage": "POST /api/tools/cad-artifact",
             "description": "Stage a Fusion 360 Python script, OpenSCAD model, and README for a CAD design request.",
         },
+        "stlCfdDuctPreflight": {
+            "run": "automatic on STL + CPAP/part-cooling duct requests",
+            "description": "Find attached or named STL files, inspect mesh geometry, capture clearance/wall constraints, and stage an OpenFOAM-ready CFD preflight before any generic duct template can answer.",
+        },
     }
 
 
@@ -5194,6 +5242,7 @@ def build_local_tools_context():
             "- For Klipper acceleration/RGB macro staging, call `POST http://127.0.0.1:8765/api/tools/klipper-accel-rgb`.",
             "- These Klipper tools write only local files. Do not upload, restart, or alter a live printer unless idle/standby has been verified through Moonraker.",
             "- For CAD artifact staging, call `POST http://127.0.0.1:8765/api/tools/cad-artifact` with JSON like `{\"prompt\":\"design a CPAP cooling duct for Fusion 360\"}`.",
+            "- For STL-based CPAP/part-cooling duct requests, use the automatic STL/CFD preflight first; do not use the generic CPAP CAD artifact path until the STL is found and inspected.",
             "",
         ]
     )
@@ -6159,6 +6208,726 @@ def format_cad_artifact_result_answer(result, recovered_from_error="", web_evide
         ]
     )
     return "\n\n".join(sections)
+
+
+def message_attachments(messages):
+    attachments = []
+    for message in messages or []:
+        for item in message.get("attachments") or []:
+            if isinstance(item, dict):
+                attachments.append(item)
+    return attachments
+
+
+def stl_names_from_text(text):
+    names = []
+    pattern = re.compile(r"([A-Za-z0-9_./~()#&+ -]{1,180}\.stl)", re.IGNORECASE)
+    for match in pattern.finditer(str(text or "")):
+        name = match.group(1).strip().strip("`'\"")
+        if name:
+            names.append(name)
+    return names
+
+
+def iter_named_file_matches(root, basename, max_depth=4, limit=12):
+    root = Path(root).expanduser()
+    if not root.exists() or not root.is_dir():
+        return []
+    matches = []
+    base_depth = len(root.parts)
+    try:
+        for current_root, dirnames, filenames in os.walk(root):
+            current = Path(current_root)
+            depth = len(current.parts) - base_depth
+            if depth >= max_depth:
+                dirnames[:] = []
+            if basename in filenames:
+                matches.append(current / basename)
+                if len(matches) >= limit:
+                    break
+    except OSError:
+        return matches
+    return matches
+
+
+def resolve_stl_file(messages, cwd=""):
+    attachments = message_attachments(messages)
+    for attachment in reversed(attachments):
+        name = str(attachment.get("name") or "")
+        path = str(attachment.get("path") or "")
+        if name.lower().endswith(".stl") or path.lower().endswith(".stl"):
+            candidate = Path(path).expanduser()
+            if candidate.exists() and candidate.is_file():
+                return {
+                    "path": candidate,
+                    "source": "attached upload",
+                    "name": name or candidate.name,
+                    "searched": [],
+                }
+
+    latest = latest_user_text(messages)
+    refs = stl_names_from_text(latest)
+    searched = []
+    roots = [
+        Path(cwd or DEFAULT_CWD).expanduser(),
+        APP_DIR / "CPAP Inputs",
+        APP_DIR,
+        UPLOAD_DIR,
+        Path(DEFAULT_CWD).expanduser(),
+        Path.home() / "Downloads",
+        Path.home() / "Desktop",
+        Path.home() / "Documents",
+    ]
+    seen_roots = []
+    for ref in refs:
+        ref_path = Path(ref).expanduser()
+        direct_candidates = []
+        if ref_path.is_absolute():
+            direct_candidates.append(ref_path)
+        else:
+            for root in roots:
+                direct_candidates.append(root / ref_path)
+        for candidate in direct_candidates:
+            searched.append(str(candidate))
+            if candidate.exists() and candidate.is_file():
+                return {
+                    "path": candidate,
+                    "source": "filename reference",
+                    "name": candidate.name,
+                    "searched": searched,
+                }
+        basename = ref_path.name
+        for root in roots[:5]:
+            root = Path(root)
+            if root in seen_roots:
+                continue
+            seen_roots.append(root)
+            for candidate in iter_named_file_matches(root, basename, max_depth=4, limit=6):
+                searched.append(str(candidate))
+                if candidate.exists() and candidate.is_file():
+                    return {
+                        "path": candidate,
+                        "source": "filename search",
+                        "name": candidate.name,
+                        "searched": searched,
+                    }
+    return {"path": None, "source": "", "name": refs[0] if refs else "", "searched": searched}
+
+
+def is_stl_cfd_duct_design_request(messages):
+    query = latest_user_text(messages).lower()
+    attachments = message_attachments(messages)
+    has_stl = ".stl" in query or any(
+        str(item.get("name") or item.get("path") or "").lower().endswith(".stl")
+        for item in attachments
+    )
+    if not has_stl:
+        return False
+    duct_terms = ("duct", "cooling", "part cooling", "cpap", "airflow", "tube")
+    action_terms = ("design", "connect", "routing", "route", "clearance", "wall thickness", "cfd", "smooth")
+    return text_has_any(query, duct_terms) and text_has_any(query, action_terms)
+
+
+def extract_stl_cfd_constraints(messages):
+    text = "\n".join(
+        str(message.get("text", ""))
+        for message in (messages or [])[-8:]
+        if str(message.get("role", "")).lower() == "user"
+    )
+    latest = latest_user_text(messages)
+    flow_given = bool(re.search(r"\bcfm\b", text, re.IGNORECASE))
+    dimensions = cad_request_dimensions(text)
+    named_features = sorted(
+        {
+            compact(match.group(0), 80)
+            for match in re.finditer(r"\bCPAP\s+(?:inlet|outlet)\s+\d+\b", text, re.IGNORECASE)
+        }
+    )
+    return {
+        "clearanceMm": cad_number(r"([0-9]+(?:\.[0-9]+)?)\s*mm\s+clearance", latest, 1.5),
+        "wallThicknessMm": cad_number_any(
+            (
+                r"([0-9]+(?:\.[0-9]+)?)\s*mm\s+wall(?:\s+thickness)?",
+                r"wall\s+thickness(?:\s+should\s+be|\s+is|\s*=|\s*:)?[^0-9]{0,16}([0-9]+(?:\.[0-9]+)?)\s*mm",
+            ),
+            latest,
+            1.0,
+        ),
+        "maxGrowthMm": cad_number_any(
+            (
+                r"max[^0-9]{0,80}([0-9]+(?:\.[0-9]+)?)\s*mm",
+                r"exist\s+away[^0-9]{0,80}([0-9]+(?:\.[0-9]+)?)\s*mm",
+            ),
+            latest,
+            5.0,
+        ),
+        "yGrowthMm": cad_number(r"([0-9]+(?:\.[0-9]+)?)\s*mm\s+in\s+the\s+y\s+direction", latest, 0.0),
+        "flowLowCfm": dimensions.get("flowLowCfm", 12.0),
+        "flowHighCfm": dimensions.get("flowHighCfm", 15.0),
+        "flowSpecified": flow_given,
+        "namedFeatures": named_features,
+        "promptExcerpt": compact(latest, 1000),
+    }
+
+
+def round_list(values, digits=3):
+    return [round(float(value), digits) for value in values]
+
+
+def analyze_stl_geometry(path):
+    try:
+        import trimesh
+    except Exception as exc:
+        return {"ok": False, "error": f"trimesh is not available: {exc}"}
+
+    try:
+        loaded = trimesh.load(path, force="scene")
+        scene_names = []
+        meshes = []
+        if isinstance(loaded, trimesh.Scene):
+            scene_names = list(loaded.geometry.keys())
+            meshes = [geometry for geometry in loaded.geometry.values() if hasattr(geometry, "faces")]
+            if not meshes:
+                return {"ok": False, "error": "The STL loaded but did not contain mesh geometry."}
+            mesh = trimesh.util.concatenate(meshes) if len(meshes) > 1 else meshes[0]
+            scene_geometry_count = len(meshes)
+        else:
+            mesh = loaded
+            scene_geometry_count = 1
+        bounds = mesh.bounds.tolist() if getattr(mesh, "bounds", None) is not None else [[0, 0, 0], [0, 0, 0]]
+        extents = mesh.extents.tolist() if getattr(mesh, "extents", None) is not None else [0, 0, 0]
+        parts = []
+        if len(mesh.faces) <= 650000:
+            split_parts = mesh.split(only_watertight=False)
+            for index, part in enumerate(sorted(split_parts, key=lambda item: len(item.faces), reverse=True)[:12]):
+                parts.append(
+                    {
+                        "index": index,
+                        "faces": int(len(part.faces)),
+                        "bounds": [round_list(part.bounds[0]), round_list(part.bounds[1])],
+                        "extents": round_list(part.extents),
+                    }
+                )
+        return {
+            "ok": True,
+            "path": str(path),
+            "fileSize": Path(path).stat().st_size,
+            "sceneGeometryCount": scene_geometry_count,
+            "sceneNames": scene_names[:20],
+            "vertices": int(len(mesh.vertices)),
+            "faces": int(len(mesh.faces)),
+            "bounds": [round_list(bounds[0]), round_list(bounds[1])],
+            "extents": round_list(extents),
+            "watertight": bool(getattr(mesh, "is_watertight", False)),
+            "connectedComponentCount": len(parts) if parts else 0,
+            "largestComponents": parts,
+        }
+    except Exception as exc:
+        return {"ok": False, "error": f"Could not read STL mesh: {exc}"}
+
+
+def python_module_available(name):
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def docker_openfoam_status():
+    docker = command_path("docker")
+    if not docker:
+        return {"dockerPath": "", "daemon": False, "images": []}
+    try:
+        info = subprocess.run(
+            [docker, "info", "--format", "{{.ServerVersion}}"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5,
+            env={**os.environ, "PATH": PATH_FOR_CODEX},
+        )
+        daemon = info.returncode == 0
+    except Exception:
+        daemon = False
+    images = []
+    if daemon:
+        try:
+            listing = subprocess.run(
+                [docker, "image", "ls", "--format", "{{.Repository}}:{{.Tag}}"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=8,
+                env={**os.environ, "PATH": PATH_FOR_CODEX},
+            )
+            images = [
+                line.strip()
+                for line in (listing.stdout or "").splitlines()
+                if "openfoam" in line.lower()
+            ][:8]
+        except Exception:
+            images = []
+    return {"dockerPath": docker, "daemon": daemon, "images": images}
+
+
+def cfd_toolchain_status():
+    commands = {
+        "openscad": command_path("openscad"),
+        "gmsh": command_path("gmsh"),
+        "simpleFoam": command_path("simpleFoam"),
+        "blockMesh": command_path("blockMesh"),
+        "snappyHexMesh": command_path("snappyHexMesh"),
+        "surfaceFeatureExtract": command_path("surfaceFeatureExtract"),
+        "checkMesh": command_path("checkMesh"),
+        "freecad": command_path("FreeCADCmd") or command_path("freecad"),
+    }
+    modules = {
+        "trimesh": python_module_available("trimesh"),
+        "meshio": python_module_available("meshio"),
+        "gmsh": python_module_available("gmsh"),
+        "pyvista": python_module_available("pyvista"),
+        "cadquery": python_module_available("cadquery"),
+        "OCP": python_module_available("OCP"),
+    }
+    docker = docker_openfoam_status()
+    openfoam_local = bool(commands["simpleFoam"] and commands["blockMesh"] and commands["snappyHexMesh"])
+    openfoam_docker = bool(docker.get("daemon") and docker.get("images"))
+    return {
+        "commands": commands,
+        "pythonModules": modules,
+        "docker": docker,
+        "openfoamAvailable": openfoam_local or openfoam_docker,
+        "openfoamLocal": openfoam_local,
+        "openfoamDocker": openfoam_docker,
+        "meshingAvailable": bool(commands["gmsh"] or modules["gmsh"] or modules["meshio"]),
+    }
+
+
+def write_openfoam_case_skeleton(target, copied_stl_name, constraints, analysis, toolchain):
+    case_dir = target / "openfoam_case"
+    for folder in (
+        case_dir / "0",
+        case_dir / "constant" / "triSurface",
+        case_dir / "system",
+    ):
+        folder.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(target / copied_stl_name, case_dir / "constant" / "triSurface" / "source.stl")
+    (case_dir / "0" / "U").write_text(
+        """FoamFile
+{
+    version 2.0;
+    format ascii;
+    class volVectorField;
+    object U;
+}
+dimensions [0 1 -1 0 0 0 0];
+internalField uniform (0 0 0);
+boundaryField
+{
+    inlet { type fixedValue; value uniform (0 0 0); }
+    outlets { type pressureInletOutletVelocity; value uniform (0 0 0); }
+    walls { type noSlip; }
+}
+""",
+        encoding="utf-8",
+    )
+    (case_dir / "0" / "p").write_text(
+        """FoamFile
+{
+    version 2.0;
+    format ascii;
+    class volScalarField;
+    object p;
+}
+dimensions [0 2 -2 0 0 0 0];
+internalField uniform 0;
+boundaryField
+{
+    inlet { type zeroGradient; }
+    outlets { type fixedValue; value uniform 0; }
+    walls { type zeroGradient; }
+}
+""",
+        encoding="utf-8",
+    )
+    (case_dir / "constant" / "transportProperties").write_text(
+        """FoamFile
+{
+    version 2.0;
+    format ascii;
+    class dictionary;
+    object transportProperties;
+}
+transportModel Newtonian;
+nu [0 2 -1 0 0 0 0] 1.5e-05;
+""",
+        encoding="utf-8",
+    )
+    (case_dir / "system" / "controlDict").write_text(
+        """FoamFile
+{
+    version 2.0;
+    format ascii;
+    class dictionary;
+    object controlDict;
+}
+application simpleFoam;
+startFrom startTime;
+startTime 0;
+stopAt endTime;
+endTime 500;
+deltaT 1;
+writeControl timeStep;
+writeInterval 100;
+purgeWrite 0;
+functions {}
+""",
+        encoding="utf-8",
+    )
+    (case_dir / "system" / "fvSchemes").write_text(
+        """FoamFile
+{
+    version 2.0;
+    format ascii;
+    class dictionary;
+    object fvSchemes;
+}
+ddtSchemes { default steadyState; }
+gradSchemes { default Gauss linear; }
+divSchemes
+{
+    default none;
+    div(phi,U) bounded Gauss linearUpwind grad(U);
+    div((nuEff*dev2(T(grad(U))))) Gauss linear;
+}
+laplacianSchemes { default Gauss linear corrected; }
+interpolationSchemes { default linear; }
+snGradSchemes { default corrected; }
+wallDist { method meshWave; }
+""",
+        encoding="utf-8",
+    )
+    (case_dir / "system" / "fvSolution").write_text(
+        """FoamFile
+{
+    version 2.0;
+    format ascii;
+    class dictionary;
+    object fvSolution;
+}
+solvers
+{
+    p { solver GAMG; tolerance 1e-7; relTol 0.1; smoother GaussSeidel; }
+    U { solver smoothSolver; smoother symGaussSeidel; tolerance 1e-8; relTol 0.1; }
+}
+SIMPLE
+{
+    nNonOrthogonalCorrectors 0;
+    residualControl { p 1e-4; U 1e-5; }
+}
+relaxationFactors
+{
+    fields { p 0.3; }
+    equations { U 0.7; }
+}
+""",
+        encoding="utf-8",
+    )
+    (case_dir / "README.md").write_text(
+        "\n".join(
+            [
+                "# OpenFOAM Case Skeleton",
+                "",
+                "This is a CFD case scaffold, not a complete simulation result.",
+                "",
+                "Before running `simpleFoam`, the duct body must exist and the inlet/outlet/wall patches must be named.",
+                "The uploaded STL is copied to `constant/triSurface/source.stl` for surface checking and meshing setup.",
+                "",
+                "Boundary targets from Tinman's prompt:",
+                f"- Minimum clearance: {constraints['clearanceMm']:.2f} mm",
+                f"- Wall thickness: {constraints['wallThicknessMm']:.2f} mm",
+                f"- Maximum outward growth: {constraints['maxGrowthMm']:.2f} mm",
+                f"- Y-direction growth: {constraints['yGrowthMm']:.2f} mm",
+                "",
+                "Geometry summary:",
+                f"- Faces: {analysis.get('faces', 0)}",
+                f"- Connected components inspected: {analysis.get('connectedComponentCount', 0)}",
+                "",
+                "Toolchain:",
+                f"- OpenFOAM local commands: {toolchain.get('openfoamLocal')}",
+                f"- OpenFOAM Docker images: {', '.join(toolchain.get('docker', {}).get('images') or []) or 'none detected'}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return case_dir
+
+
+def stage_stl_cfd_design_case(messages, cwd="", target_path=None):
+    constraints = extract_stl_cfd_constraints(messages)
+    resolved = resolve_stl_file(messages, cwd=cwd)
+    slug = slugify(latest_user_text(messages), fallback="stl-cfd-duct")[:48]
+    target = Path(target_path).expanduser() if target_path else LOCAL_CAD_OUTPUT_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}-{slug}"
+    target.mkdir(parents=True, exist_ok=True)
+    result = {
+        "ok": False,
+        "targetDir": str(target),
+        "stlPath": "",
+        "stlSource": resolved.get("source", ""),
+        "searched": resolved.get("searched", [])[:30],
+        "constraints": constraints,
+    }
+    if not resolved.get("path"):
+        (target / "README.md").write_text(
+            "\n".join(
+                [
+                    "# STL CFD Duct Preflight",
+                    "",
+                    "No readable STL file was found for this request.",
+                    "",
+                    f"Named STL reference: `{resolved.get('name') or 'none'}`",
+                    "",
+                    "Attach the STL with the + button or drag/drop it into the chat bar, then rerun the design request.",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        result["error"] = "No readable STL file was attached or found from the pasted filename."
+        result["readmePath"] = str(target / "README.md")
+        return result
+
+    stl_path = Path(resolved["path"]).expanduser()
+    copied_stl = sanitize_filename(stl_path.name, fallback="source.stl")
+    shutil.copy2(stl_path, target / copied_stl)
+    analysis = analyze_stl_geometry(stl_path)
+    toolchain = cfd_toolchain_status()
+    case_dir = write_openfoam_case_skeleton(target, copied_stl, constraints, analysis, toolchain) if analysis.get("ok") else None
+    setup = {
+        "sourceStl": str(stl_path),
+        "copiedStl": str(target / copied_stl),
+        "constraints": constraints,
+        "geometry": analysis,
+        "toolchain": toolchain,
+        "requiredNextSteps": [
+            "Identify CPAP Inlet 1 and both CPAP Outlet 1 target patches from named CAD bodies or selected mesh surfaces.",
+            "Generate the duct body with 1 mm walls, at least 1.5 mm clearance, no Y-direction growth, and no more than 5 mm outward growth.",
+            "Name inlet, outlet, and wall patches before running OpenFOAM.",
+            "Run surfaceCheck, mesh generation, checkMesh, then steady internal-flow CFD.",
+        ],
+    }
+    (target / "case_setup.json").write_text(json.dumps(setup, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (target / "CFD_PRECHECK.md").write_text(stl_cfd_precheck_text(setup), encoding="utf-8")
+    run_path = target / "run_openfoam_surface_check.sh"
+    image = (toolchain.get("docker", {}).get("images") or ["opencfd/openfoam-run:2512"])[0]
+    run_path.write_text(
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+case_dir="$(cd "$(dirname "$0")/openfoam_case" && pwd)"
+docker run --rm -v "$case_dir:/case" -w /case {image} bash -lc 'surfaceCheck constant/triSurface/source.stl'
+""",
+        encoding="utf-8",
+    )
+    run_path.chmod(0o755)
+    readme = target / "README.md"
+    readme.write_text(stl_cfd_readme_text(setup, case_dir, run_path), encoding="utf-8")
+    result.update(
+        {
+            "ok": bool(analysis.get("ok")),
+            "stlPath": str(stl_path),
+            "copiedStlPath": str(target / copied_stl),
+            "readmePath": str(readme),
+            "precheckPath": str(target / "CFD_PRECHECK.md"),
+            "caseSetupPath": str(target / "case_setup.json"),
+            "openfoamCaseDir": str(case_dir) if case_dir else "",
+            "surfaceCheckScriptPath": str(run_path),
+            "geometry": analysis,
+            "toolchain": toolchain,
+            "error": "" if analysis.get("ok") else analysis.get("error", "STL analysis failed."),
+        }
+    )
+    return result
+
+
+def stl_cfd_precheck_text(setup):
+    constraints = setup.get("constraints", {})
+    geometry = setup.get("geometry", {})
+    toolchain = setup.get("toolchain", {})
+    components = geometry.get("largestComponents") or []
+    lines = [
+        "# CFD Precheck",
+        "",
+        "This request requires real geometry validation before a final duct can be trusted.",
+        "",
+        "## Captured Constraints",
+        "",
+        f"- Clearance from other components: {constraints.get('clearanceMm', 1.5):.2f} mm minimum.",
+        f"- Wall thickness: {constraints.get('wallThicknessMm', 1.0):.2f} mm.",
+        f"- Maximum outward growth from existing components: {constraints.get('maxGrowthMm', 5.0):.2f} mm.",
+        f"- Y-direction growth limit: {constraints.get('yGrowthMm', 0.0):.2f} mm.",
+        f"- Named features requested: {', '.join(constraints.get('namedFeatures') or []) or 'none found in prompt text'}.",
+        "",
+        "## STL Read",
+        "",
+        f"- Source: `{setup.get('sourceStl')}`",
+        f"- Faces: {geometry.get('faces', 0)}",
+        f"- Vertices: {geometry.get('vertices', 0)}",
+        f"- Overall extents: {geometry.get('extents')}",
+        f"- Watertight: {geometry.get('watertight')}",
+        f"- Scene geometry names preserved: {', '.join(geometry.get('sceneNames') or []) or 'none'}",
+        "",
+        "## Largest Connected Components",
+        "",
+    ]
+    for item in components[:8]:
+        lines.append(
+            f"- Component {item['index']}: {item['faces']} faces, extents {item['extents']}, bounds {item['bounds']}"
+        )
+    if not components:
+        lines.append("- No connected-component split was available.")
+    lines.extend(
+        [
+            "",
+            "## CFD Toolchain",
+            "",
+            f"- OpenFOAM local commands available: {toolchain.get('openfoamLocal')}",
+            f"- OpenFOAM Docker available: {toolchain.get('openfoamDocker')}",
+            f"- Docker OpenFOAM images: {', '.join(toolchain.get('docker', {}).get('images') or []) or 'none'}",
+            f"- Python gmsh/mesh tools: {toolchain.get('pythonModules')}",
+            "",
+            "## Boundary Condition Needed",
+            "",
+            "The STL must provide or be mapped to named inlet/outlet/wall patches. A binary STL often loses Fusion component names, so a STEP/F3D export or manual face selections may be needed before CFD can be run honestly.",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def stl_cfd_readme_text(setup, case_dir, run_path):
+    constraints = setup.get("constraints", {})
+    toolchain = setup.get("toolchain", {})
+    return "\n".join(
+        [
+            "# STL-Based CPAP Duct CFD Package",
+            "",
+            "This folder is the geometry and CFD preflight for the uploaded STL. It replaces the old generic CPAP duct template path.",
+            "",
+            "## Files",
+            "",
+            "- `case_setup.json`: machine-readable mesh, constraints, and toolchain status.",
+            "- `CFD_PRECHECK.md`: human-readable geometry/CFD preflight.",
+            f"- `{case_dir.name}`: OpenFOAM case scaffold with the source STL under `constant/triSurface/source.stl`.",
+            f"- `{run_path.name}`: Docker OpenFOAM surface-check script.",
+            "",
+            "## Design Contract",
+            "",
+            f"- Keep at least {constraints.get('clearanceMm', 1.5):.2f} mm clearance to non-duct components.",
+            f"- Use {constraints.get('wallThicknessMm', 1.0):.2f} mm wall thickness.",
+            f"- Keep the duct within {constraints.get('maxGrowthMm', 5.0):.2f} mm of the existing envelope and {constraints.get('yGrowthMm', 0.0):.2f} mm in Y growth.",
+            "- Use smooth transitions and balanced branches from CPAP Inlet 1 to both upper CPAP Outlet 1 ports.",
+            "",
+            "## CFD Status",
+            "",
+            f"- OpenFOAM Docker images detected: {', '.join(toolchain.get('docker', {}).get('images') or []) or 'none'}",
+            "- A completed CFD run still requires a generated duct body and named boundary patches.",
+            "- Do not call this design CFD-validated until the case has run and outlet balance, pressure drop, and recirculation have been reviewed.",
+        ]
+    ) + "\n"
+
+
+def stl_cfd_case_working_notes(result):
+    if not result.get("ok"):
+        return [
+            "Checked whether the STL was actually attached or only referenced by filename.",
+            "No readable STL file was found, so the tool stopped before inventing duct geometry.",
+        ]
+    geometry = result.get("geometry") or {}
+    toolchain = result.get("toolchain") or {}
+    notes = [
+        f"Found STL from {result.get('stlSource')}: {result.get('stlPath')}.",
+        (
+            f"Read the mesh: {geometry.get('faces', 0)} faces, {geometry.get('vertices', 0)} vertices, "
+            f"overall extents {geometry.get('extents')} mm."
+        ),
+        (
+            f"Split the mesh into connected components for surface discovery; largest component count recorded: "
+            f"{len(geometry.get('largestComponents') or [])}."
+        ),
+        "Captured the hard design constraints: 1.5 mm clearance, 1 mm wall, 5 mm max outward growth, and 0 mm Y growth.",
+    ]
+    if toolchain.get("openfoamDocker"):
+        notes.append(
+            "Found OpenFOAM Docker capability, so CFD can be run after the duct body and named inlet/outlet/wall patches exist."
+        )
+    elif toolchain.get("openfoamLocal"):
+        notes.append("Found local OpenFOAM commands for a future CFD run.")
+    else:
+        notes.append("OpenFOAM solver commands/images are not visible; staged the case and marked CFD as blocked on solver availability.")
+    return notes
+
+
+def format_stl_cfd_case_answer(result):
+    if not result.get("ok"):
+        searched = result.get("searched") or []
+        searched_text = "\n".join(f"- `{path}`" for path in searched[:8]) if searched else "- No local path candidates were available."
+        return "\n\n".join(
+            [
+                "I did not find a readable STL for that request, so I stopped before generating fake duct geometry.",
+                f"This is why: {result.get('error')}",
+                "You should also consider: attach the STL with the `+` button or drag/drop it into the chat bar. If macOS only pastes the filename, put the file in the current project folder and rerun.",
+                f"Preflight folder: `{result.get('targetDir')}`",
+                "Paths checked:\n" + searched_text,
+            ]
+        )
+
+    geometry = result.get("geometry") or {}
+    constraints = result.get("constraints") or {}
+    toolchain = result.get("toolchain") or {}
+    scene_names = geometry.get("sceneNames") or []
+    component_note = (
+        "The STL loaded as one scene geometry, so Fusion body names like `CPAP Inlet 1` and `CPAP Outlet 1` were not preserved in a directly usable way."
+        if len(scene_names) <= 1
+        else f"The STL preserved {len(scene_names)} scene geometry names."
+    )
+    if toolchain.get("openfoamDocker"):
+        cfd_status = (
+            "OpenFOAM Docker images are available on this Mac, so the solver capability is present. "
+            "The remaining blocker is not compute; it is producing the duct body and named inlet/outlet/wall patches from the STL."
+        )
+    elif toolchain.get("openfoamLocal"):
+        cfd_status = "Local OpenFOAM commands are available for the eventual CFD run."
+    else:
+        cfd_status = "No OpenFOAM solver path is visible yet, so CFD is blocked until a free solver is installed or exposed."
+    return "\n\n".join(
+        [
+            "I found the STL and staged an STL-aware CFD/design preflight instead of using the generic CPAP duct template.",
+            "\n".join(
+                [
+                    f"- Source STL: `{result.get('stlPath')}`",
+                    f"- Preflight: `{result.get('precheckPath')}`",
+                    f"- Case setup: `{result.get('caseSetupPath')}`",
+                    f"- OpenFOAM case scaffold: `{result.get('openfoamCaseDir')}`",
+                    f"- Surface-check script: `{result.get('surfaceCheckScriptPath')}`",
+                ]
+            ),
+            (
+                f"Mesh read: {geometry.get('faces', 0)} faces, {geometry.get('vertices', 0)} vertices, "
+                f"overall extents {geometry.get('extents')} mm, watertight={geometry.get('watertight')}. {component_note}"
+            ),
+            (
+                f"Design constraints captured: {constraints.get('clearanceMm', 1.5):.2f} mm clearance, "
+                f"{constraints.get('wallThicknessMm', 1.0):.2f} mm wall thickness, "
+                f"{constraints.get('maxGrowthMm', 5.0):.2f} mm max outward growth, "
+                f"{constraints.get('yGrowthMm', 0.0):.2f} mm Y-direction growth."
+            ),
+            "CFD status: " + cfd_status,
+            (
+                "You should also consider: the next correct engineering step is to identify the inlet/outlet faces from the original CAD/STEP/F3D body names or manual mesh selections, then generate the duct and run the OpenFOAM case. "
+                "The app will now expose that boundary instead of instantly returning a made-up first-pass duct."
+            ),
+        ]
+    )
 
 
 def cad_artifact_recovery_answer(messages, error_text=""):
@@ -7347,6 +8116,52 @@ def package_health_report():
         )
     except Exception as exc:
         add("tools:cad-engineering-brief", "fail", str(exc))
+
+    try:
+        import trimesh
+
+        LOCAL_CAD_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="health-stl-", dir=str(LOCAL_CAD_OUTPUT_DIR)) as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            source_stl = tmp_path / "health duct fixture.stl"
+            trimesh.creation.box(extents=(20, 12, 8)).export(source_stl)
+            stl_messages = [
+                {
+                    "role": "user",
+                    "text": (
+                        "cooling-duct-fixture.stl I need a part cooling duct designed. "
+                        "The bottom of CPAP Inlet 1 needs to connect to both upper CPAP Outlet 1. "
+                        "The routing needs 1.5mm clearance, 1mm wall thickness, max 5mm away, and 0mm in the y direction."
+                    ),
+                    "attachments": [
+                        {
+                            "name": source_stl.name,
+                            "path": str(source_stl),
+                            "size": source_stl.stat().st_size,
+                        }
+                    ],
+                }
+            ]
+            result = stage_stl_cfd_design_case(stl_messages, cwd=tmp_dir, target_path=tmp_path / "case")
+            answer = format_stl_cfd_case_answer(result)
+            ok = (
+                is_stl_cfd_duct_design_request(stl_messages)
+                and result.get("ok")
+                and Path(result.get("precheckPath", "")).exists()
+                and Path(result.get("caseSetupPath", "")).exists()
+                and "STL-aware CFD/design preflight" in answer
+                and "1.00 mm wall thickness" in answer
+                and "Fusion 360 script:" not in answer
+                and "OpenSCAD model:" not in answer
+                and "generic CPAP duct template" in answer
+            )
+        add(
+            "tools:stl-cfd-geometry-routing",
+            "pass" if ok else "fail",
+            "STL duct prompts inspect the mesh and stage CFD preflight instead of generic CAD",
+        )
+    except Exception as exc:
+        add("tools:stl-cfd-geometry-routing", "fail", str(exc))
 
     try:
         hose_messages = [
@@ -8663,6 +9478,20 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             self.send_json(result)
             return
 
+        if parsed.path == "/api/files/upload":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+                result = save_uploaded_file(payload)
+            except json.JSONDecodeError:
+                self.send_error(400, "Invalid JSON")
+                return
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
+                return
+            self.send_json(result)
+            return
+
         if parsed.path == "/api/tools/cad-artifact":
             length = int(self.headers.get("Content-Length", "0") or "0")
             try:
@@ -8948,6 +9777,77 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 normalize=False,
             )
             json_line(self, {"type": "done", "returnCode": 0})
+            return
+
+        if is_stl_cfd_duct_design_request(messages):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            json_line(
+                self,
+                {
+                    "type": "status",
+                    "message": "starting",
+                    "cwd": cwd,
+                    "profile": profile,
+                    "effectiveProfile": effective_profile,
+                    "accessLevel": "local-files",
+                    "reasoningLevel": reasoning_level,
+                    "webSearch": web_search,
+                    "managerDepth": manager_depth,
+                    "friendlinessLevel": friendliness_level,
+                    "humorLevel": humor_level,
+                    "mode": "stl-cfd-duct-preflight",
+                    "engine": "local-tool",
+                    "model": "",
+                    "freeOnlyRedirect": free_only_redirect,
+                    "route": route,
+                    "adminTopic": admin_topic,
+                },
+            )
+            json_line(
+                self,
+                {
+                    "type": "thought",
+                    "text": "Checking whether the STL was attached or only referenced by filename.",
+                },
+            )
+            json_line(
+                self,
+                {
+                    "type": "thought",
+                    "text": "Inspecting the STL mesh and extracting hard clearance, wall, and growth constraints before any duct template is allowed to answer.",
+                },
+            )
+            try:
+                tool_result = stage_stl_cfd_design_case(messages, cwd=cwd)
+                for note in stl_cfd_case_working_notes(tool_result):
+                    json_line(self, {"type": "thought", "text": note})
+            except Exception as exc:
+                tool_result = {
+                    "ok": False,
+                    "error": str(exc),
+                    "targetDir": str(LOCAL_CAD_OUTPUT_DIR),
+                    "searched": [],
+                }
+                json_line(
+                    self,
+                    {
+                        "type": "thought",
+                        "text": f"STL/CFD preflight tool failed before finalizing: {exc}",
+                    },
+                )
+            emit_assistant_answer(
+                self,
+                messages,
+                route,
+                admin_topic,
+                format_stl_cfd_case_answer(tool_result),
+                normalize=False,
+            )
+            json_line(self, {"type": "done", "returnCode": 0 if tool_result.get("ok") else 1})
             return
 
         if is_cad_artifact_tool_request(messages):
@@ -9837,9 +10737,9 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             except OSError:
                 pass
 
-    def send_json(self, payload):
+    def send_json(self, payload, status=200):
         body = json.dumps(payload, indent=2).encode("utf-8")
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()

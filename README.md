@@ -9,7 +9,7 @@ This is a community package for Mac users who want a simple local Codex-style ch
 Download the DMG from the `release/` folder or the GitHub Release:
 
 ```text
-Codex_CLI_UI_Mac_v2026.07.10.dmg
+Codex_CLI_UI_Mac_v2026.07.11.dmg
 ```
 
 Open the DMG and double-click:
@@ -49,6 +49,7 @@ codex --profile local-fast --search
 - Red rounded app icon to distinguish it from the official Codex app
 - Startup inventory card for private machine records, SSH aliases, tailnet hosts, and local tool resources
 - Safe working notes while Codex CLI is running
+- Drag/drop, paste, and `+` button file attachments for STL/CAD workflows
 - Admin Improvement Lab for weak-answer feedback, tool gaps, and saved golden regression tests
 - Golden Test Generator that turns Improvement Lab items into runnable prompt tests and feeds failures back into the lab
 - One-click `Fix this` capture and safer Manager fallback when review/polish fails
@@ -59,6 +60,7 @@ codex --profile local-fast --search
 - Analytical CAD answers with airflow sizing, material cooling guidance, CFD validation limits, and lightweight web source checks
 - Direct CPAP hose sizing answers so measurement questions do not generate CAD artifacts
 - Cooling-duct research mode that learns from CFD papers, Printables, GitHub, and material-cooling guidance before CAD generation
+- STL-aware CFD/duct preflight that finds attached or named STL files, inspects mesh geometry, captures clearance/wall constraints, and detects OpenFOAM/Docker capability before answering
 - Local Research, Coder, Review, and Manager modes for a fuller free local workflow
 - Optional local history importer for your own `~/.codex/sessions`
 

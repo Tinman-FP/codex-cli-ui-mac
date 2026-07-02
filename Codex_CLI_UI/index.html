@@ -210,11 +210,16 @@
 
         <section class="composer-wrap">
           <div class="composer">
+            <button class="attach-button" id="attachButton" type="button" title="Attach files" aria-label="Attach files">
+              <span>+</span>
+            </button>
+            <input id="fileInput" type="file" multiple hidden />
             <textarea id="promptInput" rows="1" placeholder="Ask Codex"></textarea>
             <button class="send-button" id="sendButton" title="Send" aria-label="Send">
               <span>↑</span>
             </button>
           </div>
+          <div class="attachment-tray" id="attachmentTray" aria-label="Attached files" hidden></div>
           <div class="run-controls" aria-label="Codex run settings">
             <label class="control-chip" for="modeSelect">
               <span>Mode</span>

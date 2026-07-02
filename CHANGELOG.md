@@ -1,5 +1,14 @@
 # Changelog
 
+## v2026.07.11
+
+- Adds chat-bar file attachments through drag/drop, paste, and the `+` attach button.
+- Saves uploaded files into local runtime storage and sends attachment metadata with each prompt.
+- Adds filename-only STL fallback search for cases where macOS pastes only the file name.
+- Adds STL-aware CPAP/part-cooling duct preflight before generic CAD artifact generation.
+- Inspects STL mesh geometry, connected components, clearance/wall constraints, and OpenFOAM/Docker CFD capability.
+- Adds package-health regression so STL duct prompts cannot fall back to the generic Fusion/OpenSCAD CPAP duct template.
+
 ## v2026.07.10
 
 - Fixes cooling-duct research prompts being misrouted into CAD artifact generation.

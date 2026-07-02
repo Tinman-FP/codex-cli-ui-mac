@@ -1,29 +1,30 @@
-# Codex CLI UI for Mac v2026.07.10
+# Codex CLI UI for Mac v2026.07.11
 
-Bugfix release for cooling-duct research routing.
+Bugfix release for STL attachments and STL-aware CFD/duct preflight.
 
 ## Download
 
 Download one file:
 
 ```text
-Codex_CLI_UI_Mac_v2026.07.10.dmg
+Codex_CLI_UI_Mac_v2026.07.11.dmg
 ```
 
 Open the DMG and double-click `Install Codex CLI UI.command`.
 
 ## Fixed
 
-- Cooling-duct research prompts no longer generate Fusion 360/OpenSCAD CAD packages.
-- Follow-up corrections like "look at Printables and GitHub for inspiration" now route to research instead of staging another weak duct.
-- GitHub in this research context is treated as public design evidence, not local repo work.
+- STL/CAD requests no longer silently proceed when macOS only pasted a filename.
+- STL-based CPAP duct prompts no longer fall into the generic Fusion/OpenSCAD CPAP duct template.
+- The app now exposes whether CFD can actually run instead of saying "no CFD was run" as a generic afterthought.
 
 ## Added
 
-- `cad-research-direct-answer` path for part-cooling duct research.
-- Reusable source-backed cooling-duct playbook with CFD, Printables, GitHub, CPAP, and material-cooling guidance.
-- Autonomy Supervisor recovery for CAD receipts returned to research prompts.
-- Package-health regression for cooling-duct research routing.
+- Chat-bar file attachments by drag/drop, paste, or `+` attach button.
+- Local upload storage for attached files and visible attachment chips in the chat.
+- Filename-only STL fallback search in the current project and app input folders.
+- STL-aware CFD/duct preflight that reads mesh geometry, connected components, clearance/wall constraints, and OpenFOAM/Docker capability.
+- Package-health regression for STL duct requests so they inspect geometry before answering.
 
 ## Included
 
