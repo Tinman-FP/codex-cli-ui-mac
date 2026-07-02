@@ -2200,7 +2200,11 @@ def is_read_only_printer_status_query(messages):
 
 
 def is_cad_design_request(messages):
-    if is_cpap_hose_spec_question(messages) or is_cooling_duct_research_request(messages):
+    if (
+        is_cpap_hose_spec_question(messages)
+        or is_cooling_duct_research_request(messages)
+        or is_cad_reference_question(messages)
+    ):
         return False
     text = "\n".join(str(message.get("text", "")) for message in messages[-4:]).lower()
     if not text_has_any(text, CAD_DESIGN_TERMS):
@@ -3637,6 +3641,89 @@ def is_cooling_duct_research_request(messages):
     )
 
 
+def is_cad_reference_question(messages):
+    query = latest_user_text(messages).lower()
+    if not query:
+        return False
+    cad_terms = (
+        "cad",
+        "fusion",
+        "fusion 360",
+        "f3d",
+        "f3z",
+        "step",
+        "stp",
+        "stl",
+        "freecad",
+        "solidworks",
+        "component",
+        "body",
+        "assembly",
+        "mesh",
+        "slicer",
+    )
+    reference_terms = (
+        "file type",
+        "file format",
+        "format",
+        "export",
+        "import",
+        "save as",
+        "preserve",
+        "preserves",
+        "keep",
+        "keeps",
+        "component names",
+        "body names",
+        "assembly names",
+        "names",
+        "hierarchy",
+        "difference",
+        " vs ",
+        "versus",
+        "what is",
+        "what's",
+        "which",
+        "best",
+        "should i use",
+        "does",
+        "can",
+    )
+    question_terms = ("what", "which", "best", "should i", "?", "can i")
+    build_terms = (
+        "design",
+        "create",
+        "make",
+        "build",
+        "generate",
+        "model this",
+        "draw",
+        "script",
+        "write a file",
+        "save the file",
+    )
+    return (
+        text_has_any(query, cad_terms)
+        and text_has_any(query, reference_terms)
+        and text_has_any(query, question_terms)
+        and not text_has_any(query, build_terms)
+    )
+
+
+def is_fusion_component_export_question(messages):
+    query = latest_user_text(messages).lower()
+    if not query or not is_cad_reference_question(messages):
+        return False
+    fusion_terms = ("fusion", "fusion 360", "f3d", "f3z")
+    name_terms = ("component names", "body names", "assembly names", "names", "hierarchy")
+    format_terms = ("file type", "file format", "format", "export", "preserve", "preserves", "keep", "keeps")
+    return (
+        text_has_any(query, fusion_terms)
+        and text_has_any(query, name_terms)
+        and text_has_any(query, format_terms)
+    )
+
+
 def route_query_text(messages, cwd=""):
     recent = []
     for message in (messages or [])[-6:]:
@@ -3659,6 +3746,7 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
     previous_project = project_from_thread(messages)
     cpap_hose_spec = is_cpap_hose_spec_question(messages)
     cooling_duct_research = is_cooling_duct_research_request(messages)
+    cad_reference = is_cad_reference_question(messages)
     cad_design = is_cad_design_request(messages)
     public_printer_research = wants_public_printer_research(messages) and not cad_design
     scores = []
@@ -3702,6 +3790,10 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
         project_id = "cad-modeling-projects"
         score = max(score, 34)
         matched = ["cooling-duct-research"] + [item for item in matched if item != "cooling-duct-research"]
+    elif cad_reference:
+        project_id = "cad-modeling-projects"
+        score = max(score, 30)
+        matched = ["cad-reference"] + [item for item in matched if item != "cad-reference"]
     elif cad_design:
         project_id = "cad-modeling-projects"
         score = max(score, 32)
@@ -4334,6 +4426,24 @@ def cpap_hose_spec_direct_answer(messages):
             (
                 "You should also consider: if you are modeling an adapter or duct inlet, measure the actual hose/cuff you have. "
                 "For most 3D-printer CPAP cooling setups, start with a 19 mm airflow bore unless you know you are using 15 mm slim tubing."
+            ),
+        ]
+    )
+
+
+def fusion_component_export_direct_answer(messages):
+    if not is_fusion_component_export_question(messages):
+        return ""
+    return "\n\n".join(
+        [
+            "Use `.f3d` or `.f3z` as the native Fusion master file, and use `.step` / `.stp` when another CAD tool needs to read the component names.",
+            (
+                "This is why: `.f3d` preserves Fusion's component structure, body names, sketches, materials, and design history best. "
+                "Use `.f3z` when the design has externally referenced components. STEP is the best neutral exchange format because it usually carries assembly/component names into tools like FreeCAD much better than mesh formats."
+            ),
+            (
+                "You should also consider: do not use STL if the names matter. STL is mostly triangle mesh geometry and usually loses component names, hierarchy, body structure, and useful CAD metadata. "
+                "For our workflow, keep the `.f3d`/`.f3z` master and export STEP for Codex CLI UI, FreeCAD, or CFD prep."
             ),
         ]
     )
@@ -10089,6 +10199,49 @@ def package_health_report():
         add("tools:cpap-hose-spec-direct", "fail", str(exc))
 
     try:
+        fusion_messages = [
+            {
+                "role": "user",
+                "text": "what file type from fusion preserves component names?",
+            }
+        ]
+        alt_fusion_messages = [
+            {
+                "role": "user",
+                "text": "Which Fusion 360 export format should I use so FreeCAD can still see body names and assembly hierarchy?",
+            }
+        ]
+        fusion_route = route_manager(fusion_messages, requested_profile="manager", web_search="live")
+        fusion_answer = fusion_component_export_direct_answer(fusion_messages)
+        alt_answer = fusion_component_export_direct_answer(alt_fusion_messages)
+        ok = (
+            is_cad_reference_question(fusion_messages)
+            and is_fusion_component_export_question(fusion_messages)
+            and is_cad_reference_question(alt_fusion_messages)
+            and is_fusion_component_export_question(alt_fusion_messages)
+            and not is_cad_design_request(fusion_messages)
+            and not is_cad_artifact_tool_request(fusion_messages)
+            and not is_cad_design_request(alt_fusion_messages)
+            and not is_cad_artifact_tool_request(alt_fusion_messages)
+            and fusion_route.get("projectId") == "cad-modeling-projects"
+            and ".f3d" in fusion_answer
+            and ".f3z" in fusion_answer
+            and ".step" in fusion_answer
+            and "STL" in fusion_answer
+            and "Fusion 360 script" not in fusion_answer
+            and "OpenSCAD model" not in fusion_answer
+            and ".step" in alt_answer
+            and "Fusion 360 script" not in alt_answer
+        )
+        add(
+            "tools:fusion-export-reference-direct",
+            "pass" if ok else "fail",
+            "Fusion export/component-name questions answer directly without CAD artifact staging",
+        )
+    except Exception as exc:
+        add("tools:fusion-export-reference-direct", "fail", str(exc))
+
+    try:
         research_messages = [
             {
                 "role": "user",
@@ -11622,6 +11775,53 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 normalize=False,
             )
             json_line(self, {"type": "done", "returnCode": 0 if tool_result.get("ok") else 1})
+            return
+
+        direct_fusion_export_answer = fusion_component_export_direct_answer(messages)
+        if direct_fusion_export_answer:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            json_line(
+                self,
+                {
+                    "type": "status",
+                    "message": "starting",
+                    "cwd": cwd,
+                    "profile": profile,
+                    "effectiveProfile": effective_profile,
+                    "accessLevel": "local-files",
+                    "reasoningLevel": reasoning_level,
+                    "webSearch": web_search,
+                    "managerDepth": manager_depth,
+                    "friendlinessLevel": friendliness_level,
+                    "humorLevel": humor_level,
+                    "mode": "cad-reference-direct-answer",
+                    "engine": "local-knowledge",
+                    "model": "",
+                    "freeOnlyRedirect": free_only_redirect,
+                    "route": route,
+                    "adminTopic": admin_topic,
+                },
+            )
+            json_line(
+                self,
+                {
+                    "type": "thought",
+                    "text": "Recognized this as a CAD export/reference question, not a CAD artifact request.",
+                },
+            )
+            emit_assistant_answer(
+                self,
+                messages,
+                route,
+                admin_topic,
+                direct_fusion_export_answer,
+                normalize=False,
+            )
+            json_line(self, {"type": "done", "returnCode": 0})
             return
 
         direct_cpap_hose_answer = cpap_hose_spec_direct_answer(messages)
