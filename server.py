@@ -2613,7 +2613,7 @@ def is_load_failure(text):
     return "load failed" in lower or "failed to load" in lower
 
 
-def build_failure_recovery_answer(messages, route=None, error_text="", cwd="", runtime_notes=None):
+def build_failure_recovery_answer(messages, route=None, error_text="", cwd="", runtime_notes=None, tool_recovery=None):
     query = latest_user_text(messages).strip()
     lower = query.lower()
     route = route or {}
@@ -2650,6 +2650,26 @@ def build_failure_recovery_answer(messages, route=None, error_text="", cwd="", r
     lines.append("")
     lines.append("Recovery plan:")
     lines.extend(f"- {item}" for item in recovery)
+    if tool_recovery and tool_recovery.get("issue"):
+        issue = tool_recovery.get("issue") or {}
+        decision = tool_recovery.get("decision") or {}
+        lines.append("")
+        lines.append("Tool recovery:")
+        lines.append(f"- Detected blocker: {issue.get('title') or issue.get('kind') or 'tool failure'}.")
+        if issue.get("freeToolId"):
+            label = decision.get("label") or issue.get("freeToolId")
+            if decision.get("installed"):
+                lines.append(f"- Tool status: {label} is already available; retry the original task.")
+            elif decision.get("canInstall"):
+                lines.append(f"- Tool status: {label} is free, allowlisted, and storage-safe to install.")
+            elif decision.get("needsApproval"):
+                lines.append(f"- Tool status: needs Tinman's approval before download or alternate tooling.")
+            else:
+                lines.append(f"- Tool status: {decision.get('reason') or 'no automatic install path confirmed'}.")
+        if tool_recovery.get("nextAction"):
+            lines.append(f"- Next action: {tool_recovery.get('nextAction')}.")
+        if tool_recovery.get("retryAction"):
+            lines.append(f"- Retry after recovery: {tool_recovery.get('retryAction')}.")
     if cwd:
         lines.append(f"- Last working directory: `{cwd}`.")
     if project:
@@ -3939,12 +3959,209 @@ def install_free_tool(tool_or_command, approved=False, dry_run=False, reason="")
     return result
 
 
+def missing_command_from_error(text):
+    text = str(text or "")
+    patterns = (
+        r"(?im)(?:^|\n)\s*(?:/[^:\n]+:\s*)?(?:line\s+\d+:\s*)?([A-Za-z0-9_.+-]+):\s+command not found\b",
+        r"(?im)\bcommand not found:\s*([A-Za-z0-9_.+-]+)\b",
+        r"(?im)\b([A-Za-z0-9_.+-]+):\s+not found\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            command = match.group(1).strip()
+            if command and command not in {"env", "line"}:
+                return command
+    return ""
+
+
+def detect_tool_recovery_issue(messages=None, error_text="", cwd="", route=None):
+    messages = messages or []
+    query = latest_user_text(messages)
+    combined = "\n".join([query, str(error_text or ""), str(cwd or ""), json.dumps(route or {}, default=str)]).lower()
+    missing_command = missing_command_from_error(error_text)
+    if missing_command:
+        tool_id = resolve_free_tool_id(missing_command)
+        title = f"Missing command: {missing_command}"
+        if missing_command == "codex":
+            return {
+                "kind": "missing-codex-binary",
+                "severity": "high",
+                "title": title,
+                "command": missing_command,
+                "reason": "The Codex CLI command was not found in the active PATH.",
+                "nextAction": f"Use the bundled binary at `{CODEX_BIN}` or fix PATH_FOR_CODEX before retrying.",
+                "retryAction": "Retry the original command after the Codex binary is visible.",
+            }
+        return {
+            "kind": "missing-command",
+            "severity": "high" if not tool_id else "medium",
+            "title": title,
+            "command": missing_command,
+            "freeToolId": tool_id or missing_command,
+            "reason": "A required shell command was not available to the local worker.",
+            "nextAction": "Check the free allowlisted installer catalog and storage policy.",
+            "retryAction": f"Retry the original task after `{missing_command}` is installed or a local fallback is chosen.",
+        }
+
+    if "no configured push destination" in combined or "no such remote" in combined or "does not appear to be a git repository" in combined:
+        return {
+            "kind": "git-remote",
+            "severity": "high",
+            "title": "Git remote is missing or invalid",
+            "command": "gh",
+            "freeToolId": "github-cli",
+            "reason": "Git cannot push until an accessible origin remote exists.",
+            "nextAction": "Use authenticated `gh` to inspect/create/connect the GitHub repo, then push with tracking.",
+            "retryAction": "Run `git push -u origin <branch>` after the remote is connected.",
+        }
+
+    if "not able to hit the public web" in combined or "web access" in combined and "disabled" in combined:
+        return {
+            "kind": "web-access",
+            "severity": "medium",
+            "title": "Public web access path is unavailable",
+            "reason": "The request needs current public evidence, but the active path cannot reach the web.",
+            "nextAction": "Switch to Local Research with the Web toggle on, then use cached/fetched public evidence.",
+            "retryAction": "Retry the original web-search request in `Local Research` or `Manager` with Web enabled.",
+            "endpoint": "POST /api/run with profile=local-research and webSearch=live",
+        }
+
+    if "moonraker" in combined or "klipper" in combined or "printer.cfg" in combined or "macro" in combined:
+        if any(term in combined for term in ("folder", "path", "locate", "find", "save", "config")):
+            return {
+                "kind": "klipper-config-discovery",
+                "severity": "medium",
+                "title": "Klipper config path needs discovery",
+                "reason": "The task needs a confirmed local Klipper config folder before writing or staging files.",
+                "nextAction": "Call the local Klipper config discovery endpoint with the printer or firmware hint.",
+                "retryAction": "Retry the original save/stage task after a candidate config folder is confirmed.",
+                "endpoint": "GET /api/tools/klipper-configs?hint=klipper",
+            }
+
+    if "load failed" in combined or "no final response" in combined or "no final message" in combined:
+        return {
+            "kind": "local-runtime-load",
+            "severity": "medium",
+            "title": "Local runtime did not produce a final answer",
+            "reason": "The worker failed before completion or returned no final message.",
+            "nextAction": "Retry once with a narrower local command/tool path, then fall back to a staged local artifact or local Ollama answer.",
+            "retryAction": "Rerun the exact task after narrowing the tool path and preserving any partial evidence.",
+        }
+
+    if "permission denied" in combined or "operation not permitted" in combined:
+        return {
+            "kind": "permission",
+            "severity": "high",
+            "title": "Local permission boundary blocked the action",
+            "reason": "The operating system or sandbox rejected a file, process, or network action.",
+            "nextAction": "Check the target path, macOS permissions, and Codex access level before retrying.",
+            "retryAction": "Retry only after the specific permission boundary is corrected.",
+        }
+
+    return {
+        "kind": "unknown",
+        "severity": "low",
+        "title": "No specific recovery tool matched",
+        "reason": "The recovery engine did not find a known missing command, platform endpoint, web path, git remote, or permission pattern.",
+        "nextAction": "Use the Improvement Lab entry and failure text to add a new recovery rule if this repeats.",
+        "retryAction": "Retry with a smaller command or ask one focused question if the missing capability cannot be inferred.",
+    }
+
+
+def tool_recovery_plan(payload=None, record=False):
+    payload = payload or {}
+    messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+    error_text = str(payload.get("error") or payload.get("errorText") or "")
+    cwd = str(payload.get("cwd") or "")
+    route = payload.get("route") if isinstance(payload.get("route"), dict) else {}
+    approved = bool(payload.get("approved"))
+    auto_install = bool(payload.get("autoInstall"))
+    issue = detect_tool_recovery_issue(messages, error_text=error_text, cwd=cwd, route=route)
+    decision = {}
+    installed = False
+    if issue.get("freeToolId"):
+        if auto_install:
+            decision = install_free_tool(
+                issue.get("freeToolId"),
+                approved=approved,
+                dry_run=False,
+                reason=issue.get("reason") or latest_user_text(messages),
+            )
+            installed = bool(decision.get("installed"))
+        elif record:
+            decision = install_free_tool(
+                issue.get("freeToolId"),
+                approved=approved,
+                dry_run=True,
+                reason=issue.get("reason") or latest_user_text(messages),
+            )
+        else:
+            decision = evaluate_free_tool_install(issue.get("freeToolId"), approved=approved)
+
+    status = "ready"
+    if issue.get("kind") == "unknown":
+        status = "unmatched"
+    elif decision.get("needsApproval"):
+        status = "needs-approval"
+    elif decision.get("canInstall"):
+        status = "can-install"
+    elif installed or decision.get("installed"):
+        status = "installed"
+    elif issue.get("endpoint"):
+        status = "use-local-endpoint"
+
+    return {
+        "ok": True,
+        "status": status,
+        "issue": issue,
+        "decision": decision,
+        "nextAction": decision.get("askTinman") or issue.get("nextAction", ""),
+        "retryAction": issue.get("retryAction", ""),
+        "endpoint": issue.get("endpoint", ""),
+        "policy": "Free allowlisted installs only; ask Tinman before paid, unknown, large, unsafe, or low-storage downloads.",
+    }
+
+
+def tool_recovery_synthetic_check():
+    missing = tool_recovery_plan(
+        {
+            "error": "/bin/bash: jq: command not found",
+            "messages": [{"role": "user", "text": "Parse this Moonraker JSON."}],
+        },
+        record=False,
+    )
+    git_remote = tool_recovery_plan(
+        {
+            "error": "fatal: No configured push destination.",
+            "messages": [{"role": "user", "text": "Push this to GitHub."}],
+        },
+        record=False,
+    )
+    web = tool_recovery_plan(
+        {
+            "error": "I am not able to hit the public web from here; web access disabled.",
+            "messages": [{"role": "user", "text": "Search the web for PET-CF prices."}],
+        },
+        record=False,
+    )
+    return (
+        missing.get("issue", {}).get("freeToolId") == "jq"
+        and git_remote.get("issue", {}).get("kind") == "git-remote"
+        and web.get("issue", {}).get("kind") == "web-access"
+    )
+
+
 def local_tool_catalog():
     return {
         "capabilityManager": {
             "list": "GET /api/tools/capabilities",
             "install": "POST /api/tools/install-free-tool",
             "policy": "Free allowlisted tools only; ask Tinman before low-storage, paid, unknown, or large installs.",
+        },
+        "toolRecovery": {
+            "plan": "POST /api/tools/recover",
+            "description": "Classify a local failure, choose a free/safe tool or local endpoint, and return the retry path.",
         },
         "klipperConfigDiscovery": {
             "list": "GET /api/tools/klipper-configs?hint=qidi",
@@ -3965,6 +4182,7 @@ def build_local_tools_context():
             "Local completion tools:",
             "- If a command or capability is missing, inspect `GET http://127.0.0.1:8765/api/tools/capabilities`.",
             "- To install a free allowlisted missing tool, call `POST http://127.0.0.1:8765/api/tools/install-free-tool` with JSON like `{\"tool\":\"jq\",\"reason\":\"parse printer API JSON\"}`.",
+            "- To recover from a failure, call `POST http://127.0.0.1:8765/api/tools/recover` with the original messages, cwd, and error text. Use its recovery status before giving up.",
             "- If the install response says `needsApproval`, ask Tinman before downloading. Do this for storage pressure, large installs, unknown tools, or anything not confirmed free.",
             "- After a successful install, retry the original task instead of stopping at `command not found`.",
             "- For local Klipper config discovery, call `GET http://127.0.0.1:8765/api/tools/klipper-configs?hint=qidi` or use another machine hint. Add `&scan=1` only when known paths are not enough.",
@@ -5442,6 +5660,15 @@ def package_health_report():
         add("tools:capability-manager", "fail", str(exc))
 
     try:
+        add(
+            "tools:recovery-engine",
+            "pass" if tool_recovery_synthetic_check() else "fail",
+            "detects missing commands, git remote gaps, and disabled web path",
+        )
+    except Exception as exc:
+        add("tools:recovery-engine", "fail", str(exc))
+
+    try:
         discovery = discover_klipper_config_dirs("klipper")
         candidates = discovery.get("candidates", [])
         add(
@@ -6337,14 +6564,24 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 web_search=safe_choice(payload.get("webSearch"), WEB_SEARCH_LEVELS, DEFAULT_WEB_SEARCH),
             )
             admin_topic = route_admin_topic(messages, route)
+            tool_recovery = tool_recovery_plan(
+                {
+                    "messages": messages,
+                    "error": payload.get("error") or "load failed",
+                    "cwd": cwd,
+                    "route": route,
+                },
+                record=True,
+            )
             text = build_failure_recovery_answer(
                 messages,
                 route=route,
                 error_text=payload.get("error") or "load failed",
                 cwd=cwd,
                 runtime_notes=payload.get("runtimeNotes") or [],
+                tool_recovery=tool_recovery,
             )
-            self.send_json({"ok": True, "text": text, "route": route, "adminTopic": admin_topic})
+            self.send_json({"ok": True, "text": text, "route": route, "adminTopic": admin_topic, "toolRecovery": tool_recovery})
             return
 
         if parsed.path == "/api/admin/knowledge":
@@ -6376,6 +6613,17 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 str(payload.get("id") or "").strip(),
             )
             self.send_json({**result, "admin": admin_summary(), "improvementLab": improvement_lab_summary()})
+            return
+
+        if parsed.path == "/api/tools/recover":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self.send_error(400, "Invalid JSON")
+                return
+            result = tool_recovery_plan(payload, record=True)
+            self.send_json(result)
             return
 
         if parsed.path == "/api/tools/install-free-tool":
@@ -7111,12 +7359,22 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 if fallback_text:
                     emit_assistant_answer(self, messages, route, admin_topic, fallback_text)
                 else:
+                    tool_recovery = tool_recovery_plan(
+                        {
+                            "messages": messages,
+                            "error": fallback.get("error") or "local Codex returned no final answer",
+                            "cwd": cwd,
+                            "route": route,
+                        },
+                        record=True,
+                    )
                     recovery_text = build_failure_recovery_answer(
                         messages,
                         route=route,
                         error_text=fallback.get("error") or "local Codex returned no final answer",
                         cwd=cwd,
                         runtime_notes=stderr_tail[-5:],
+                        tool_recovery=tool_recovery,
                     )
                     emit_assistant_answer(self, messages, route, admin_topic, recovery_text)
 
@@ -7125,12 +7383,22 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             pass
         except Exception as exc:
             try:
+                tool_recovery = tool_recovery_plan(
+                    {
+                        "messages": messages,
+                        "error": str(exc),
+                        "cwd": cwd,
+                        "route": route,
+                    },
+                    record=True,
+                )
                 recovery_text = build_failure_recovery_answer(
                     messages,
                     route=route,
                     error_text=str(exc),
                     cwd=cwd,
                     runtime_notes=stderr_tail[-5:] if "stderr_tail" in locals() else [],
+                    tool_recovery=tool_recovery,
                 )
                 emit_assistant_answer(self, messages, route, admin_topic, recovery_text)
                 json_line(self, {"type": "done", "returnCode": 1})

@@ -62,6 +62,7 @@ The server binds to `127.0.0.1` by default and streams `codex exec --json` outpu
 - Finished assistant replies include local `Good` and `Fix this` feedback actions. Feedback is stored in `data/quality_feedback.jsonl` and reused as project-specific answer-quality lessons.
 - `Fix this` feedback and capability gaps now flow into the Admin `Improvement Lab`, where they can be reviewed, archived, or promoted into regression-test candidates.
 - Tool/run failures now have a recovery path. If the local worker hits a load failure or returns no final answer, the UI/server produce a useful recovery answer that says what failed, what was not confirmed, and the next concrete fallback instead of ending with raw `Run failed` text.
+- The Tool Recovery Engine classifies failures such as missing commands, missing Git remotes, disabled web paths, Klipper config discovery gaps, local load failures, and permission boundaries, then chooses a free/safe recovery path before retry guidance.
 - The capability manager lets local Codex notice missing free tools, inspect an allowlisted installer catalog, check available storage, install small/free tools through Homebrew, then retry the job. It asks before paid, unknown, large, or low-storage downloads.
 - Local Klipper tools can discover `printer.cfg` config folders, identify Moonraker targets, and stage Klipper-safe macros locally. Live upload/restart still requires explicit intent and idle/standby verification.
 - The analytical layer runs before answers and tool use. It classifies the domain, platform, firmware, operating system, framework, material, or protocol; picks the right tool family; names missing evidence; and avoids wrong-ecosystem mistakes such as using Klipper tools on a Marlin/Prusa printer.
@@ -151,6 +152,9 @@ curl "http://127.0.0.1:8765/api/tools/klipper-configs?hint=qidi"
 curl -X POST http://127.0.0.1:8765/api/tools/install-free-tool \
   -H 'Content-Type: application/json' \
   -d '{"tool":"jq","reason":"parse Moonraker API JSON"}'
+curl -X POST http://127.0.0.1:8765/api/tools/recover \
+  -H 'Content-Type: application/json' \
+  -d '{"error":"/bin/bash: jq: command not found","messages":[{"role":"user","text":"Parse this Moonraker JSON"}]}'
 ```
 
 ```bash

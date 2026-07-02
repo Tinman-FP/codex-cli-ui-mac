@@ -2034,6 +2034,9 @@ async function recoverRunFailure(thread, pending, error) {
     pending.text = payload.text;
     if (payload.route) pending.route = payload.route;
     if (payload.adminTopic) pending.adminTopic = payload.adminTopic;
+    if (payload.toolRecovery?.issue) {
+      addThought(pending, `Tool recovery: ${payload.toolRecovery.issue.title || payload.toolRecovery.status || "recovery planned"}.`);
+    }
     addThought(pending, "Recovered from the local load failure with a safe fallback answer.");
     return true;
   } catch (recoverError) {
