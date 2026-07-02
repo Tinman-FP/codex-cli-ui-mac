@@ -1,30 +1,29 @@
-# Codex CLI UI for Mac v2026.07.11
+# Codex CLI UI for Mac v2026.07.12
 
-Bugfix release for STL attachments and STL-aware CFD/duct preflight.
+Design-worker release for STL-based CPAP cooling duct requests.
 
 ## Download
 
 Download one file:
 
 ```text
-Codex_CLI_UI_Mac_v2026.07.11.dmg
+Codex_CLI_UI_Mac_v2026.07.12.dmg
 ```
 
 Open the DMG and double-click `Install Codex CLI UI.command`.
 
 ## Fixed
 
-- STL/CAD requests no longer silently proceed when macOS only pasted a filename.
-- STL-based CPAP duct prompts no longer fall into the generic Fusion/OpenSCAD CPAP duct template.
-- The app now exposes whether CFD can actually run instead of saying "no CFD was run" as a generic afterthought.
+- STL-based CPAP duct prompts no longer stop at a preflight report.
+- The CAD path now attempts a real inferred duct design when mesh geometry is available.
+- Package health now fails if STL duct prompts return only generic CAD or preflight-only output.
 
 ## Added
 
-- Chat-bar file attachments by drag/drop, paste, or `+` attach button.
-- Local upload storage for attached files and visible attachment chips in the chat.
-- Filename-only STL fallback search in the current project and app input folders.
-- STL-aware CFD/duct preflight that reads mesh geometry, connected components, clearance/wall constraints, and OpenFOAM/Docker capability.
-- Package-health regression for STL duct requests so they inspect geometry before answering.
+- Inferred CPAP inlet/outlet body detection from STL connected components.
+- Generated duct STL, editable OpenSCAD source, internal-airway STL, inferred-port JSON, and design-preview PNG.
+- OpenFOAM Docker `surfaceCheck` for generated duct STL when Docker/OpenFOAM images are present.
+- A flattened split-duct strategy for tight Y-growth constraints.
 
 ## Included
 

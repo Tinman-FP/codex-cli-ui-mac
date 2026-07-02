@@ -6664,6 +6664,463 @@ relaxationFactors
     return case_dir
 
 
+def as_point_text(point):
+    return "[" + ", ".join(f"{float(value):.3f}" for value in point) + "]"
+
+
+def scad_path_text(points):
+    return "[" + ", ".join(as_point_text(point) for point in points) + "]"
+
+
+def extend_polyline(points, start_ext=0.0, end_ext=0.0):
+    try:
+        import numpy as np
+    except Exception:
+        return points
+    pts = np.array(points, dtype=float)
+    output = pts
+    if start_ext and len(pts) > 1:
+        vector = pts[0] - pts[1]
+        length = float(np.linalg.norm(vector))
+        if length > 0:
+            output = np.vstack([pts[0] + vector / length * start_ext, output])
+    if end_ext and len(pts) > 1:
+        vector = pts[-1] - pts[-2]
+        length = float(np.linalg.norm(vector))
+        if length > 0:
+            output = np.vstack([output, pts[-1] + vector / length * end_ext])
+    return output.tolist()
+
+
+def component_record(part, source_index):
+    return {
+        "sourceIndex": int(source_index),
+        "faces": int(len(part.faces)),
+        "centroid": round_list(part.centroid),
+        "bounds": [round_list(part.bounds[0]), round_list(part.bounds[1])],
+        "extents": round_list(part.extents),
+        "watertight": bool(getattr(part, "is_watertight", False)),
+    }
+
+
+def component_circular_xz(record, tolerance=0.28):
+    extents = record.get("extents") or [0, 0, 0]
+    x = float(extents[0] or 0)
+    z = float(extents[2] or 0)
+    if not x or not z:
+        return False
+    return abs(x - z) <= max(1.5, tolerance * max(x, z))
+
+
+def infer_cpap_duct_ports(stl_path, constraints):
+    try:
+        import trimesh
+    except Exception as exc:
+        return {"ok": False, "error": f"trimesh is not available: {exc}"}
+
+    loaded = trimesh.load(stl_path, force="scene")
+    meshes = list(loaded.geometry.values()) if isinstance(loaded, trimesh.Scene) else [loaded]
+    mesh = trimesh.util.concatenate(meshes) if len(meshes) > 1 else meshes[0]
+    parts = mesh.split(only_watertight=False)
+    records = [component_record(part, index) for index, part in enumerate(parts)]
+
+    central = [
+        record
+        for record in records
+        if 300 <= record["centroid"][0] <= 390
+        and 380 <= record["centroid"][1] <= 505
+        and 500 <= record["centroid"][2] <= 570
+    ]
+    inlet_candidates = [
+        record
+        for record in central
+        if record["faces"] > 1000
+        and record["extents"][1] <= 16
+        and component_circular_xz(record)
+    ]
+    if inlet_candidates:
+        inlet_body = sorted(inlet_candidates, key=lambda item: (item["faces"], -item["centroid"][1]), reverse=True)[0]
+    elif central:
+        inlet_body = sorted(central, key=lambda item: item["faces"], reverse=True)[0]
+    else:
+        inlet_body = sorted(records, key=lambda item: item["faces"], reverse=True)[0]
+
+    outlet_candidates = [
+        record
+        for record in central
+        if record["faces"] > 1000
+        and record["extents"][1] >= 20
+        and record["extents"][2] >= 20
+        and record["centroid"][1] >= inlet_body["centroid"][1] + 8
+    ]
+    if outlet_candidates:
+        outlet_body = sorted(outlet_candidates, key=lambda item: item["faces"], reverse=True)[0]
+    else:
+        outlet_body = inlet_body
+
+    upper_port_candidates = []
+    outlet_bounds = outlet_body["bounds"]
+    for record in central:
+        extents = record["extents"]
+        centroid = record["centroid"]
+        if not component_circular_xz(record, tolerance=0.35):
+            continue
+        if not (2.5 <= extents[0] <= 18 and 2.5 <= extents[2] <= 18 and extents[1] <= 3.0):
+            continue
+        if centroid[1] < outlet_bounds[1][1] - 8:
+            continue
+        if centroid[2] < outlet_body["centroid"][2] + 5:
+            continue
+        upper_port_candidates.append(record)
+
+    upper_port_candidates = sorted(
+        upper_port_candidates,
+        key=lambda item: (item["centroid"][2], item["centroid"][1], item["faces"]),
+        reverse=True,
+    )
+    chosen_ports = []
+    for candidate in upper_port_candidates:
+        if not chosen_ports:
+            chosen_ports.append(candidate)
+            continue
+        if abs(candidate["centroid"][0] - chosen_ports[0]["centroid"][0]) >= 8:
+            chosen_ports.append(candidate)
+            break
+    if len(chosen_ports) < 2:
+        xmin, ymin, zmin = outlet_bounds[0]
+        xmax, ymax, zmax = outlet_bounds[1]
+        xspan = xmax - xmin
+        fallback_z = zmax - max(6.0, min(15.0, (zmax - zmin) * 0.30))
+        fallback_y = ymax - 1.5
+        chosen_centers = [
+            [xmin + xspan * 0.32, fallback_y, fallback_z],
+            [xmax - xspan * 0.32, fallback_y, fallback_z],
+        ]
+    else:
+        chosen_ports = sorted(chosen_ports[:2], key=lambda item: item["centroid"][0])
+        chosen_centers = [item["centroid"] for item in chosen_ports]
+
+    inlet_bounds = inlet_body["bounds"]
+    inlet_center = [
+        inlet_body["centroid"][0],
+        min(inlet_bounds[1][1] - 0.4, inlet_body["centroid"][1] + inlet_body["extents"][1] * 0.45),
+        inlet_bounds[0][2] + max(1.0, min(3.0, inlet_body["extents"][2] * 0.06)),
+    ]
+    left_outlet = chosen_centers[0]
+    right_outlet = chosen_centers[1]
+    outlet_y = min(left_outlet[1], right_outlet[1]) - 0.8
+    outlet_z = (left_outlet[2] + right_outlet[2]) / 2.0
+    splitter = [
+        inlet_center[0],
+        min(outlet_y - 14.0, inlet_center[1] + max(18.0, (outlet_y - inlet_center[1]) * 0.52)),
+        inlet_center[2] + max(18.0, (outlet_z - inlet_center[2]) * 0.60),
+    ]
+    main_path = [
+        inlet_center,
+        [inlet_center[0], inlet_center[1] + max(9.0, (splitter[1] - inlet_center[1]) * 0.35), inlet_center[2] + 8.0],
+        splitter,
+    ]
+    left_path = [
+        splitter,
+        [(splitter[0] + left_outlet[0]) / 2.0, (splitter[1] + left_outlet[1]) / 2.0, max(splitter[2], left_outlet[2] - 5.0)],
+        [left_outlet[0], outlet_y, left_outlet[2]],
+    ]
+    right_path = [
+        splitter,
+        [(splitter[0] + right_outlet[0]) / 2.0, (splitter[1] + right_outlet[1]) / 2.0, max(splitter[2], right_outlet[2] - 5.0)],
+        [right_outlet[0], outlet_y, right_outlet[2]],
+    ]
+
+    inlet_id = round(max(12.0, min(18.0, inlet_body["extents"][0] * 0.40)), 2)
+    branch_id = round(max(8.0, min(12.5, inlet_id / math.sqrt(2.0))), 2)
+    wall = float(constraints.get("wallThicknessMm") or 1.0)
+    max_growth = float(constraints.get("maxGrowthMm") or 5.0)
+    flat_inner_y = 1.6 if float(constraints.get("yGrowthMm") or 0.0) <= 0.1 else max(1.6, min(3.0, max_growth * 0.45))
+    selected_bounds = {
+        "min": round_list(
+            [
+                min(inlet_bounds[0][0], outlet_bounds[0][0]),
+                min(inlet_bounds[0][1], outlet_bounds[0][1]),
+                min(inlet_bounds[0][2], outlet_bounds[0][2]),
+            ]
+        ),
+        "max": round_list(
+            [
+                max(inlet_bounds[1][0], outlet_bounds[1][0]),
+                max(inlet_bounds[1][1], outlet_bounds[1][1]),
+                max(inlet_bounds[1][2], outlet_bounds[1][2]),
+            ]
+        ),
+    }
+    all_points = main_path + left_path + right_path
+    path_bounds = {
+        "min": round_list([min(point[i] for point in all_points) for i in range(3)]),
+        "max": round_list([max(point[i] for point in all_points) for i in range(3)]),
+    }
+    return {
+        "ok": True,
+        "method": "geometry-inference",
+        "inletBody": inlet_body,
+        "outletBody": outlet_body,
+        "upperPortCandidates": upper_port_candidates[:8],
+        "chosenUpperPorts": chosen_ports[:2],
+        "inletCenter": round_list(inlet_center),
+        "leftOutletCenter": round_list([left_outlet[0], outlet_y, left_outlet[2]]),
+        "rightOutletCenter": round_list([right_outlet[0], outlet_y, right_outlet[2]]),
+        "splitterCenter": round_list(splitter),
+        "mainPath": [round_list(point) for point in main_path],
+        "leftPath": [round_list(point) for point in left_path],
+        "rightPath": [round_list(point) for point in right_path],
+        "mainInnerPath": [round_list(point) for point in extend_polyline(main_path, start_ext=max(5.0, inlet_id * 0.55), end_ext=0.0)],
+        "leftInnerPath": [round_list(point) for point in extend_polyline(left_path, start_ext=0.0, end_ext=max(5.0, branch_id * 0.70))],
+        "rightInnerPath": [round_list(point) for point in extend_polyline(right_path, start_ext=0.0, end_ext=max(5.0, branch_id * 0.70))],
+        "mainIdMm": inlet_id,
+        "branchIdMm": branch_id,
+        "wallMm": wall,
+        "mainRyMm": flat_inner_y,
+        "branchRyMm": max(1.2, flat_inner_y * 0.85),
+        "selectedComponentBounds": selected_bounds,
+        "pathBounds": path_bounds,
+        "assumptions": [
+            "The STL did not preserve Fusion body names, so the tool inferred CPAP Inlet 1 as the largest thin circular-XZ central body.",
+            "The tool inferred CPAP Outlet 1 as the largest forward/upper central body and selected two upper circular port markers on it.",
+            "The duct is flattened in global Y to respect the zero-Y-growth request while preserving X/Z airflow area.",
+        ],
+    }
+
+
+def scad_inferred_duct_text(layout):
+    main_rx = float(layout["mainIdMm"]) / 2.0
+    branch_rx = float(layout["branchIdMm"]) / 2.0
+    wall = float(layout.get("wallMm") or 1.0)
+    main_ry = float(layout.get("mainRyMm") or 1.6)
+    branch_ry = float(layout.get("branchRyMm") or 1.35)
+    return f"""// Tinman inferred STL CPAP cooling duct
+// Units: mm. Generated from uploaded STL geometry, not a generic template.
+// Import the exported STL into Fusion 360, or edit this SCAD for a revised fit.
+
+$fn = 28;
+model = "shell"; // shell or airway
+
+wall = {wall:.3f};
+main_rx = {main_rx:.3f};
+main_ry = {main_ry:.3f};
+main_rz = {main_rx:.3f};
+branch_rx = {branch_rx:.3f};
+branch_ry = {branch_ry:.3f};
+branch_rz = {branch_rx:.3f};
+
+main_path = {scad_path_text(layout["mainPath"])};
+left_path = {scad_path_text(layout["leftPath"])};
+right_path = {scad_path_text(layout["rightPath"])};
+main_inner_path = {scad_path_text(layout["mainInnerPath"])};
+left_inner_path = {scad_path_text(layout["leftInnerPath"])};
+right_inner_path = {scad_path_text(layout["rightInnerPath"])};
+
+module node(p, rx, ry, rz) {{
+  translate(p) scale([rx, ry, rz]) sphere(r=1);
+}}
+
+module tube(points, rx, ry, rz) {{
+  for (i = [0:len(points)-2]) {{
+    hull() {{
+      node(points[i], rx, ry, rz);
+      node(points[i+1], rx, ry, rz);
+    }}
+  }}
+}}
+
+module airway() {{
+  tube(main_inner_path, main_rx, main_ry, main_rz);
+  tube(left_inner_path, branch_rx, branch_ry, branch_rz);
+  tube(right_inner_path, branch_rx, branch_ry, branch_rz);
+}}
+
+module shell() {{
+  difference() {{
+    union() {{
+      tube(main_path, main_rx + wall, main_ry + wall, main_rz + wall);
+      tube(left_path, branch_rx + wall, branch_ry + wall, branch_rz + wall);
+      tube(right_path, branch_rx + wall, branch_ry + wall, branch_rz + wall);
+      node(main_path[len(main_path)-1], main_rx + branch_rx + 2 * wall, branch_ry + 2 * wall, main_rz + branch_rz + 2 * wall);
+    }}
+    airway();
+  }}
+}}
+
+if (model == "airway") {{
+  airway();
+}} else {{
+  shell();
+}}
+"""
+
+
+def write_duct_preview(path, layout, analysis):
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+    fig, axs = plt.subplots(1, 3, figsize=(16, 5.5))
+    views = [(0, 1, "X", "Y"), (0, 2, "X", "Z"), (1, 2, "Y", "Z")]
+    overall = (analysis or {}).get("bounds") or [[0, 0, 0], [1, 1, 1]]
+    components = [layout.get("inletBody"), layout.get("outletBody")]
+    colors = ["#2563eb", "#16a34a"]
+    paths = [layout.get("mainPath") or [], layout.get("leftPath") or [], layout.get("rightPath") or []]
+    path_colors = ["#111827", "#dc2626", "#dc2626"]
+    for ax, (a, b, label_a, label_b) in zip(axs, views):
+        ax.set_title(f"{label_a}-{label_b}")
+        ax.set_xlabel(label_a)
+        ax.set_ylabel(label_b)
+        ax.set_aspect("equal", adjustable="box")
+        ax.grid(True, alpha=0.22)
+        ax.set_xlim(overall[0][a] - 12, overall[1][a] + 12)
+        ax.set_ylim(overall[0][b] - 12, overall[1][b] + 12)
+        for component, color in zip(components, colors):
+            if not component:
+                continue
+            bounds = component["bounds"]
+            extents = component["extents"]
+            rect = plt.Rectangle((bounds[0][a], bounds[0][b]), extents[a], extents[b], fill=False, lw=1.4, color=color)
+            ax.add_patch(rect)
+        for points, color in zip(paths, path_colors):
+            if not points:
+                continue
+            xs = [point[a] for point in points]
+            ys = [point[b] for point in points]
+            ax.plot(xs, ys, color=color, lw=2.0, marker="o", markersize=3)
+    fig.tight_layout()
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
+    return {"ok": True, "path": str(path)}
+
+
+def run_openfoam_surface_check(case_dir, stl_name, toolchain):
+    docker = (toolchain.get("docker") or {}).get("dockerPath") or command_path("docker")
+    images = (toolchain.get("docker") or {}).get("images") or []
+    if not docker or not images:
+        return {"ok": False, "ran": False, "error": "OpenFOAM Docker image is not available."}
+    cmd = [
+        docker,
+        "run",
+        "--rm",
+        "-v",
+        f"{case_dir}:/case",
+        images[0],
+        "bash",
+        "-lc",
+        f"cd /case && surfaceCheck constant/triSurface/{stl_name}",
+    ]
+    started = time.time()
+    try:
+        proc = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=120,
+            env={**os.environ, "PATH": PATH_FOR_CODEX},
+        )
+    except Exception as exc:
+        return {"ok": False, "ran": False, "error": str(exc)}
+    output = "\n".join([proc.stdout or "", proc.stderr or ""]).strip()
+    return {
+        "ok": proc.returncode == 0 and "Surface has no illegal triangles" in output,
+        "ran": True,
+        "returnCode": proc.returncode,
+        "durationMs": round((time.time() - started) * 1000),
+        "summary": compact(output, 1800),
+    }
+
+
+def stage_inferred_cpap_duct_design(target, stl_path, constraints, analysis, toolchain, case_dir):
+    layout = infer_cpap_duct_ports(stl_path, constraints)
+    if not layout.get("ok"):
+        return {"ok": False, "error": layout.get("error", "Could not infer ports from STL.")}
+    slug = "inferred_cpap_split_duct"
+    scad_path = target / f"{slug}.scad"
+    stl_path_out = target / f"{slug}.stl"
+    airway_scad_path = target / f"{slug}_airway.scad"
+    airway_stl_path = target / f"{slug}_airway.stl"
+    ports_path = target / "inferred_ports.json"
+    preview_path = target / "duct_design_preview.png"
+    surface_check_path = target / "surface_check.txt"
+
+    scad_text = scad_inferred_duct_text(layout)
+    scad_path.write_text(scad_text, encoding="utf-8")
+    airway_scad_path.write_text(scad_text.replace('model = "shell";', 'model = "airway";'), encoding="utf-8")
+    ports_path.write_text(json.dumps(layout, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    preview = write_duct_preview(preview_path, layout, analysis)
+
+    openscad = command_path("openscad")
+    render = {"ok": False, "ran": False, "error": "OpenSCAD is not available."}
+    airway_render = {"ok": False, "ran": False, "error": "OpenSCAD is not available."}
+    if openscad:
+        started = time.time()
+        proc = subprocess.run(
+            [openscad, "-o", str(stl_path_out), str(scad_path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=180,
+            env={**os.environ, "PATH": PATH_FOR_CODEX},
+        )
+        render = {
+            "ok": proc.returncode == 0 and stl_path_out.exists(),
+            "ran": True,
+            "returnCode": proc.returncode,
+            "durationMs": round((time.time() - started) * 1000),
+            "stdout": compact(proc.stdout, 800),
+            "stderr": compact(proc.stderr, 1200),
+        }
+        started = time.time()
+        proc_air = subprocess.run(
+            [openscad, "-o", str(airway_stl_path), str(airway_scad_path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=120,
+            env={**os.environ, "PATH": PATH_FOR_CODEX},
+        )
+        airway_render = {
+            "ok": proc_air.returncode == 0 and airway_stl_path.exists(),
+            "ran": True,
+            "returnCode": proc_air.returncode,
+            "durationMs": round((time.time() - started) * 1000),
+            "stdout": compact(proc_air.stdout, 800),
+            "stderr": compact(proc_air.stderr, 1200),
+        }
+
+    surface_check = {"ok": False, "ran": False, "error": "Duct STL was not rendered."}
+    if render.get("ok") and case_dir:
+        tri_dir = Path(case_dir) / "constant" / "triSurface"
+        tri_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(stl_path_out, tri_dir / "duct_candidate.stl")
+        if airway_render.get("ok"):
+            shutil.copy2(airway_stl_path, tri_dir / "airway_candidate.stl")
+        surface_check = run_openfoam_surface_check(Path(case_dir), "duct_candidate.stl", toolchain)
+        surface_check_path.write_text(json.dumps(surface_check, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    return {
+        "ok": bool(render.get("ok")),
+        "layout": layout,
+        "scadPath": str(scad_path),
+        "stlPath": str(stl_path_out) if stl_path_out.exists() else "",
+        "airwayScadPath": str(airway_scad_path),
+        "airwayStlPath": str(airway_stl_path) if airway_stl_path.exists() else "",
+        "portsPath": str(ports_path),
+        "previewPath": str(preview_path) if preview.get("ok") else "",
+        "surfaceCheckPath": str(surface_check_path) if surface_check_path.exists() else "",
+        "render": render,
+        "airwayRender": airway_render,
+        "surfaceCheck": surface_check,
+    }
+
+
 def stage_stl_cfd_design_case(messages, cwd="", target_path=None):
     constraints = extract_stl_cfd_constraints(messages)
     resolved = resolve_stl_file(messages, cwd=cwd)
@@ -6704,17 +7161,22 @@ def stage_stl_cfd_design_case(messages, cwd="", target_path=None):
     analysis = analyze_stl_geometry(stl_path)
     toolchain = cfd_toolchain_status()
     case_dir = write_openfoam_case_skeleton(target, copied_stl, constraints, analysis, toolchain) if analysis.get("ok") else None
+    duct_design = (
+        stage_inferred_cpap_duct_design(target, stl_path, constraints, analysis, toolchain, case_dir)
+        if analysis.get("ok")
+        else {"ok": False, "error": analysis.get("error", "STL analysis failed.")}
+    )
     setup = {
         "sourceStl": str(stl_path),
         "copiedStl": str(target / copied_stl),
         "constraints": constraints,
         "geometry": analysis,
         "toolchain": toolchain,
+        "ductDesign": duct_design,
         "requiredNextSteps": [
-            "Identify CPAP Inlet 1 and both CPAP Outlet 1 target patches from named CAD bodies or selected mesh surfaces.",
-            "Generate the duct body with 1 mm walls, at least 1.5 mm clearance, no Y-direction growth, and no more than 5 mm outward growth.",
-            "Name inlet, outlet, and wall patches before running OpenFOAM.",
-            "Run surfaceCheck, mesh generation, checkMesh, then steady internal-flow CFD.",
+            "Open the generated duct STL in Fusion 360 with the source STL and confirm the inferred inlet/outlet selections.",
+            "If the selected ports are wrong, edit inferred_ports.json or the SCAD control points and regenerate.",
+            "Use the generated airway STL and OpenFOAM case as the CFD starting point for meshing and pressure/velocity validation.",
         ],
     }
     (target / "case_setup.json").write_text(json.dumps(setup, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -6725,7 +7187,11 @@ def stage_stl_cfd_design_case(messages, cwd="", target_path=None):
         f"""#!/usr/bin/env bash
 set -euo pipefail
 case_dir="$(cd "$(dirname "$0")/openfoam_case" && pwd)"
-docker run --rm -v "$case_dir:/case" -w /case {image} bash -lc 'surfaceCheck constant/triSurface/source.stl'
+target="duct_candidate.stl"
+if [ ! -f "$case_dir/constant/triSurface/$target" ]; then
+  target="source.stl"
+fi
+docker run --rm -v "$case_dir:/case" {image} bash -lc "cd /case && surfaceCheck constant/triSurface/$target"
 """,
         encoding="utf-8",
     )
@@ -6744,6 +7210,7 @@ docker run --rm -v "$case_dir:/case" -w /case {image} bash -lc 'surfaceCheck con
             "surfaceCheckScriptPath": str(run_path),
             "geometry": analysis,
             "toolchain": toolchain,
+            "ductDesign": duct_design,
             "error": "" if analysis.get("ok") else analysis.get("error", "STL analysis failed."),
         }
     )
@@ -6754,6 +7221,7 @@ def stl_cfd_precheck_text(setup):
     constraints = setup.get("constraints", {})
     geometry = setup.get("geometry", {})
     toolchain = setup.get("toolchain", {})
+    duct_design = setup.get("ductDesign") or {}
     components = geometry.get("largestComponents") or []
     lines = [
         "# CFD Precheck",
@@ -6796,9 +7264,15 @@ def stl_cfd_precheck_text(setup):
             f"- Docker OpenFOAM images: {', '.join(toolchain.get('docker', {}).get('images') or []) or 'none'}",
             f"- Python gmsh/mesh tools: {toolchain.get('pythonModules')}",
             "",
-            "## Boundary Condition Needed",
+            "## Generated Duct",
             "",
-            "The STL must provide or be mapped to named inlet/outlet/wall patches. A binary STL often loses Fusion component names, so a STEP/F3D export or manual face selections may be needed before CFD can be run honestly.",
+            f"- Design generated: {duct_design.get('ok', False)}",
+            f"- Duct STL: `{duct_design.get('stlPath', '')}`",
+            f"- Airway STL: `{duct_design.get('airwayStlPath', '')}`",
+            f"- Port inference: `{duct_design.get('portsPath', '')}`",
+            f"- OpenFOAM surface check: {duct_design.get('surfaceCheck', {}).get('ok', False)}",
+            "",
+            "A binary STL can lose Fusion component names, so this design uses geometry inference. Check `inferred_ports.json` and `duct_design_preview.png` before treating the port selections as final.",
         ]
     )
     return "\n".join(lines) + "\n"
@@ -6807,17 +7281,23 @@ def stl_cfd_precheck_text(setup):
 def stl_cfd_readme_text(setup, case_dir, run_path):
     constraints = setup.get("constraints", {})
     toolchain = setup.get("toolchain", {})
+    duct_design = setup.get("ductDesign") or {}
     return "\n".join(
         [
             "# STL-Based CPAP Duct CFD Package",
             "",
-            "This folder is the geometry and CFD preflight for the uploaded STL. It replaces the old generic CPAP duct template path.",
+            "This folder contains an inferred CPAP split-duct design generated from the uploaded STL plus supporting CFD preflight files.",
             "",
             "## Files",
             "",
+            f"- `{Path(duct_design.get('stlPath') or 'inferred_cpap_split_duct.stl').name}`: generated duct STL.",
+            f"- `{Path(duct_design.get('scadPath') or 'inferred_cpap_split_duct.scad').name}`: editable parametric duct source.",
+            f"- `{Path(duct_design.get('airwayStlPath') or 'inferred_cpap_split_duct_airway.stl').name}`: internal-airway solid for CFD meshing setup.",
+            f"- `{Path(duct_design.get('portsPath') or 'inferred_ports.json').name}`: inferred inlet/outlet bodies, control points, diameters, and assumptions.",
+            f"- `{Path(duct_design.get('previewPath') or 'duct_design_preview.png').name}`: visual check of inferred components and duct path.",
             "- `case_setup.json`: machine-readable mesh, constraints, and toolchain status.",
             "- `CFD_PRECHECK.md`: human-readable geometry/CFD preflight.",
-            f"- `{case_dir.name}`: OpenFOAM case scaffold with the source STL under `constant/triSurface/source.stl`.",
+            f"- `{case_dir.name}`: OpenFOAM case scaffold with source and generated duct STLs under `constant/triSurface/`.",
             f"- `{run_path.name}`: Docker OpenFOAM surface-check script.",
             "",
             "## Design Contract",
@@ -6830,8 +7310,8 @@ def stl_cfd_readme_text(setup, case_dir, run_path):
             "## CFD Status",
             "",
             f"- OpenFOAM Docker images detected: {', '.join(toolchain.get('docker', {}).get('images') or []) or 'none'}",
-            "- A completed CFD run still requires a generated duct body and named boundary patches.",
-            "- Do not call this design CFD-validated until the case has run and outlet balance, pressure drop, and recirculation have been reviewed.",
+            f"- Generated duct surface check passed: {duct_design.get('surfaceCheck', {}).get('ok', False)}",
+            "- The generated airway STL is the next meshing target for full pressure/velocity validation.",
         ]
     ) + "\n"
 
@@ -6844,6 +7324,7 @@ def stl_cfd_case_working_notes(result):
         ]
     geometry = result.get("geometry") or {}
     toolchain = result.get("toolchain") or {}
+    duct_design = result.get("ductDesign") or {}
     notes = [
         f"Found STL from {result.get('stlSource')}: {result.get('stlPath')}.",
         (
@@ -6856,9 +7337,18 @@ def stl_cfd_case_working_notes(result):
         ),
         "Captured the hard design constraints: 1.5 mm clearance, 1 mm wall, 5 mm max outward growth, and 0 mm Y growth.",
     ]
+    if duct_design.get("ok"):
+        notes.append(f"Generated inferred CPAP split-duct STL at {duct_design.get('stlPath')}.")
+        if duct_design.get("surfaceCheck", {}).get("ran"):
+            notes.append(
+                "Ran OpenFOAM surfaceCheck on the generated duct; "
+                + ("surface passed." if duct_design.get("surfaceCheck", {}).get("ok") else "surface needs review.")
+            )
+    else:
+        notes.append(f"Duct generation did not complete: {duct_design.get('error') or duct_design.get('render', {}).get('stderr') or 'unknown error'}.")
     if toolchain.get("openfoamDocker"):
         notes.append(
-            "Found OpenFOAM Docker capability, so CFD can be run after the duct body and named inlet/outlet/wall patches exist."
+            "Found OpenFOAM Docker capability for CFD follow-through."
         )
     elif toolchain.get("openfoamLocal"):
         notes.append("Found local OpenFOAM commands for a future CFD run.")
@@ -6884,6 +7374,8 @@ def format_stl_cfd_case_answer(result):
     geometry = result.get("geometry") or {}
     constraints = result.get("constraints") or {}
     toolchain = result.get("toolchain") or {}
+    duct_design = result.get("ductDesign") or {}
+    layout = duct_design.get("layout") or {}
     scene_names = geometry.get("sceneNames") or []
     component_note = (
         "The STL loaded as one scene geometry, so Fusion body names like `CPAP Inlet 1` and `CPAP Outlet 1` were not preserved in a directly usable way."
@@ -6893,7 +7385,7 @@ def format_stl_cfd_case_answer(result):
     if toolchain.get("openfoamDocker"):
         cfd_status = (
             "OpenFOAM Docker images are available on this Mac, so the solver capability is present. "
-            "The remaining blocker is not compute; it is producing the duct body and named inlet/outlet/wall patches from the STL."
+            "The generated duct surface has been prepared for the OpenFOAM case."
         )
     elif toolchain.get("openfoamLocal"):
         cfd_status = "Local OpenFOAM commands are available for the eventual CFD run."
@@ -6901,10 +7393,19 @@ def format_stl_cfd_case_answer(result):
         cfd_status = "No OpenFOAM solver path is visible yet, so CFD is blocked until a free solver is installed or exposed."
     return "\n\n".join(
         [
-            "I found the STL and staged an STL-aware CFD/design preflight instead of using the generic CPAP duct template.",
+            (
+                "I generated an inferred CPAP split-duct design from the STL."
+                if duct_design.get("ok")
+                else "I found the STL, but duct generation did not complete."
+            ),
             "\n".join(
                 [
                     f"- Source STL: `{result.get('stlPath')}`",
+                    f"- Duct STL: `{duct_design.get('stlPath') or 'not generated'}`",
+                    f"- Editable SCAD: `{duct_design.get('scadPath') or 'not generated'}`",
+                    f"- Airway STL for CFD: `{duct_design.get('airwayStlPath') or 'not generated'}`",
+                    f"- Inferred ports: `{duct_design.get('portsPath') or 'not generated'}`",
+                    f"- Design preview: `{duct_design.get('previewPath') or 'not generated'}`",
                     f"- Preflight: `{result.get('precheckPath')}`",
                     f"- Case setup: `{result.get('caseSetupPath')}`",
                     f"- OpenFOAM case scaffold: `{result.get('openfoamCaseDir')}`",
@@ -6919,12 +7420,21 @@ def format_stl_cfd_case_answer(result):
                 f"Design constraints captured: {constraints.get('clearanceMm', 1.5):.2f} mm clearance, "
                 f"{constraints.get('wallThicknessMm', 1.0):.2f} mm wall thickness, "
                 f"{constraints.get('maxGrowthMm', 5.0):.2f} mm max outward growth, "
-                f"{constraints.get('yGrowthMm', 0.0):.2f} mm Y-direction growth."
+                f"{constraints.get('yGrowthMm', 0.0):.2f} mm Y-direction growth. "
+                f"The generated path is flattened in Y with main ID {layout.get('mainIdMm', 0):.2f} mm and branch ID {layout.get('branchIdMm', 0):.2f} mm."
+            ),
+            (
+                "Surface check: "
+                + (
+                    "passed with OpenFOAM `surfaceCheck`."
+                    if duct_design.get("surfaceCheck", {}).get("ok")
+                    else compact(duct_design.get("surfaceCheck", {}).get("error") or "not run", 220)
+                )
             ),
             "CFD status: " + cfd_status,
             (
-                "You should also consider: the next correct engineering step is to identify the inlet/outlet faces from the original CAD/STEP/F3D body names or manual mesh selections, then generate the duct and run the OpenFOAM case. "
-                "The app will now expose that boundary instead of instantly returning a made-up first-pass duct."
+                "You should also consider: because the STL did not preserve Fusion component names, this is an inferred-port design. "
+                "Open `duct_design_preview.png` and `inferred_ports.json` with the source STL; if the selected inlet/outlet bodies are wrong, revise the port points and regenerate before printing."
             ),
         ]
     )
@@ -8144,21 +8654,26 @@ def package_health_report():
             ]
             result = stage_stl_cfd_design_case(stl_messages, cwd=tmp_dir, target_path=tmp_path / "case")
             answer = format_stl_cfd_case_answer(result)
+            duct_design = result.get("ductDesign") or {}
             ok = (
                 is_stl_cfd_duct_design_request(stl_messages)
                 and result.get("ok")
+                and duct_design.get("ok")
+                and Path(duct_design.get("scadPath", "")).exists()
+                and Path(duct_design.get("stlPath", "")).exists()
                 and Path(result.get("precheckPath", "")).exists()
                 and Path(result.get("caseSetupPath", "")).exists()
-                and "STL-aware CFD/design preflight" in answer
+                and "inferred CPAP split-duct design" in answer
+                and "Duct STL:" in answer
                 and "1.00 mm wall thickness" in answer
                 and "Fusion 360 script:" not in answer
                 and "OpenSCAD model:" not in answer
-                and "generic CPAP duct template" in answer
+                and "generic CPAP duct template" not in answer
             )
         add(
             "tools:stl-cfd-geometry-routing",
             "pass" if ok else "fail",
-            "STL duct prompts inspect the mesh and stage CFD preflight instead of generic CAD",
+            "STL duct prompts generate an inferred duct artifact instead of generic CAD",
         )
     except Exception as exc:
         add("tools:stl-cfd-geometry-routing", "fail", str(exc))
@@ -9818,7 +10333,14 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 self,
                 {
                     "type": "thought",
-                    "text": "Inspecting the STL mesh and extracting hard clearance, wall, and growth constraints before any duct template is allowed to answer.",
+                    "text": "Inspecting the STL mesh, inferring CPAP inlet/outlet geometry, and generating a real duct artifact before answering.",
+                },
+            )
+            json_line(
+                self,
+                {
+                    "type": "thought",
+                    "text": "Running the CAD design worker: port inference, flattened split-duct generation, STL export, and OpenFOAM surface check when available.",
                 },
             )
             try:

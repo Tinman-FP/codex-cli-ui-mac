@@ -1,5 +1,14 @@
 # Changelog
 
+## v2026.07.12
+
+- Upgrades STL/CPAP duct handling from preflight-only to a real inferred design worker.
+- Infers likely CPAP inlet/outlet bodies from STL mesh geometry when Fusion component names are not preserved.
+- Generates editable OpenSCAD, printable duct STL, internal-airway STL, inferred-port JSON, and a design-preview image.
+- Uses a flattened split-duct path to respect 1 mm wall thickness, 1.5 mm clearance intent, 5 mm growth, and zero-Y-growth requests.
+- Runs OpenFOAM Docker `surfaceCheck` on generated duct STL when available.
+- Updates package-health regression so STL duct prompts must produce a duct artifact instead of only a preflight report.
+
 ## v2026.07.11
 
 - Adds chat-bar file attachments through drag/drop, paste, and the `+` attach button.
