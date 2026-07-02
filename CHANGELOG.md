@@ -1,5 +1,13 @@
 # Changelog
 
+## v2026.07.10
+
+- Fixes cooling-duct research prompts being misrouted into CAD artifact generation.
+- Adds `cad-research-direct-answer` for part-cooling duct research and reusable design rules.
+- Routes Printables/GitHub/inspiration/practical-technique duct prompts through Local Research instead of local CAD staging.
+- Adds reusable source-backed playbook guidance for pressure loss, plenum balance, CPAP outlet area, material-specific cooling, and CFD validation.
+- Adds a package-health regression for both the initial research prompt and the follow-up correction prompt.
+
 ## v2026.07.09
 
 - Fixes CPAP hose inner-diameter questions being misrouted into CAD artifact generation.

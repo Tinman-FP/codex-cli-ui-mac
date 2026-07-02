@@ -2181,7 +2181,7 @@ def is_read_only_printer_status_query(messages):
 
 
 def is_cad_design_request(messages):
-    if is_cpap_hose_spec_question(messages):
+    if is_cpap_hose_spec_question(messages) or is_cooling_duct_research_request(messages):
         return False
     text = "\n".join(str(message.get("text", "")) for message in messages[-4:]).lower()
     if not text_has_any(text, CAD_DESIGN_TERMS):
@@ -3510,6 +3510,57 @@ def is_cpap_hose_spec_question(messages):
     )
 
 
+def is_cooling_duct_research_request(messages):
+    query = latest_user_text(messages).lower()
+    if not query:
+        return False
+    duct_terms = (
+        "duct",
+        "cooling duct",
+        "part cooling",
+        "parts cooling",
+        "fan duct",
+        "cpap",
+        "airflow",
+    )
+    research_terms = (
+        "research",
+        "educate",
+        "learn",
+        "study",
+        "applicable data",
+        "requirements",
+        "requirments",
+        "practical design",
+        "practical techniques",
+        "inspiration",
+        "look at printable",
+        "look at printables",
+        "github",
+        "do not forget",
+        "dont forget",
+        "don't forget",
+    )
+    artifact_terms = (
+        "create a file",
+        "make a file",
+        "save the file",
+        "write the file",
+        "generate cad",
+        "stage",
+        "fusion 360",
+        "imported into fusion",
+        "step file",
+        "stl file",
+        "openscad",
+    )
+    return (
+        text_has_any(query, duct_terms)
+        and text_has_any(query, research_terms)
+        and not text_has_any(query, artifact_terms)
+    )
+
+
 def route_query_text(messages, cwd=""):
     recent = []
     for message in (messages or [])[-6:]:
@@ -3531,6 +3582,7 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
     text = route_query_text(messages, cwd)
     previous_project = project_from_thread(messages)
     cpap_hose_spec = is_cpap_hose_spec_question(messages)
+    cooling_duct_research = is_cooling_duct_research_request(messages)
     cad_design = is_cad_design_request(messages)
     public_printer_research = wants_public_printer_research(messages) and not cad_design
     scores = []
@@ -3570,6 +3622,10 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
         project_id = "research-parts-reference"
         score = max(score, 30)
         matched = ["cpap-hose-spec"] + [item for item in matched if item != "cpap-hose-spec"]
+    elif cooling_duct_research:
+        project_id = "cad-modeling-projects"
+        score = max(score, 34)
+        matched = ["cooling-duct-research"] + [item for item in matched if item != "cooling-duct-research"]
     elif cad_design:
         project_id = "cad-modeling-projects"
         score = max(score, 32)
@@ -3580,6 +3636,7 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
         wants_research_quality_context(messages)
         or wants_web_context(messages)
         or public_printer_research
+        or cooling_duct_research
         or cad_design
     )
     local_need_terms = (
@@ -3587,7 +3644,11 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
         "repo", "github", "launchctl", "dock", "install",
         "upload", "restart", "deploy", "production", "flightops",
     )
-    needs_local = (any(term in text for term in local_need_terms) or cad_design) and not public_printer_research
+    needs_local = (
+        (any(term in text for term in local_need_terms) or cad_design)
+        and not public_printer_research
+        and not cooling_duct_research
+    )
     preferred_engine = playbook.get("preferred_engine", "local")
     engine = preferred_engine
     if public_research and not needs_local and (
@@ -3597,6 +3658,7 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
             "general",
             "printer-klipper-ops",
             "tinmanx-slicer-research",
+            "cad-modeling-projects",
         }
         or (project_id == "tinmanx-slicer-research" and wants_material_shopping_context(messages))
         or public_printer_research
@@ -4201,6 +4263,71 @@ def cpap_hose_spec_direct_answer(messages):
     )
 
 
+COOLING_DUCT_RESEARCH_SOURCES = (
+    (
+        "ScienceDirect part-cooling fan duct geometry optimization",
+        "https://www.sciencedirect.com/science/article/abs/pii/S2214785321069534",
+    ),
+    (
+        "Periodica Polytechnica generative CFD cooling duct paper",
+        "https://www.pp.bme.hu/me/article/download/42624/24233/240421",
+    ),
+    (
+        "CrownCooler CPAP ring duct on GitHub",
+        "https://github.com/sneakytreesnake/CrownCooler",
+    ),
+    (
+        "Printables part-cooling-duct design collection",
+        "https://www.printables.com/tag/partcoolingduct",
+    ),
+    (
+        "Prusa Mini+ CFD-optimized fan duct on Printables",
+        "https://www.printables.com/model/351703-prusa-mini-cfd-optimized-fan-duct-v2",
+    ),
+    (
+        "JLC3DP material cooling guidance",
+        "https://jlc3dp.com/blog/3d-printing-cooling-guide",
+    ),
+)
+
+
+def cooling_duct_research_direct_answer(messages):
+    if not is_cooling_duct_research_request(messages):
+        return ""
+    source_lines = "\n".join(f"- {title}: {url}" for title, url in COOLING_DUCT_RESEARCH_SOURCES)
+    return "\n\n".join(
+        [
+            "Start with a research brief, not a CAD file.",
+            (
+                "This is why: the request is to learn part-cooling duct requirements and airflow behavior before design. "
+                "A useful answer should extract design rules from CFD papers, Printables examples, GitHub CPAP ducts, and practical material-cooling guidance before generating geometry."
+            ),
+            (
+                "Reusable design rules: keep pressure loss low with smooth inlets, large radii, gradual transitions, and no sudden dead-end cavities; use a plenum to equalize flow before splitting; "
+                "aim air at the fresh bead just below/around the nozzle without cooling the heater block; keep outlets symmetric or intentionally balanced; leave nozzle visibility and service access; "
+                "make outlet tips replaceable or tunable; validate with overhang/bridge tests, smoke or tuft checks, and temperature/flow measurements."
+            ),
+            (
+                "CPAP-specific rule: do not choke a standard 19 mm hose down to two tiny outlets unless testing proves the blower can handle the pressure. "
+                "For a first serious CPAP duct, target a larger aggregate outlet area, roughly 60-100 percent of inlet area, then tune outlet slot width/angle for velocity and focus. "
+                "Ring/crown ducts, broad slot outlets, or dual curved outlets are better starting patterns than two small round nozzles."
+            ),
+            (
+                "Material rules: PLA usually wants the strongest targeted cooling; PETG/PCTG usually need moderate cooling so layer bonding does not suffer; ABS/ASA usually need low or feature-specific cooling to avoid warp, with bridges and tiny features as exceptions."
+            ),
+            (
+                "CFD setup to remember: model the real fan/hose as a velocity or mass-flow inlet, use pressure outlets at the duct exits, include the nozzle/toolhead blockage, inspect pressure drop, outlet balance, recirculation, and velocity vectors at the bead. "
+                "Do not call the design CFD-validated until simulation is checked against a real print or flow test."
+            ),
+            "Sources to keep in the playbook:\n" + source_lines,
+            (
+                "You should also consider: the next design pass should start by collecting 6-10 reference geometries from Printables/GitHub, sorting them by outlet strategy "
+                "(ring/crown, dual side jets, front slot, auxiliary fan duct), then choosing the pattern that fits the actual toolhead envelope."
+            ),
+        ]
+    )
+
+
 def material_selection_direct_answer(messages, route):
     query = latest_user_text(messages).strip()
     lower = query.lower()
@@ -4784,6 +4911,17 @@ def autonomy_supervisor_find_gaps(
                 }
             )
 
+    if is_cooling_duct_research_request(messages):
+        if stage == "post" and answer_has_cad_artifact(answer):
+            gaps.append(
+                {
+                    "kind": "cad-research-misrouted",
+                    "severity": "high",
+                    "reason": "The request is asking for research and design requirements, not a generated CAD package.",
+                    "recovery": "Answer with a cooling-duct research brief, practical design rules, validation plan, and source links.",
+                }
+            )
+
     missing_command = missing_command_from_error(combined_error)
     if missing_command:
         recovery = tool_recovery_plan(
@@ -4916,6 +5054,18 @@ def autonomy_supervisor_recover_answer(
         except Exception as exc:
             if emit:
                 emit(f"CAD artifact recovery failed: {compact(exc, 140)}")
+
+    if any(gap.get("kind") == "cad-research-misrouted" for gap in gaps):
+        recovered = cooling_duct_research_direct_answer(messages)
+        if recovered:
+            append_autonomy_supervisor_log(
+                {
+                    "action": "cad-research-recovery",
+                    "route": route,
+                    "gaps": gaps,
+                }
+            )
+            return {"text": recovered, "status": status, "recovered": True}
 
     web_gap = next((gap for gap in gaps if gap.get("kind") == "web-evidence-missing"), None)
     if web_gap and web_search == "live" and (route or {}).get("engine") != "local-research":
@@ -6591,6 +6741,15 @@ def local_research_queries(query, route):
                 "site:ebay.com 300rpm permanent magnet generator 3 phase 96v",
             ]
         )
+    elif is_cooling_duct_research_request([{"role": "user", "text": query}]):
+        queries.extend(
+            [
+                "3D printer part cooling duct CFD analysis optimization geometry",
+                "site:printables.com 3D printer part cooling duct CFD optimized",
+                "site:github.com CPAP part cooling duct Voron 3D printer",
+                "3D printer CPAP part cooling duct airflow PLA PETG ABS practical design",
+            ]
+        )
     elif is_cad_design_request([{"role": "user", "text": query}]):
         queries.extend(
             [
@@ -7215,6 +7374,71 @@ def package_health_report():
         )
     except Exception as exc:
         add("tools:cpap-hose-spec-direct", "fail", str(exc))
+
+    try:
+        research_messages = [
+            {
+                "role": "user",
+                "text": (
+                    "I want you to research designing a 3d printer parts cooling duct. "
+                    "I want you to educate yourself on design requirements and airflow. "
+                    "Search the web for applicable data and do not forget the research."
+                ),
+            }
+        ]
+        correction_messages = [
+            {
+                "role": "user",
+                "text": (
+                    "The duct that you designed is not even close to being usable. "
+                    "Look at printable.com and github for inspiration as well as practical design techniques. "
+                    "Do not limit your research to these 2 sites."
+                ),
+            }
+        ]
+        research_route = route_manager(research_messages, requested_profile="manager", web_search="live")
+        correction_route = route_manager(correction_messages, requested_profile="manager", web_search="live")
+        research_answer = cooling_duct_research_direct_answer(research_messages)
+        correction_answer = cooling_duct_research_direct_answer(correction_messages)
+        research_queries = local_research_queries(latest_user_text(research_messages), research_route)
+        bad_answer = (
+            "I staged a first-pass CPAP cooling duct CAD package.\n"
+            "Fusion 360 script: /tmp/example.py\n"
+            "OpenSCAD model: /tmp/example.scad"
+        )
+        supervisor = autonomy_supervisor_recover_answer(
+            research_messages,
+            research_route,
+            bad_answer,
+            web_search="live",
+        )
+        ok = (
+            is_cooling_duct_research_request(research_messages)
+            and not is_cad_design_request(research_messages)
+            and not is_cad_artifact_tool_request(research_messages)
+            and research_route.get("projectId") == "cad-modeling-projects"
+            and research_route.get("engine") == "local-research"
+            and is_cooling_duct_research_request(correction_messages)
+            and not is_cad_artifact_tool_request(correction_messages)
+            and correction_route.get("engine") == "local-research"
+            and any("printables.com" in query for query in research_queries)
+            and any("github.com" in query for query in research_queries)
+            and "Start with a research brief" in research_answer
+            and "Start with a research brief" in correction_answer
+            and "60-100 percent" in research_answer
+            and "Fusion 360 script" not in research_answer
+            and "OpenSCAD model" not in research_answer
+            and "Fusion 360 script" not in correction_answer
+            and supervisor.get("recovered")
+            and "Start with a research brief" in supervisor.get("text", "")
+        )
+        add(
+            "tools:cooling-duct-research-routing",
+            "pass" if ok else "fail",
+            "cooling duct research prompts route to research, not CAD artifact staging",
+        )
+    except Exception as exc:
+        add("tools:cooling-duct-research-routing", "fail", str(exc))
 
     try:
         analysis = build_analytical_context(
@@ -8667,6 +8891,60 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 route,
                 admin_topic,
                 direct_cpap_hose_answer,
+                normalize=False,
+            )
+            json_line(self, {"type": "done", "returnCode": 0})
+            return
+
+        cooling_research_answer = cooling_duct_research_direct_answer(messages)
+        if cooling_research_answer:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            json_line(
+                self,
+                {
+                    "type": "status",
+                    "message": "starting",
+                    "cwd": cwd,
+                    "profile": profile,
+                    "effectiveProfile": effective_profile,
+                    "accessLevel": "local-files",
+                    "reasoningLevel": reasoning_level,
+                    "webSearch": web_search,
+                    "managerDepth": manager_depth,
+                    "friendlinessLevel": friendliness_level,
+                    "humorLevel": humor_level,
+                    "mode": "cad-research-direct-answer",
+                    "engine": "local-research-guide",
+                    "model": "",
+                    "freeOnlyRedirect": free_only_redirect,
+                    "route": route,
+                    "adminTopic": admin_topic,
+                },
+            )
+            json_line(
+                self,
+                {
+                    "type": "thought",
+                    "text": "Recognized this as a cooling-duct research request, not a CAD artifact request.",
+                },
+            )
+            json_line(
+                self,
+                {
+                    "type": "thought",
+                    "text": "Using the reusable part-cooling duct playbook with Printables, GitHub, CFD, and material-cooling source links.",
+                },
+            )
+            emit_assistant_answer(
+                self,
+                messages,
+                route,
+                admin_topic,
+                cooling_research_answer,
                 normalize=False,
             )
             json_line(self, {"type": "done", "returnCode": 0})
