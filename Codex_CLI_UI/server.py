@@ -3,6 +3,7 @@ import concurrent.futures
 import json
 import hashlib
 import html
+import math
 import os
 import re
 import selectors
@@ -36,6 +37,7 @@ GOLDEN_TESTS_PATH = DATA_DIR / "golden_tests.json"
 GOLDEN_TEST_RESULTS_PATH = DATA_DIR / "golden_test_results.json"
 MODEL_WARMUP_STATE_PATH = DATA_DIR / "model_warmup_state.json"
 LOCAL_TOOL_OUTPUT_DIR = DATA_DIR / "generated" / "printer-macros"
+LOCAL_CAD_OUTPUT_DIR = DATA_DIR / "generated" / "cad"
 CAPABILITY_TOOL_LOG_PATH = DATA_DIR / "capability_tool_log.jsonl"
 MIN_FREE_BYTES_FOR_AUTO_INSTALL = int(
     os.environ.get("CODEX_MIN_FREE_BYTES_FOR_AUTO_INSTALL", str(20 * 1024 * 1024 * 1024))
@@ -318,6 +320,7 @@ RESEARCH_CONTEXT_TERMS = {
     "pricing",
     "product",
     "recommend",
+    "simulation",
     "seller",
     "shopping",
     "source",
@@ -328,6 +331,22 @@ RESEARCH_CONTEXT_TERMS = {
     "toolhead",
     "vendor",
     "wind turbine",
+}
+CAD_DESIGN_TERMS = {
+    "cad",
+    "fusion 360",
+    "step",
+    "stp",
+    "stl",
+    "3d model",
+    "model",
+    "design",
+    "duct",
+    "cpap",
+    "cfd",
+    "cooling duct",
+    "part cooling",
+    "imported into fusion",
 }
 STOP_WORDS = {
     "about",
@@ -416,7 +435,20 @@ PROJECT_QUERY_HINTS = {
         "vpn",
         "tailnet",
     ),
-    "cad-modeling-projects": ("p51", "fusion 360", "cad", "fuselage", "wing"),
+    "cad-modeling-projects": (
+        "p51",
+        "fusion 360",
+        "cad",
+        "fuselage",
+        "wing",
+        "step",
+        "stl",
+        "duct",
+        "cpap",
+        "cfd",
+        "cooling duct",
+        "part cooling",
+    ),
     "research-parts-reference": ("fk275", "serpentine belt", "cross reference", "part number"),
     "energy-power-research": ("wind turbine", "alternator", "60vdc", "60 vdc", "300 rpm"),
     "bible-kjv-study": ("king james", "kjv", "bible", "scripture"),
@@ -544,10 +576,12 @@ PROJECT_PLAYBOOKS = {
         "triggers": (
             "p51", "fusion 360", "cad", "model", "fuselage", "wing",
             "rudder", "stl", ".step", "step file", "stp", "printable", "3d model",
+            "duct", "cpap", "cfd", "cooling duct", "part cooling", "imported into fusion",
         ),
         "rules": (
             "Keep manufacturability and print orientation in view, not only geometry.",
             "When converting or designing files, verify dimensions and exported artifacts.",
+            "For CAD design requests, create a concrete artifact path whenever feasible and state assumptions, dimensions, and import route.",
         ),
     },
     "research-parts-reference": {
@@ -1153,6 +1187,24 @@ FREE_TOOL_MANIFEST = {
         "capabilities": ["searchable PDF creation", "document OCR pipeline"],
         "free": True,
         "autoInstall": True,
+    },
+    "openscad": {
+        "label": "OpenSCAD",
+        "commands": ["openscad"],
+        "brew": ["openscad"],
+        "estimatedBytes": 700 * MIB,
+        "capabilities": ["scripted CAD", "STL export from SCAD models"],
+        "free": True,
+        "autoInstall": True,
+    },
+    "freecad": {
+        "label": "FreeCAD",
+        "commands": ["freecad", "FreeCADCmd"],
+        "brew": ["freecad"],
+        "estimatedBytes": 2500 * MIB,
+        "capabilities": ["parametric CAD", "STEP/STL export"],
+        "free": True,
+        "autoInstall": False,
     },
 }
 COMMAND_TO_FREE_TOOL = {
@@ -2091,6 +2143,8 @@ def is_read_only_printer_status_query(messages):
     query = latest_user_text(messages).lower()
     if not query or not wants_qidi_context(messages):
         return False
+    if is_cad_design_request(messages):
+        return False
     status_terms = (
         "status",
         "state",
@@ -2123,6 +2177,26 @@ def is_read_only_printer_status_query(messages):
     return any(term in query for term in status_terms) and not any(
         term in query for term in change_terms
     )
+
+
+def is_cad_design_request(messages):
+    text = "\n".join(str(message.get("text", "")) for message in messages[-4:]).lower()
+    if not text_has_any(text, CAD_DESIGN_TERMS):
+        return False
+    deliverable_terms = (
+        "import",
+        "imported",
+        "fusion",
+        "cad",
+        "step",
+        "stl",
+        "model",
+        "design",
+        "duct",
+        "geometry",
+        "dimensions",
+    )
+    return text_has_any(text, deliverable_terms)
 
 
 def printer_endpoint_label(printer):
@@ -3430,7 +3504,8 @@ def project_from_thread(messages):
 def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_search="live"):
     text = route_query_text(messages, cwd)
     previous_project = project_from_thread(messages)
-    public_printer_research = wants_public_printer_research(messages)
+    cad_design = is_cad_design_request(messages)
+    public_printer_research = wants_public_printer_research(messages) and not cad_design
     scores = []
     for project_id, playbook in PROJECT_PLAYBOOKS.items():
         if project_id == "general":
@@ -3464,14 +3539,24 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
     else:
         score, project_id, matched = 0, "general", []
 
+    if cad_design:
+        project_id = "cad-modeling-projects"
+        score = max(score, 32)
+        matched = ["cad-design"] + [item for item in matched if item != "cad-design"]
+
     playbook = PROJECT_PLAYBOOKS[project_id]
-    public_research = wants_research_quality_context(messages) or wants_web_context(messages) or public_printer_research
+    public_research = (
+        wants_research_quality_context(messages)
+        or wants_web_context(messages)
+        or public_printer_research
+        or cad_design
+    )
     local_need_terms = (
         "ssh", "moonraker", "tailscale", "vpn", "local file", "this mac",
         "repo", "github", "launchctl", "dock", "install",
         "upload", "restart", "deploy", "production", "flightops",
     )
-    needs_local = any(term in text for term in local_need_terms) and not public_printer_research
+    needs_local = (any(term in text for term in local_need_terms) or cad_design) and not public_printer_research
     preferred_engine = playbook.get("preferred_engine", "local")
     engine = preferred_engine
     if public_research and not needs_local and (
@@ -3691,6 +3776,8 @@ def wants_research_quality_context(messages):
 
 
 def wants_public_printer_research(messages):
+    if is_cad_design_request(messages):
+        return False
     text = "\n".join(str(message.get("text", "")) for message in messages[-4:]).lower()
     product_terms = (
         "fiberseek",
@@ -3774,6 +3861,29 @@ def build_research_quality_context(messages):
     )
 
 
+def build_cad_design_context(messages, route):
+    if not is_cad_design_request(messages):
+        return ""
+
+    return "\n".join(
+        [
+            "CAD design contract:",
+            "- Treat this as an engineering design task, not a live printer status request.",
+            "- Do not check live printer status, Moonraker, nozzle telemetry, or fleet health unless Tinman explicitly asks for current machine state.",
+            "- Tolerate obvious typos such as `ond` meaning `and` and continue with the most likely technical meaning.",
+            "- Extract the coordinate frame, hard clearance envelope, inlet/outlet constraints, fan flow range, material/process needs, and cosmetic intent from the prompt.",
+            "- Use the user's dimensions as source of truth. State any missing assumptions before the design details.",
+            "- When local tools are available, stage CAD artifacts with `POST http://127.0.0.1:8765/api/tools/cad-artifact` before finalizing CPAP duct or Fusion 360 design requests.",
+            "- When feasible, create a concrete artifact under `" + str(LOCAL_CAD_OUTPUT_DIR) + "` or provide a Fusion 360 Python script/OpenSCAD/STL/STEP import route that can be saved there.",
+            "- For Fusion 360, prefer a script that builds real parametric geometry when native STEP export is unavailable from the local toolchain.",
+            "- If no CFD solver is available, do first-order airflow sizing and pressure-loss reasoning instead of claiming full CFD was run.",
+            "- For CPAP part-cooling ducts, consider 12-15 CFM blower flow, gentle bends, expanding plenum, split/twin outlets or an annular outlet near the nozzle, smooth internal transitions, balanced outlet area, and serviceable print orientation.",
+            "- Final answer should include: artifact path or exact file plan, major dimensions, airflow assumptions, why the geometry supports PLA/ABS/PCTG, limitations, and next validation steps.",
+            "",
+        ]
+    )
+
+
 def build_web_disabled_context(messages):
     if not wants_web_context(messages):
         return ""
@@ -3799,6 +3909,8 @@ def moonraker_get(path, timeout=4, base_url=None):
 
 
 def build_local_context(messages):
+    if is_cad_design_request(messages):
+        return ""
     if not wants_qidi_context(messages):
         return ""
 
@@ -3903,6 +4015,20 @@ def detected_domain_profile(messages, route=None):
         "volatility": "volatile/current" if is_volatile_query_text(query) or wants_web_context(messages) else "mostly stable",
         "risk": "normal",
     }
+    if route_id == "cad-modeling-projects" or is_cad_design_request(messages):
+        profile.update(
+            {
+                "domain": "CAD/CFD design and manufacturable geometry",
+                "platform": "Fusion 360/importable CAD artifact workflow",
+                "platformConfidence": "high",
+                "toolFamily": "dimension extraction, CAD script or STEP/STL/SCAD artifact generation, first-order airflow math, optional CFD/tool research",
+                "firstChecks": ["given dimensions", "coordinate frame", "hard clearance envelope", "inlet/outlet size", "manufacturing process", "artifact export path"],
+                "avoid": "Do not check live printer status, Moonraker, nozzle telemetry, or fleet health unless the user explicitly asks for live machine state.",
+                "evidenceNeed": "Use the user's dimensions as source of truth, add explicit assumptions, and create or specify an importable artifact path whenever feasible.",
+                "risk": "engineering/design",
+            }
+        )
+        return profile
     printer_platform = detected_printer_platform(query)
     if printer_platform:
         profile.update(
@@ -4519,6 +4645,10 @@ def local_tool_catalog():
             "legacyStage": "POST /api/tools/ratrig-accel-rgb",
             "description": "Stage a generic Klipper acceleration-aware RGB macro in a confirmed local config folder.",
         },
+        "cadArtifactGenerator": {
+            "stage": "POST /api/tools/cad-artifact",
+            "description": "Stage a Fusion 360 Python script, OpenSCAD model, and README for a CAD design request.",
+        },
     }
 
 
@@ -4534,6 +4664,7 @@ def build_local_tools_context():
             "- For local Klipper config discovery, call `GET http://127.0.0.1:8765/api/tools/klipper-configs?hint=qidi` or use another machine hint. Add `&scan=1` only when known paths are not enough.",
             "- For Klipper acceleration/RGB macro staging, call `POST http://127.0.0.1:8765/api/tools/klipper-accel-rgb`.",
             "- These Klipper tools write only local files. Do not upload, restart, or alter a live printer unless idle/standby has been verified through Moonraker.",
+            "- For CAD artifact staging, call `POST http://127.0.0.1:8765/api/tools/cad-artifact` with JSON like `{\"prompt\":\"design a CPAP cooling duct for Fusion 360\"}`.",
             "",
         ]
     )
@@ -4990,6 +5121,293 @@ def stage_ratrig_accel_rgb_macro(target_path=None, patch_include=True):
     )
 
 
+def cad_number(pattern, text, default):
+    match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return default
+    try:
+        return float(match.group(1))
+    except (TypeError, ValueError):
+        return default
+
+
+def cad_number_any(patterns, text, default):
+    for pattern in patterns:
+        value = cad_number(pattern, text, None)
+        if value is not None:
+            return value
+    return default
+
+
+def cad_request_dimensions(prompt):
+    text = str(prompt or "")
+    return {
+        "toolheadX": cad_number(r"([0-9]+(?:\.[0-9]+)?)\s*mm\s*(?:in\s+the\s+)?x", text, 50.0),
+        "toolheadY": cad_number(r"([0-9]+(?:\.[0-9]+)?)\s*mm\s*(?:in\s+the\s+)?y", text, 50.0),
+        "toolheadZ": cad_number(r"([0-9]+(?:\.[0-9]+)?)\s*mm\s*(?:in\s+the\s+)?z", text, 150.0),
+        "inletDiameter": cad_number_any(
+            (
+                r"([0-9]+(?:\.[0-9]+)?)\s*mm\s+(?:diameter\s+)?(?:cpap\s+)?inlet",
+                r"inlet[^0-9]{0,60}([0-9]+(?:\.[0-9]+)?)\s*mm",
+            ),
+            text,
+            18.0,
+        ),
+        "frontClearance": cad_number(r"([0-9]+(?:\.[0-9]+)?)\s*mm\s+in\s+the\s+front", text, 8.0),
+        "nozzleBelow": cad_number(r"nozzle\s+tip[^0-9]{0,80}([0-9]+(?:\.[0-9]+)?)\s*mm\s+below", text, 9.0),
+        "flowLowCfm": cad_number(r"([0-9]+(?:\.[0-9]+)?)\s*(?:-|to|~|--|/)\s*[0-9]+(?:\.[0-9]+)?\s*cfm", text, 12.0),
+        "flowHighCfm": cad_number(r"[0-9]+(?:\.[0-9]+)?\s*(?:-|to|~|--|/)\s*([0-9]+(?:\.[0-9]+)?)\s*cfm", text, 15.0),
+    }
+
+
+def scad_cpap_duct_text(dim):
+    x = dim["toolheadX"]
+    y = dim["toolheadY"]
+    z = dim["toolheadZ"]
+    inlet = dim["inletDiameter"]
+    front = dim["frontClearance"]
+    nozzle = dim["nozzleBelow"]
+    wall = 1.8
+    outlet_d = 8.0
+    inlet_od = inlet + wall * 2
+    plenum_z = -max(5.0, nozzle * 0.55)
+    outlet_z = -max(2.0, nozzle - 1.5)
+    inlet_y = -y / 2 - 15
+    plenum_y = min(y / 2 + front - 2.0, y / 2 + 5.0)
+    outlet_y = min(y / 2 + front - 1.0, y / 2 + 7.0)
+    outlet_x = max(9.0, min(x / 2 - 7.0, 15.0))
+    return f"""// Tinman CPAP part-cooling duct concept
+// Generated by Codex CLI UI. Units: mm.
+// Coordinate assumption: X left/right, Y front/back with positive Y forward, Z vertical.
+// This is a first-pass printable envelope, not a validated CFD result.
+
+$fn = 48;
+wall = {wall:.2f};
+tool_x = {x:.2f};
+tool_y = {y:.2f};
+tool_z = {z:.2f};
+inlet_id = {inlet:.2f};
+inlet_od = {inlet_od:.2f};
+outlet_id = {outlet_d:.2f};
+outlet_od = outlet_id + 2 * wall;
+
+module marker_cube(size, center) {{
+  translate(center) cube(size, center=true);
+}}
+
+module node(p, d) {{
+  translate(p) sphere(d=d);
+}}
+
+module tube_path(points, d) {{
+  for (i = [0:len(points)-2]) {{
+    hull() {{
+      node(points[i], d);
+      node(points[i+1], d);
+    }}
+  }}
+}}
+
+inlet_center = [0, {inlet_y:.2f}, {plenum_z + 12.0:.2f}];
+plenum_center = [0, {plenum_y:.2f}, {plenum_z:.2f}];
+left_outlet = [-{outlet_x:.2f}, {outlet_y:.2f}, {outlet_z:.2f}];
+right_outlet = [{outlet_x:.2f}, {outlet_y:.2f}, {outlet_z:.2f}];
+
+module airflow_core() {{
+  tube_path([inlet_center, [0, -{y / 2 + 4.0:.2f}, {plenum_z + 6.0:.2f}], plenum_center], inlet_id);
+  tube_path([plenum_center, [-{outlet_x * 0.55:.2f}, {plenum_y + 1.0:.2f}, {outlet_z + 1.0:.2f}], left_outlet], outlet_id);
+  tube_path([plenum_center, [{outlet_x * 0.55:.2f}, {plenum_y + 1.0:.2f}, {outlet_z + 1.0:.2f}], right_outlet], outlet_id);
+}}
+
+module duct_shell() {{
+  difference() {{
+    union() {{
+      tube_path([inlet_center, [0, -{y / 2 + 4.0:.2f}, {plenum_z + 6.0:.2f}], plenum_center], inlet_od);
+      tube_path([plenum_center, [-{outlet_x * 0.55:.2f}, {plenum_y + 1.0:.2f}, {outlet_z + 1.0:.2f}], left_outlet], outlet_od);
+      tube_path([plenum_center, [{outlet_x * 0.55:.2f}, {plenum_y + 1.0:.2f}, {outlet_z + 1.0:.2f}], right_outlet], outlet_od);
+      translate([0, {plenum_y:.2f}, {plenum_z:.2f}]) scale([1.4, 0.6, 0.45]) sphere(d={min(x - 6.0, 34.0):.2f});
+    }}
+    airflow_core();
+    translate([0, 0, {z / 2:.2f}]) cube([tool_x, tool_y, tool_z + 4], center=true);
+  }}
+}}
+
+duct_shell();
+
+// Uncomment for fit/reference only.
+// color([0.2, 0.5, 1.0, 0.18]) marker_cube([tool_x, tool_y, tool_z], [0, 0, tool_z / 2]);
+// color([1, 0.1, 0.1, 0.7]) translate([0, 0, -{nozzle:.2f}]) sphere(d=2.2);
+"""
+
+
+def fusion_cpap_duct_script_text(dim):
+    return f'''# Tinman CPAP cooling duct concept for Fusion 360
+# Generated by Codex CLI UI. Units in this file are millimeters.
+# Run from Fusion 360: Utilities > Scripts and Add-Ins > Scripts > + > select this file.
+# This creates reference geometry and a first-pass duct envelope. Use the OpenSCAD
+# file in the same folder for a printable hollow STL workflow.
+
+import adsk.core, adsk.fusion, traceback
+
+TOOL_X = {dim["toolheadX"]:.3f}
+TOOL_Y = {dim["toolheadY"]:.3f}
+TOOL_Z = {dim["toolheadZ"]:.3f}
+INLET_ID = {dim["inletDiameter"]:.3f}
+FRONT_CLEARANCE = {dim["frontClearance"]:.3f}
+NOZZLE_BELOW = {dim["nozzleBelow"]:.3f}
+WALL = 1.8
+OUTLET_ID = 8.0
+
+def mm(value):
+    return value / 10.0
+
+def add_box(comp, name, center, size):
+    sketches = comp.sketches
+    sketch = sketches.add(comp.xYConstructionPlane)
+    x, y, z = center
+    sx, sy, sz = size
+    lines = sketch.sketchCurves.sketchLines
+    lines.addTwoPointRectangle(
+        adsk.core.Point3D.create(mm(x - sx / 2), mm(y - sy / 2), 0),
+        adsk.core.Point3D.create(mm(x + sx / 2), mm(y + sy / 2), 0)
+    )
+    prof = sketch.profiles.item(0)
+    ext = comp.features.extrudeFeatures
+    inp = ext.createInput(prof, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+    inp.setDistanceExtent(False, adsk.core.ValueInput.createByReal(mm(sz)))
+    body = ext.add(inp).bodies.item(0)
+    body.name = name
+    move_body(comp, body, (0, 0, z - sz / 2))
+    return body
+
+def move_body(comp, body, delta):
+    bodies = adsk.core.ObjectCollection.create()
+    bodies.add(body)
+    matrix = adsk.core.Matrix3D.create()
+    matrix.translation = adsk.core.Vector3D.create(mm(delta[0]), mm(delta[1]), mm(delta[2]))
+    move_input = comp.features.moveFeatures.createInput(bodies, matrix)
+    comp.features.moveFeatures.add(move_input)
+
+def add_cylinder_y(comp, name, center, diameter, length):
+    sketches = comp.sketches
+    sketch = sketches.add(comp.xZConstructionPlane)
+    x, y, z = center
+    sketch.sketchCurves.sketchCircles.addByCenterRadius(
+        adsk.core.Point3D.create(mm(x), mm(z), 0),
+        mm(diameter / 2)
+    )
+    prof = sketch.profiles.item(0)
+    ext = comp.features.extrudeFeatures
+    inp = ext.createInput(prof, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+    inp.setDistanceExtent(False, adsk.core.ValueInput.createByReal(mm(length)))
+    body = ext.add(inp).bodies.item(0)
+    body.name = name
+    move_body(comp, body, (0, y - length / 2, 0))
+    return body
+
+def run(context):
+    app = adsk.core.Application.get()
+    ui = app.userInterface
+    try:
+        doc = app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType)
+        design = app.activeProduct
+        root = design.rootComponent
+        root.name = "Tinman CPAP Cooling Duct Concept"
+
+        add_box(root, "reference_toolhead_50x50x150", (0, 0, TOOL_Z / 2), (TOOL_X, TOOL_Y, TOOL_Z))
+        add_box(root, "front_clearance_limit_8mm", (0, TOOL_Y / 2 + FRONT_CLEARANCE / 2, 4), (TOOL_X, FRONT_CLEARANCE, 8))
+        add_cylinder_y(root, "cpap_inlet_outer_18mm_id_plus_wall", (0, -TOOL_Y / 2 - 15, -1), INLET_ID + 2 * WALL, 20)
+        add_box(root, "rounded_front_plenum_envelope", (0, TOOL_Y / 2 + min(FRONT_CLEARANCE, 8) / 2, -5), (TOOL_X - 6, min(FRONT_CLEARANCE, 8), 10))
+        add_cylinder_y(root, "left_outlet_aimed_at_nozzle_zone", (-min(15, TOOL_X / 2 - 7), TOOL_Y / 2 + FRONT_CLEARANCE - 2, -NOZZLE_BELOW + 2), OUTLET_ID + 2 * WALL, 8)
+        add_cylinder_y(root, "right_outlet_aimed_at_nozzle_zone", (min(15, TOOL_X / 2 - 7), TOOL_Y / 2 + FRONT_CLEARANCE - 2, -NOZZLE_BELOW + 2), OUTLET_ID + 2 * WALL, 8)
+
+        ui.messageBox("Created CPAP duct concept geometry. Use the matching .scad file for hollow printable export, then refine bends and outlet aiming after fit check.")
+    except:
+        ui.messageBox("CPAP duct script failed:\\n" + traceback.format_exc())
+'''
+
+
+def cad_readme_text(prompt, dim, paths):
+    flow_low = dim["flowLowCfm"]
+    flow_high = dim["flowHighCfm"]
+    outlet_id = 8.0
+    outlet_area_mm2 = 2 * math.pi * (outlet_id / 2) ** 2
+    inlet_area_mm2 = math.pi * (dim["inletDiameter"] / 2) ** 2
+    return f"""# CPAP Cooling Duct CAD Concept
+
+This folder contains a first-pass CPAP part-cooling duct concept generated from Tinman's prompt.
+
+## Files
+
+- `{Path(paths["fusionScriptPath"]).name}`: Fusion 360 Python script for reference geometry and a design envelope.
+- `{Path(paths["openScadPath"]).name}`: OpenSCAD parametric hollow duct model.
+
+## Assumptions
+
+- Coordinate frame: X is left/right, Y is front/back with positive Y forward, Z is vertical.
+- Toolhead envelope is {dim["toolheadX"]:.1f} x {dim["toolheadY"]:.1f} x {dim["toolheadZ"]:.1f} mm.
+- CPAP inlet inner diameter is {dim["inletDiameter"]:.1f} mm.
+- Front clearance is {dim["frontClearance"]:.1f} mm and side/back clearance is treated as zero.
+- Nozzle tip is {dim["nozzleBelow"]:.1f} mm below the toolhead bottom.
+- Fan free-flow estimate is {flow_low:.1f}-{flow_high:.1f} CFM.
+
+## Airflow basis
+
+- Inlet area is about {inlet_area_mm2:.0f} mm^2.
+- Two {outlet_id:.1f} mm outlets have combined area about {outlet_area_mm2:.0f} mm^2.
+- That outlet ratio intentionally raises exit velocity for PLA bridging/detail cooling while keeping the duct compact.
+- This is not a completed CFD result. Treat it as a parametric starting geometry for fit, smoke/flow visualization, and later CFD validation.
+
+## Fusion 360 import route
+
+1. Run the `.py` script in Fusion 360 to create reference bodies and the design envelope.
+2. If OpenSCAD is installed, export the `.scad` model to STL and import that STL into Fusion 360.
+3. Refine outlet angles, fillets, mounting tabs, and clearances around the actual hotend/nozzle/sock.
+
+Original prompt excerpt:
+
+```text
+{compact(prompt, 1200)}
+```
+"""
+
+
+def stage_cad_artifact(prompt="", target_path=None, artifact_name=""):
+    prompt = str(prompt or "")
+    dim = cad_request_dimensions(prompt)
+    slug = slugify(artifact_name or "cpap cooling duct", fallback="cad-artifact")
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    target = Path(target_path).expanduser() if target_path else LOCAL_CAD_OUTPUT_DIR / f"{timestamp}-{slug}"
+    target.mkdir(parents=True, exist_ok=True)
+    if not os.access(target, os.W_OK):
+        raise PermissionError(f"Target folder is not writable: {target}")
+
+    fusion_path = target / f"{slug}_fusion360.py"
+    scad_path = target / f"{slug}.scad"
+    readme_path = target / "README.md"
+    fusion_path.write_text(fusion_cpap_duct_script_text(dim), encoding="utf-8")
+    scad_path.write_text(scad_cpap_duct_text(dim), encoding="utf-8")
+    paths = {
+        "fusionScriptPath": str(fusion_path),
+        "openScadPath": str(scad_path),
+        "readmePath": str(readme_path),
+    }
+    readme_path.write_text(cad_readme_text(prompt, dim, paths), encoding="utf-8")
+    openscad_path = command_path("openscad")
+    return {
+        "ok": True,
+        "targetDir": str(target),
+        **paths,
+        "dimensions": dim,
+        "openscadInstalled": bool(openscad_path),
+        "openscadPath": openscad_path,
+        "freeCadInstalled": bool(command_path("FreeCADCmd") or command_path("freecad")),
+        "fullCfdRun": False,
+        "cfdNote": "No CFD solver was run. The artifact uses first-order airflow sizing and should be validated with fit checks, flow visualization, and CFD if needed.",
+        "importRoute": "Run the Fusion 360 Python script directly, or export the OpenSCAD model to STL and import it into Fusion 360.",
+    }
+
+
 def is_klipper_accel_rgb_tool_request(messages):
     query = latest_user_text(messages).lower()
     if not query:
@@ -5088,6 +5506,7 @@ def build_prompt(
     research_context = build_research_quality_context(messages)
     local_context = build_local_context(messages)
     local_tools_context = build_local_tools_context()
+    cad_design_context = build_cad_design_context(messages, route or {})
     analytical_context = build_analytical_context(
         messages,
         route=route or {},
@@ -5110,6 +5529,7 @@ def build_prompt(
             + research_context
             + local_context
             + local_tools_context
+            + cad_design_context
             + analytical_context
             + direct_answer_context
             + admin_context
@@ -5146,6 +5566,8 @@ def build_prompt(
         blocks.append(local_context)
     if local_tools_context:
         blocks.append(local_tools_context)
+    if cad_design_context:
+        blocks.append(cad_design_context)
     if analytical_context:
         blocks.append(analytical_context)
     if direct_answer_context:
@@ -5216,6 +5638,10 @@ def build_cloud_research_prompt(
     research_context = build_research_quality_context(messages)
     if research_context:
         blocks.append(research_context.strip())
+        blocks.append("")
+    cad_design_context = build_cad_design_context(messages, route or {})
+    if cad_design_context:
+        blocks.append(cad_design_context.strip())
         blocks.append("")
     quality_context = build_response_quality_context(messages, route or {})
     if quality_context:
@@ -6041,6 +6467,25 @@ def package_health_report():
         add("tools:klipper-accel-rgb-template", "fail", str(exc))
 
     try:
+        LOCAL_CAD_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="health-", dir=str(LOCAL_CAD_OUTPUT_DIR)) as tmp_dir:
+            artifact = stage_cad_artifact(
+                "Design a CPAP cooling duct in CAD for Fusion 360 with an 18mm inlet.",
+                target_path=tmp_dir,
+                artifact_name="health-cpap-duct",
+            )
+            ok = (
+                artifact.get("ok")
+                and Path(artifact.get("fusionScriptPath", "")).exists()
+                and Path(artifact.get("openScadPath", "")).exists()
+                and Path(artifact.get("readmePath", "")).exists()
+                and not artifact.get("fullCfdRun")
+            )
+        add("tools:cad-artifact-generator", "pass" if ok else "fail", "Fusion/OpenSCAD/README staged")
+    except Exception as exc:
+        add("tools:cad-artifact-generator", "fail", str(exc))
+
+    try:
         analysis = build_analytical_context(
             [{"role": "user", "text": "Diagnose my Prusa printer running Marlin. The nozzle temperature is not reading."}],
             route={
@@ -6083,6 +6528,48 @@ def package_health_report():
         )
     except Exception as exc:
         add("analysis:printer-public-research", "fail", str(exc))
+
+    try:
+        cad_prompt = (
+            "I have a printer toolhead that measures 50mm in the x direction x 50mm in the y direction "
+            "and 150mm in the z direction. The cpap inlet duct is 18mm in diameter, located 15mm aft "
+            "ond 0mm above the toolhead in the middle of the toolhead. I need a cpap cooling duct designed "
+            "in cad that can be imported into fusion 360. The nozzle tip is placed 9mm below the bottom of "
+            "the toolhead. Design using CFD and industry from the web a duct that will support part cooling."
+        )
+        cad_messages = [{"role": "user", "text": cad_prompt}]
+        cad_route = route_manager(cad_messages, requested_profile="manager", web_search="live")
+        ok = (
+            cad_route.get("projectId") == "cad-modeling-projects"
+            and cad_route.get("engine") == "local"
+            and not is_read_only_printer_status_query(cad_messages)
+        )
+        add(
+            "analysis:cad-design-routing",
+            "pass" if ok else "fail",
+            f"{cad_route.get('projectId')} via {cad_route.get('engine')}",
+        )
+    except Exception as exc:
+        add("analysis:cad-design-routing", "fail", str(exc))
+
+    try:
+        cad_prompt = (
+            "Design a CPAP cooling duct in CAD for a 50mm x 50mm x 150mm printer toolhead. "
+            "The inlet is 18mm and the nozzle tip is 9mm below the toolhead. "
+            "I need it imported into Fusion 360."
+        )
+        cad_messages = [{"role": "user", "text": cad_prompt}]
+        cad_route = route_manager(cad_messages, requested_profile="manager", web_search="live")
+        prompt_text = build_prompt(cad_messages, web_search="live", route=cad_route).lower()
+        ok = (
+            "cad design contract" in prompt_text
+            and "do not check live printer status" in prompt_text
+            and "fusion 360" in prompt_text
+            and "generated/cad" in prompt_text
+        )
+        add("analysis:cad-design-context", "pass" if ok else "fail", "CAD artifact contract included")
+    except Exception as exc:
+        add("analysis:cad-design-context", "fail", str(exc))
 
     try:
         stable = should_store_stable_knowledge(
@@ -7091,6 +7578,24 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 dry_run=bool(payload.get("dryRun")),
                 reason=payload.get("reason") or "",
             )
+            self.send_json(result)
+            return
+
+        if parsed.path == "/api/tools/cad-artifact":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self.send_error(400, "Invalid JSON")
+                return
+            try:
+                result = stage_cad_artifact(
+                    prompt=payload.get("prompt") or latest_user_text(payload.get("messages") or []),
+                    target_path=payload.get("targetPath") or payload.get("targetDir"),
+                    artifact_name=payload.get("artifactName") or "",
+                )
+            except Exception as exc:
+                result = {"ok": False, "error": str(exc)}
             self.send_json(result)
             return
 

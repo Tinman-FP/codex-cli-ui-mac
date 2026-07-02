@@ -1,24 +1,29 @@
-# Codex CLI UI for Mac v2026.07.04
+# Codex CLI UI for Mac v2026.07.05
 
-Bugfix release for answer recovery, one-click feedback, and public printer-hardware research routing.
+Bugfix and capability release for CAD/design routing and local CAD artifact staging.
 
 ## Download
 
 Download one file:
 
 ```text
-Codex_CLI_UI_Mac_v2026.07.04.dmg
+Codex_CLI_UI_Mac_v2026.07.05.dmg
 ```
 
 Open the DMG and double-click `Install Codex CLI UI.command`.
 
 ## Fixed
 
-- `Fix this` now saves a useful feedback lesson with one click instead of depending on a prompt dialog.
-- Manager review, final polish, and Quality Coach failures no longer discard a valid primary worker answer.
-- Knowledge/research questions no longer receive file/upload/live-printer recovery wording after a local load failure.
-- Public printer hardware/spec questions, including Fibreseek/Fiberseek continuous-fiber toolhead questions, route through Local Research when web is enabled.
-- Obvious technical typos such as `hotted` are treated as likely `hotend` instead of derailing the answer.
+- CAD/CPAP duct design prompts no longer get mistaken for live printer status or Moonraker checks.
+- CAD design requests now route to the CAD/Modeling specialist with the local artifact-capable engine.
+- Printer-status context is suppressed when the request is clearly about CAD geometry, Fusion 360, STEP/STL, ducts, CFD, or part-cooling design.
+
+## Added
+
+- Local CAD artifact endpoint: `POST /api/tools/cad-artifact`.
+- Fusion 360 Python script, OpenSCAD model, and README staging for CPAP duct design requests.
+- OpenSCAD and FreeCAD entries in the free-tool capability catalog, with storage and approval rules.
+- Package-health checks for CAD routing, CAD prompt context, and CAD artifact generation.
 
 ## Included
 
@@ -30,6 +35,7 @@ Open the DMG and double-click `Install Codex CLI UI.command`.
 - Admin Improvement Lab, Golden Test Generator, Test Bench history, and package health checks
 - Tool Recovery Engine and Capability Manager
 - Klipper config discovery and macro-staging helpers
+- CAD artifact staging helper for Fusion 360/OpenSCAD workflows
 - Privacy-safe local data/log folders
 
 ## Requirements

@@ -1,5 +1,13 @@
 # Changelog
 
+## v2026.07.05
+
+- Fixes CAD/CPAP duct design prompts being mistaken for live printer status checks.
+- Adds CAD design intent detection, CAD-first analytical context, and a prompt contract for Fusion 360/importable artifacts.
+- Adds a local CAD artifact endpoint that stages a Fusion 360 Python script, OpenSCAD model, and README.
+- Adds OpenSCAD and FreeCAD to the free-tool capability catalog with storage/approval policy checks.
+- Adds package-health regressions for CAD routing, CAD context, and CAD artifact staging.
+
 ## v2026.07.04
 
 - Makes `Fix this` a one-click feedback capture instead of relying on a prompt dialog.
