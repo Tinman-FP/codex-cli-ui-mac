@@ -7,11 +7,13 @@ import hashlib
 import html
 import math
 import os
+import pkgutil
 import re
 import selectors
 import shutil
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -43,6 +45,8 @@ LOCAL_CAD_OUTPUT_DIR = DATA_DIR / "generated" / "cad"
 UPLOAD_DIR = DATA_DIR / "uploads"
 CAPABILITY_TOOL_LOG_PATH = DATA_DIR / "capability_tool_log.jsonl"
 AUTONOMY_SUPERVISOR_LOG_PATH = DATA_DIR / "autonomy_supervisor.jsonl"
+TOOL_INVENTORY_JSON_PATH = DATA_DIR / "tool_inventory_latest.json"
+TOOL_INVENTORY_MARKDOWN_PATH = DATA_DIR / "tool_inventory_latest.md"
 MIN_FREE_BYTES_FOR_AUTO_INSTALL = int(
     os.environ.get("CODEX_MIN_FREE_BYTES_FOR_AUTO_INSTALL", str(20 * 1024 * 1024 * 1024))
 )
@@ -74,8 +78,15 @@ FREE_ONLY = os.environ.get("CODEX_FREE_ONLY", "1").strip().lower() not in {
     "no",
 }
 QIDI_MOONRAKER_URL = os.environ.get("QIDI_MOONRAKER_URL", "")
+PYTHON_USER_BIN = (
+    HOME_DIR
+    / "Library"
+    / "Python"
+    / f"{sys.version_info.major}.{sys.version_info.minor}"
+    / "bin"
+)
 PATH_FOR_CODEX = (
-    f"{HOME_DIR}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/Applications/Codex.app/Contents/Resources:"
+    f"{HOME_DIR}/.local/bin:{PYTHON_USER_BIN}:/usr/local/bin:/opt/homebrew/bin:/Applications/Codex.app/Contents/Resources:"
     "/Applications/Codex.app/Contents/Resources/cua_node/bin:"
     "/usr/bin:/bin:/usr/sbin:/sbin:"
     f"{HOME_DIR}/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin"
@@ -1030,6 +1041,7 @@ BENCHMARK_TESTS = [
 ]
 history_cache = {"mtime": None, "documents": [], "summary": None}
 startup_cache = {"time": 0, "context": None}
+tool_inventory_cache = {"time": 0, "data": None}
 printer_health_cache = {"time": 0, "data": None}
 model_warmup_runtime = {"running": False}
 model_warmup_lock = threading.Lock()
@@ -3369,6 +3381,7 @@ def build_startup_context():
         "sshHosts": parse_ssh_config(),
         "tailscaleHosts": detect_tailscale_hosts(),
         "resources": detect_program_resources(),
+        "toolInventory": summarize_mac_tool_inventory(build_mac_tool_inventory()),
         "updatedAt": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
     startup_cache.update({"time": now, "context": context})
@@ -3383,6 +3396,7 @@ def summarize_startup_context(context):
         "sshHosts": len(context.get("sshHosts", [])),
         "tailscaleHosts": len(context.get("tailscaleHosts", [])),
         "resources": len(context.get("resources", [])),
+        "toolInventory": context.get("toolInventory", {}),
         "updatedAt": context.get("updatedAt", ""),
     }
 
@@ -3453,6 +3467,17 @@ def format_startup_context(context):
             if version:
                 text += f" ({compact(version, 120)})"
             lines.append(text)
+    tool_inventory = context.get("toolInventory") or {}
+    if tool_inventory:
+        lines.append("- Mac tool inventory:")
+        lines.append(
+            f"  - Commands={tool_inventory.get('commandCount', 0)}, apps={tool_inventory.get('applicationCount', 0)}, Python modules={tool_inventory.get('pythonModuleCount', 0)}"
+        )
+        lines.append(
+            f"  - Homebrew={tool_inventory.get('brewFormulaCount', 0)} formulae/{tool_inventory.get('brewCaskCount', 0)} casks, Docker images={tool_inventory.get('dockerImageCount', 0)}, Ollama models={tool_inventory.get('ollamaModelCount', 0)}"
+        )
+        lines.append("  - Full inventory endpoint: GET http://127.0.0.1:8765/api/tools/inventory")
+        lines.append(f"  - Private inventory file: {tool_inventory.get('inventoryMarkdownPath', '')}")
     lines.append("")
     return "\n".join(lines)
 
@@ -5222,6 +5247,11 @@ def local_tool_catalog():
             "install": "POST /api/tools/install-free-tool",
             "policy": "Free allowlisted tools only; ask Tinman before low-storage, paid, unknown, or large installs.",
         },
+        "macToolInventory": {
+            "list": "GET /api/tools/inventory",
+            "refresh": "GET /api/tools/inventory?refresh=1",
+            "description": "Full local inventory of visible PATH commands, macOS applications, Python modules, Homebrew packages, Docker images, and Ollama models.",
+        },
         "toolRecovery": {
             "plan": "POST /api/tools/recover",
             "description": "Classify a local failure, choose a free/safe tool or local endpoint, and return the retry path.",
@@ -5256,6 +5286,7 @@ def build_local_tools_context():
         [
             "Local completion tools:",
             "- If a command or capability is missing, inspect `GET http://127.0.0.1:8765/api/tools/capabilities`.",
+            "- To see the full Mac tool inventory, call `GET http://127.0.0.1:8765/api/tools/inventory`. It lists visible commands, app bundles, Python modules, Homebrew packages, Docker images, and Ollama models.",
             "- To install a free allowlisted missing tool, call `POST http://127.0.0.1:8765/api/tools/install-free-tool` with JSON like `{\"tool\":\"jq\",\"reason\":\"parse printer API JSON\"}`.",
             "- To recover from a failure, call `POST http://127.0.0.1:8765/api/tools/recover` with the original messages, cwd, and error text. Use its recovery status before giving up.",
             "- To check whether a draft answer needs help before finalizing, call `POST http://127.0.0.1:8765/api/tools/autonomy-supervisor` with the messages, route, answerText, cwd, and webSearch.",
@@ -6524,6 +6555,240 @@ def cfd_toolchain_status():
         "openfoamDocker": openfoam_docker,
         "meshingAvailable": bool(commands["gmsh"] or modules["gmsh"] or modules["meshio"]),
     }
+
+
+IMPORTANT_PYTHON_MODULES = [
+    "numpy",
+    "scipy",
+    "trimesh",
+    "meshio",
+    "cadquery",
+    "OCP",
+    "gmsh",
+    "pyvista",
+    "vtk",
+    "skimage",
+    "matplotlib",
+    "rtree",
+    "open3d",
+    "pandas",
+    "openpyxl",
+    "docx",
+    "pptx",
+    "pypdf",
+    "pdfplumber",
+    "reportlab",
+    "PIL",
+]
+
+
+def path_dirs_for_inventory():
+    dirs = []
+    for raw_path in (PATH_FOR_CODEX, os.environ.get("PATH", "")):
+        for item in raw_path.split(":"):
+            if not item:
+                continue
+            path = str(Path(item).expanduser())
+            if path not in dirs:
+                dirs.append(path)
+    return dirs
+
+
+def scan_path_commands():
+    commands = {}
+    for folder in path_dirs_for_inventory():
+        path = Path(folder)
+        if not path.exists() or not path.is_dir():
+            continue
+        try:
+            for item in path.iterdir():
+                try:
+                    if not item.is_file() or not os.access(item, os.X_OK):
+                        continue
+                except OSError:
+                    continue
+                commands.setdefault(item.name, str(item))
+        except OSError:
+            continue
+    return [
+        {"name": name, "path": commands[name]}
+        for name in sorted(commands, key=str.lower)
+    ]
+
+
+def scan_app_bundles():
+    apps = {}
+    for root in [Path("/Applications"), HOME_DIR / "Applications"]:
+        if not root.exists():
+            continue
+        for pattern in ("*.app", "*/*.app"):
+            try:
+                matches = root.glob(pattern)
+                for app in matches:
+                    apps.setdefault(app.name, str(app))
+            except OSError:
+                continue
+    return [
+        {"name": name, "path": apps[name]}
+        for name in sorted(apps, key=str.lower)
+    ]
+
+
+def installed_python_modules():
+    modules = {}
+    for module in pkgutil.iter_modules():
+        if not module.name:
+            continue
+        modules.setdefault(module.name, getattr(module.module_finder, "path", "") or "")
+    return [
+        {"name": name, "path": modules[name]}
+        for name in sorted(modules, key=str.lower)
+    ]
+
+
+def brew_inventory():
+    if not shutil.which("brew", path=PATH_FOR_CODEX):
+        return {"formulae": [], "casks": []}
+    formulae = [
+        line.strip()
+        for line in run_capture(["brew", "list", "--formula"], timeout=12).splitlines()
+        if line.strip()
+    ]
+    casks = [
+        line.strip()
+        for line in run_capture(["brew", "list", "--cask"], timeout=12).splitlines()
+        if line.strip()
+    ]
+    return {"formulae": sorted(formulae, key=str.lower), "casks": sorted(casks, key=str.lower)}
+
+
+def docker_image_inventory():
+    docker = command_path("docker")
+    if not docker:
+        return []
+    output = run_capture(
+        [docker, "image", "ls", "--format", "{{.Repository}}:{{.Tag}} {{.Size}}"],
+        timeout=12,
+    )
+    return [line.strip() for line in output.splitlines() if line.strip()]
+
+
+def ollama_model_inventory():
+    ollama = command_path("ollama")
+    if not ollama:
+        return []
+    output = run_capture([ollama, "list"], timeout=12)
+    models = []
+    for line in output.splitlines()[1:]:
+        if line.strip():
+            models.append(line.rstrip())
+    return models
+
+
+def build_mac_tool_inventory(refresh=False):
+    now = time.time()
+    if (
+        not refresh
+        and tool_inventory_cache.get("data")
+        and now - tool_inventory_cache.get("time", 0) < 60
+    ):
+        return tool_inventory_cache["data"]
+
+    commands = scan_path_commands()
+    apps = scan_app_bundles()
+    python_modules = installed_python_modules()
+    important_modules = {
+        name: python_module_available(name)
+        for name in IMPORTANT_PYTHON_MODULES
+    }
+    brew = brew_inventory()
+    inventory = {
+        "generatedAt": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "appDir": str(APP_DIR),
+        "pathForCodex": PATH_FOR_CODEX,
+        "pathDirectories": path_dirs_for_inventory(),
+        "freeSpace": human_bytes(disk_free_bytes(APP_DIR)),
+        "commands": commands,
+        "applications": apps,
+        "python": {
+            "executable": sys.executable,
+            "version": sys.version.split()[0],
+            "userBin": str(PYTHON_USER_BIN),
+            "importantModules": important_modules,
+            "modules": python_modules,
+        },
+        "homebrew": brew,
+        "dockerImages": docker_image_inventory(),
+        "ollamaModels": ollama_model_inventory(),
+        "capabilityCatalog": capability_tool_catalog(),
+        "cfdToolchain": cfd_toolchain_status(),
+    }
+    inventory["summary"] = summarize_mac_tool_inventory(inventory)
+    tool_inventory_cache.update({"time": now, "data": inventory})
+    write_tool_inventory_files(inventory)
+    return inventory
+
+
+def summarize_mac_tool_inventory(inventory):
+    important = inventory.get("python", {}).get("importantModules", {})
+    missing_important = [name for name, ok in important.items() if not ok]
+    return {
+        "generatedAt": inventory.get("generatedAt", ""),
+        "commandCount": len(inventory.get("commands", [])),
+        "applicationCount": len(inventory.get("applications", [])),
+        "pythonModuleCount": len(inventory.get("python", {}).get("modules", [])),
+        "importantPythonModulesAvailable": sum(1 for ok in important.values() if ok),
+        "importantPythonModulesMissing": missing_important,
+        "brewFormulaCount": len(inventory.get("homebrew", {}).get("formulae", [])),
+        "brewCaskCount": len(inventory.get("homebrew", {}).get("casks", [])),
+        "dockerImageCount": len(inventory.get("dockerImages", [])),
+        "ollamaModelCount": len(inventory.get("ollamaModels", [])),
+        "freeSpace": inventory.get("freeSpace", ""),
+        "inventoryJsonPath": str(TOOL_INVENTORY_JSON_PATH),
+        "inventoryMarkdownPath": str(TOOL_INVENTORY_MARKDOWN_PATH),
+    }
+
+
+def write_tool_inventory_files(inventory):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        TOOL_INVENTORY_JSON_PATH.write_text(json.dumps(inventory, indent=2), encoding="utf-8")
+    except OSError:
+        return
+    summary = inventory.get("summary") or summarize_mac_tool_inventory(inventory)
+    important = inventory.get("python", {}).get("importantModules", {})
+    lines = [
+        "# Codex CLI UI Tool Inventory",
+        "",
+        f"Generated: {inventory.get('generatedAt', '')}",
+        f"Free space: {inventory.get('freeSpace', '')}",
+        "",
+        "## Summary",
+        f"- Commands visible through PATH_FOR_CODEX/current PATH: {summary.get('commandCount', 0)}",
+        f"- Applications: {summary.get('applicationCount', 0)}",
+        f"- Python modules: {summary.get('pythonModuleCount', 0)}",
+        f"- Homebrew formulae: {summary.get('brewFormulaCount', 0)}",
+        f"- Homebrew casks: {summary.get('brewCaskCount', 0)}",
+        f"- Docker images: {summary.get('dockerImageCount', 0)}",
+        f"- Ollama models: {summary.get('ollamaModelCount', 0)}",
+        "",
+        "## Important Python Modules",
+    ]
+    for name in IMPORTANT_PYTHON_MODULES:
+        lines.append(f"- {name}: {'OK' if important.get(name) else 'missing'}")
+    lines.extend(["", "## Capability Tools"])
+    for tool in inventory.get("capabilityCatalog", {}).get("tools", []):
+        lines.append(f"- {'OK' if tool.get('installed') else 'MISSING'} {tool.get('label', tool.get('id', 'tool'))}")
+    lines.extend(["", "## Commands"])
+    for command in inventory.get("commands", []):
+        lines.append(f"- {command.get('name')}: {command.get('path')}")
+    lines.extend(["", "## Applications"])
+    for app in inventory.get("applications", []):
+        lines.append(f"- {app.get('path')}")
+    try:
+        TOOL_INVENTORY_MARKDOWN_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except OSError:
+        pass
 
 
 def write_openfoam_case_skeleton(target, copied_stl_name, constraints, analysis, toolchain):
@@ -9698,6 +9963,7 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                     "modelWarmup": model_warmup_summary(),
                     "localTools": local_tool_catalog(),
                     "capabilityManager": capability_tool_catalog(),
+                    "macToolInventory": summarize_mac_tool_inventory(build_mac_tool_inventory()),
                     "packageHealth": None,
                     "integrations": {
                         "openaiCli": bool(shutil.which("openai", path=PATH_FOR_CODEX)),
@@ -9800,6 +10066,13 @@ class CodexUIHandler(BaseHTTPRequestHandler):
 
         if path == "/api/tools/capabilities":
             self.send_json({"ok": True, **capability_tool_catalog(), "localTools": local_tool_catalog()})
+            return
+
+        if path == "/api/tools/inventory":
+            params = urllib.parse.parse_qs(parsed.query)
+            refresh = str((params.get("refresh") or ["0"])[0]).strip().lower() in {"1", "true", "yes"}
+            inventory = build_mac_tool_inventory(refresh=refresh)
+            self.send_json({"ok": True, **inventory})
             return
 
         if path in {"/api/tools/klipper-configs", "/api/tools/printer-configs"}:
