@@ -42,6 +42,7 @@ GOLDEN_TEST_RESULTS_PATH = DATA_DIR / "golden_test_results.json"
 MODEL_WARMUP_STATE_PATH = DATA_DIR / "model_warmup_state.json"
 LOCAL_TOOL_OUTPUT_DIR = DATA_DIR / "generated" / "printer-macros"
 LOCAL_CAD_OUTPUT_DIR = DATA_DIR / "generated" / "cad"
+LOCAL_QUALITY_OUTPUT_DIR = DATA_DIR / "generated" / "quality-gates"
 UPLOAD_DIR = DATA_DIR / "uploads"
 CAPABILITY_TOOL_LOG_PATH = DATA_DIR / "capability_tool_log.jsonl"
 AUTONOMY_SUPERVISOR_LOG_PATH = DATA_DIR / "autonomy_supervisor.jsonl"
@@ -4892,6 +4893,549 @@ def tool_recovery_synthetic_check():
     )
 
 
+QUALITY_LANGUAGE_ALIASES = {
+    "py": "python",
+    "python3": "python",
+    "c++": "cpp",
+    "cplusplus": "cpp",
+    "cc": "cpp",
+    "cxx": "cpp",
+    "h++": "cpp",
+    "hpp": "cpp",
+    "ino": "cpp",
+    "arduino": "cpp",
+    "klipper macro": "klipper",
+    "klipper cfg": "klipper",
+    "printer.cfg": "klipper",
+    "gcode": "gcode",
+    "g-code": "gcode",
+    "nc": "gcode",
+    "cnc": "gcode",
+    "shell": "bash",
+    "sh": "bash",
+    "zsh": "bash",
+    "yml": "yaml",
+    "scad": "openscad",
+    "openscad": "openscad",
+    "js": "javascript",
+    "node": "javascript",
+}
+
+
+QUALITY_EXTENSION_LANGUAGE = {
+    ".py": "python",
+    ".c": "c",
+    ".h": "c",
+    ".cc": "cpp",
+    ".cpp": "cpp",
+    ".cxx": "cpp",
+    ".hpp": "cpp",
+    ".hh": "cpp",
+    ".ino": "cpp",
+    ".cfg": "klipper",
+    ".conf": "klipper",
+    ".gcode": "gcode",
+    ".gc": "gcode",
+    ".nc": "gcode",
+    ".tap": "gcode",
+    ".sh": "bash",
+    ".bash": "bash",
+    ".zsh": "bash",
+    ".js": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
+    ".json": "json",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".toml": "toml",
+    ".scad": "openscad",
+}
+
+
+QUALITY_SUPPORTED_LANGUAGES = sorted(
+    {
+        "python",
+        "c",
+        "cpp",
+        "klipper",
+        "gcode",
+        "bash",
+        "javascript",
+        "json",
+        "yaml",
+        "toml",
+        "openscad",
+        "text",
+    }
+)
+
+
+def normalize_quality_language(language="", path="", text=""):
+    raw = str(language or "").strip().lower()
+    if raw:
+        return QUALITY_LANGUAGE_ALIASES.get(raw, raw)
+    suffix = Path(str(path or "")).suffix.lower()
+    if suffix in QUALITY_EXTENSION_LANGUAGE:
+        return QUALITY_EXTENSION_LANGUAGE[suffix]
+    lower = str(text or "").lower()
+    if "[gcode_macro" in lower or "[delayed_gcode" in lower or "printer.cfg" in lower:
+        return "klipper"
+    if re.search(r"(?m)^\s*[gmt]\d+\b", lower):
+        return "gcode"
+    if "def " in lower or "import " in lower:
+        return "python"
+    return "text"
+
+
+def quality_gate_status(checks):
+    if any(check.get("status") == "fail" for check in checks):
+        return "fail"
+    if any(check.get("status") == "warn" for check in checks):
+        return "warn"
+    return "pass"
+
+
+def quality_check(name, status, detail=""):
+    return {"name": name, "status": status, "detail": compact(detail or "", 1000)}
+
+
+def run_quality_command(cmd, cwd=None, timeout=25):
+    started = time.time()
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(cwd) if cwd else None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
+            env={**os.environ, "PATH": PATH_FOR_CODEX},
+        )
+        return {
+            "ok": proc.returncode == 0,
+            "returnCode": proc.returncode,
+            "stdout": compact(proc.stdout or "", 1600),
+            "stderr": compact(proc.stderr or "", 1600),
+            "durationMs": round((time.time() - started) * 1000),
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "returnCode": 1,
+            "stdout": "",
+            "stderr": str(exc),
+            "durationMs": round((time.time() - started) * 1000),
+        }
+
+
+def read_quality_gate_source(payload):
+    payload = payload or {}
+    text = payload.get("code")
+    if text is None:
+        text = payload.get("text")
+    source_path = str(payload.get("path") or payload.get("file") or "").strip()
+    if text is None and source_path:
+        path = Path(source_path).expanduser()
+        if not path.exists() or not path.is_file():
+            return "", source_path, f"File does not exist: {source_path}"
+        if path.stat().st_size > MAX_UPLOAD_BYTES:
+            return "", source_path, f"File is too large for the quality gate: {human_bytes(path.stat().st_size)}"
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            return "", source_path, str(exc)
+    return str(text or ""), source_path, ""
+
+
+def quality_gate_temp_file(language, text, source_path=""):
+    extension = Path(source_path).suffix if source_path else ""
+    if not extension:
+        extension = {
+            "python": ".py",
+            "c": ".c",
+            "cpp": ".cpp",
+            "klipper": ".cfg",
+            "gcode": ".gcode",
+            "bash": ".sh",
+            "javascript": ".js",
+            "json": ".json",
+            "yaml": ".yaml",
+            "toml": ".toml",
+            "openscad": ".scad",
+        }.get(language, ".txt")
+    LOCAL_QUALITY_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_dir = Path(tempfile.mkdtemp(prefix="quality-gate-", dir=str(LOCAL_QUALITY_OUTPUT_DIR)))
+    name = slugify(Path(source_path).stem if source_path else f"{language}-snippet", "snippet")
+    path = tmp_dir / f"{name}{extension}"
+    path.write_text(text, encoding="utf-8")
+    return tmp_dir, path
+
+
+def validate_python_quality(text, source_path=""):
+    tmp_dir, path = quality_gate_temp_file("python", text, source_path)
+    command = [command_path("python3") or "/usr/bin/python3", "-m", "py_compile", str(path)]
+    run = run_quality_command(command, cwd=tmp_dir, timeout=20)
+    return [
+        quality_check(
+            "python:py_compile",
+            "pass" if run["ok"] else "fail",
+            run["stderr"] or run["stdout"] or "Python syntax ok.",
+        )
+    ], str(path)
+
+
+def validate_c_family_quality(language, text, source_path=""):
+    tmp_dir, path = quality_gate_temp_file(language, text, source_path)
+    if language == "c":
+        compiler = command_path("clang") or command_path("gcc") or command_path("cc")
+        standard = "c11"
+        check_name = "c:fsyntax-only"
+    else:
+        compiler = command_path("clang++") or command_path("g++") or command_path("c++")
+        standard = "c++17"
+        check_name = "cpp:fsyntax-only"
+    if not compiler:
+        return [quality_check(check_name, "warn", "No C/C++ compiler found for syntax-only validation.")], str(path)
+    run = run_quality_command(
+        [compiler, f"-std={standard}", "-Wall", "-Wextra", "-fsyntax-only", str(path)],
+        cwd=tmp_dir,
+        timeout=30,
+    )
+    checks = [
+        quality_check(
+            check_name,
+            "pass" if run["ok"] else "fail",
+            run["stderr"] or run["stdout"] or f"{language.upper()} syntax ok.",
+        )
+    ]
+    if language == "cpp" and Path(source_path).suffix.lower() == ".ino":
+        checks.append(
+            quality_check(
+                "arduino:project-context",
+                "warn",
+                "Arduino `.ino` files may need board/core context; this gate only ran a C++ syntax pass.",
+            )
+        )
+    return checks, str(path)
+
+
+def validate_bash_quality(text, source_path=""):
+    tmp_dir, path = quality_gate_temp_file("bash", text, source_path)
+    bash = command_path("bash") or "/bin/bash"
+    run = run_quality_command([bash, "-n", str(path)], cwd=tmp_dir, timeout=20)
+    return [
+        quality_check(
+            "bash:syntax",
+            "pass" if run["ok"] else "fail",
+            run["stderr"] or run["stdout"] or "Bash syntax ok.",
+        )
+    ], str(path)
+
+
+def validate_javascript_quality(text, source_path=""):
+    tmp_dir, path = quality_gate_temp_file("javascript", text, source_path)
+    node = command_path("node")
+    if not node:
+        return [quality_check("javascript:node-check", "warn", "Node was not found; skipped JavaScript syntax check.")], str(path)
+    run = run_quality_command([node, "--check", str(path)], cwd=tmp_dir, timeout=20)
+    return [
+        quality_check(
+            "javascript:node-check",
+            "pass" if run["ok"] else "fail",
+            run["stderr"] or run["stdout"] or "JavaScript syntax ok.",
+        )
+    ], str(path)
+
+
+def validate_json_quality(text, source_path=""):
+    try:
+        json.loads(text)
+        return [quality_check("json:parse", "pass", "JSON parses cleanly.")], source_path
+    except json.JSONDecodeError as exc:
+        return [quality_check("json:parse", "fail", f"line {exc.lineno}, column {exc.colno}: {exc.msg}")], source_path
+
+
+def validate_yaml_quality(text, source_path=""):
+    try:
+        import yaml
+    except Exception as exc:
+        return [quality_check("yaml:parse", "warn", f"PyYAML is not available: {exc}")], source_path
+    try:
+        yaml.safe_load(text) if text.strip() else None
+        return [quality_check("yaml:parse", "pass", "YAML parses cleanly.")], source_path
+    except Exception as exc:
+        return [quality_check("yaml:parse", "fail", str(exc))], source_path
+
+
+def validate_toml_quality(text, source_path=""):
+    try:
+        import tomllib
+
+        tomllib.loads(text)
+        return [quality_check("toml:parse", "pass", "TOML parses cleanly.")], source_path
+    except ModuleNotFoundError:
+        try:
+            import tomli
+
+            tomli.loads(text)
+            return [quality_check("toml:parse", "pass", "TOML parses cleanly.")], source_path
+        except ModuleNotFoundError:
+            return [quality_check("toml:parse", "warn", "No TOML parser is available in this Python environment.")], source_path
+        except Exception as exc:
+            return [quality_check("toml:parse", "fail", str(exc))], source_path
+    except Exception as exc:
+        return [quality_check("toml:parse", "fail", str(exc))], source_path
+
+
+def validate_openscad_quality(text, source_path=""):
+    tmp_dir, path = quality_gate_temp_file("openscad", text, source_path)
+    openscad = command_path("openscad")
+    if not openscad:
+        return [quality_check("openscad:render-check", "warn", "OpenSCAD was not found; skipped render validation.")], str(path)
+    out_path = tmp_dir / "quality-check.stl"
+    run = run_quality_command([openscad, "-o", str(out_path), str(path)], cwd=tmp_dir, timeout=45)
+    return [
+        quality_check(
+            "openscad:render-check",
+            "pass" if run["ok"] and out_path.exists() else "fail",
+            run["stderr"] or run["stdout"] or "OpenSCAD rendered an STL successfully.",
+        )
+    ], str(path)
+
+
+def validate_klipper_quality(text, source_path=""):
+    checks = []
+    sections = []
+    current = ""
+    macro_sections = {}
+    jinja_pairs = [
+        ("{{", "}}", "jinja:expression-delimiters"),
+        ("{%", "%}", "jinja:statement-delimiters"),
+        ("{#", "#}", "jinja:comment-delimiters"),
+    ]
+    for open_token, close_token, name in jinja_pairs:
+        if text.count(open_token) != text.count(close_token):
+            checks.append(
+                quality_check(
+                    name,
+                    "fail",
+                    f"Unbalanced `{open_token}`/`{close_token}` delimiters.",
+                )
+            )
+
+    bad_lines = []
+    outside_section = []
+    continuation_without_key = []
+    for line_no, raw in enumerate(text.splitlines(), 1):
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("["):
+            match = re.match(r"^\[([A-Za-z0-9_]+)(?:\s+([^\]]+))?\]\s*(?:#.*)?$", stripped)
+            if not match:
+                bad_lines.append(f"line {line_no}: malformed section header `{compact(stripped, 120)}`")
+                current = ""
+                continue
+            section_type = match.group(1).strip().lower()
+            section_name = (match.group(2) or "").strip()
+            current = f"{section_type} {section_name}".strip()
+            sections.append(current)
+            if section_type in {"gcode_macro", "delayed_gcode"}:
+                macro_sections[current] = {"line": line_no, "hasGcode": False}
+            continue
+        if not current:
+            outside_section.append(f"line {line_no}: `{compact(stripped, 120)}`")
+            continue
+        if re.match(r"^[A-Za-z0-9_]+(?:\s*[:=]).*$", stripped):
+            key = re.split(r"[:=]", stripped, maxsplit=1)[0].strip().lower()
+            if key == "gcode" and current in macro_sections:
+                macro_sections[current]["hasGcode"] = True
+            continue
+        if raw.startswith((" ", "\t")):
+            continue
+        continuation_without_key.append(f"line {line_no}: `{compact(stripped, 120)}`")
+
+    if bad_lines:
+        checks.append(quality_check("klipper:section-headers", "fail", "; ".join(bad_lines[:5])))
+    else:
+        checks.append(quality_check("klipper:section-headers", "pass", f"{len(sections)} section(s) parsed."))
+    if outside_section:
+        checks.append(quality_check("klipper:outside-section", "fail", "; ".join(outside_section[:5])))
+    if continuation_without_key:
+        checks.append(
+            quality_check(
+                "klipper:line-shape",
+                "warn",
+                "Non-indented non-key lines found; verify these are valid Klipper/G-code lines: "
+                + "; ".join(continuation_without_key[:5]),
+            )
+        )
+    missing_gcode = [
+        f"{section} at line {info['line']}"
+        for section, info in macro_sections.items()
+        if not info.get("hasGcode")
+    ]
+    if missing_gcode:
+        checks.append(quality_check("klipper:gcode-blocks", "fail", "Missing `gcode:` in " + "; ".join(missing_gcode[:5])))
+    else:
+        checks.append(quality_check("klipper:gcode-blocks", "pass", f"{len(macro_sections)} macro/delayed section(s) include gcode blocks."))
+    checks.append(
+        quality_check(
+            "klipper:live-machine-safety",
+            "warn",
+            "Static config check only. Do not upload/restart a live printer until Moonraker reports standby/ready and virtual_sdcard is inactive.",
+        )
+    )
+    return checks, source_path
+
+
+def validate_gcode_quality(text, source_path=""):
+    checks = []
+    invalid = []
+    commands = []
+    motion = False
+    units_seen = False
+    coordinate_seen = False
+    dangerous = []
+    for line_no, raw in enumerate(text.splitlines(), 1):
+        line = re.sub(r"\([^)]*\)", "", raw)
+        line = line.split(";", 1)[0].strip()
+        if not line or line == "%":
+            continue
+        parts = line.split()
+        if parts and re.match(r"^N\d+$", parts[0], re.IGNORECASE):
+            parts = parts[1:]
+        if not parts:
+            continue
+        command = parts[0].upper()
+        if not re.match(r"^[GMT]\d+(?:\.\d+)?$", command):
+            invalid.append(f"line {line_no}: unknown command token `{command}`")
+            continue
+        commands.append(command)
+        if command in {"G0", "G00", "G1", "G01", "G2", "G02", "G3", "G03"}:
+            motion = True
+        if command in {"G20", "G21"}:
+            units_seen = True
+        if command in {"G90", "G91"}:
+            coordinate_seen = True
+        if command in {"M3", "M03", "M4", "M04", "M5", "M05", "M112", "G28", "G29"}:
+            dangerous.append(f"line {line_no}: {command}")
+        for token in parts[1:]:
+            if not re.match(r"^[A-Z][-+]?(?:\d+(?:\.\d*)?|\.\d+)?$", token.upper()):
+                invalid.append(f"line {line_no}: unusual word `{compact(token, 60)}`")
+                break
+    if invalid:
+        checks.append(quality_check("gcode:line-shape", "fail", "; ".join(invalid[:8])))
+    else:
+        checks.append(quality_check("gcode:line-shape", "pass", f"{len(commands)} command line(s) parsed."))
+    if motion and not units_seen:
+        checks.append(quality_check("gcode:units", "warn", "Motion commands found but no explicit G20/G21 unit mode was detected."))
+    if motion and not coordinate_seen:
+        checks.append(quality_check("gcode:coordinates", "warn", "Motion commands found but no explicit G90/G91 coordinate mode was detected."))
+    if dangerous:
+        checks.append(
+            quality_check(
+                "gcode:machine-safety",
+                "warn",
+                "Machine-affecting commands require live-state/operator verification before use: " + "; ".join(dangerous[:8]),
+            )
+        )
+    else:
+        checks.append(quality_check("gcode:machine-safety", "pass", "No homing/probing/spindle/emergency commands detected."))
+    return checks, source_path
+
+
+def quality_gate(payload=None):
+    payload = payload or {}
+    text, source_path, error = read_quality_gate_source(payload)
+    requested_language = payload.get("language") or payload.get("lang") or ""
+    language = normalize_quality_language(requested_language, source_path, text)
+    if error:
+        return {
+            "ok": False,
+            "status": "fail",
+            "language": language,
+            "sourcePath": source_path,
+            "checks": [quality_check("input:source", "fail", error)],
+            "policy": "Read-only/syntax-only validation; no live machine actions are performed.",
+        }
+    if language not in QUALITY_SUPPORTED_LANGUAGES:
+        language = "text"
+    if not text.strip():
+        checks = [quality_check("input:source", "fail", "No code/config text or readable file path was provided.")]
+        return {
+            "ok": False,
+            "status": "fail",
+            "language": language,
+            "sourcePath": source_path,
+            "checks": checks,
+            "policy": "Read-only/syntax-only validation; no live machine actions are performed.",
+        }
+
+    if language == "python":
+        checks, staged_path = validate_python_quality(text, source_path)
+    elif language in {"c", "cpp"}:
+        checks, staged_path = validate_c_family_quality(language, text, source_path)
+    elif language == "bash":
+        checks, staged_path = validate_bash_quality(text, source_path)
+    elif language == "javascript":
+        checks, staged_path = validate_javascript_quality(text, source_path)
+    elif language == "json":
+        checks, staged_path = validate_json_quality(text, source_path)
+    elif language == "yaml":
+        checks, staged_path = validate_yaml_quality(text, source_path)
+    elif language == "toml":
+        checks, staged_path = validate_toml_quality(text, source_path)
+    elif language == "openscad":
+        checks, staged_path = validate_openscad_quality(text, source_path)
+    elif language == "klipper":
+        checks, staged_path = validate_klipper_quality(text, source_path)
+    elif language == "gcode":
+        checks, staged_path = validate_gcode_quality(text, source_path)
+    else:
+        checks = [
+            quality_check(
+                "text:unsupported-language",
+                "warn",
+                "No dedicated validator is configured for this language yet; use project tests or a language-specific tool if available.",
+            )
+        ]
+        staged_path = source_path
+
+    status = quality_gate_status(checks)
+    return {
+        "ok": status != "fail",
+        "status": status,
+        "language": language,
+        "requestedLanguage": requested_language,
+        "sourcePath": source_path,
+        "stagedPath": staged_path,
+        "checks": checks,
+        "supportedLanguages": QUALITY_SUPPORTED_LANGUAGES,
+        "policy": "Read-only/syntax-only validation; no live printer/CNC movement, firmware flashing, uploads, or restarts are performed.",
+    }
+
+
+def quality_gate_synthetic_check():
+    py = quality_gate({"language": "python", "code": "def add(a, b):\n    return a + b\n"})
+    cpp = quality_gate({"language": "cpp", "code": "#include <vector>\nint add(int a,int b){return a+b;}\n"})
+    klipper = quality_gate(
+        {
+            "language": "klipper",
+            "code": "[gcode_macro TEST_MACRO]\ngcode:\n  G90\n  G1 X1 Y1 F1200\n",
+        }
+    )
+    gcode = quality_gate({"language": "gcode", "code": "G21\nG90\nG1 X1 Y1 F1200\n"})
+    bad_python = quality_gate({"language": "python", "code": "def nope(:\n    pass\n"})
+    return (
+        py.get("status") == "pass"
+        and cpp.get("status") == "pass"
+        and klipper.get("status") == "warn"
+        and gcode.get("status") == "pass"
+        and bad_python.get("status") == "fail"
+    )
+
+
 def append_autonomy_supervisor_log(record):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -5252,6 +5796,10 @@ def local_tool_catalog():
             "refresh": "GET /api/tools/inventory?refresh=1",
             "description": "Full local inventory of visible PATH commands, macOS applications, Python modules, Homebrew packages, Docker images, and Ollama models.",
         },
+        "languageQualityGate": {
+            "check": "POST /api/tools/quality-gate",
+            "description": "Read-only syntax/static validation for Python, C, C++, Klipper config/macros, G-code, Bash, JavaScript, JSON, YAML, TOML, and OpenSCAD.",
+        },
         "toolRecovery": {
             "plan": "POST /api/tools/recover",
             "description": "Classify a local failure, choose a free/safe tool or local endpoint, and return the retry path.",
@@ -5287,6 +5835,7 @@ def build_local_tools_context():
             "Local completion tools:",
             "- If a command or capability is missing, inspect `GET http://127.0.0.1:8765/api/tools/capabilities`.",
             "- To see the full Mac tool inventory, call `GET http://127.0.0.1:8765/api/tools/inventory`. It lists visible commands, app bundles, Python modules, Homebrew packages, Docker images, and Ollama models.",
+            "- Before claiming generated code/config is done, run `POST http://127.0.0.1:8765/api/tools/quality-gate` with JSON like `{\"language\":\"python\",\"code\":\"print('ok')\"}` or `{\"path\":\"/path/to/file.cpp\"}`. Use it for Python, C, C++, Klipper, G-code, Bash, JavaScript, JSON, YAML, TOML, and OpenSCAD.",
             "- To install a free allowlisted missing tool, call `POST http://127.0.0.1:8765/api/tools/install-free-tool` with JSON like `{\"tool\":\"jq\",\"reason\":\"parse printer API JSON\"}`.",
             "- To recover from a failure, call `POST http://127.0.0.1:8765/api/tools/recover` with the original messages, cwd, and error text. Use its recovery status before giving up.",
             "- To check whether a draft answer needs help before finalizing, call `POST http://127.0.0.1:8765/api/tools/autonomy-supervisor` with the messages, route, answerText, cwd, and webSearch.",
@@ -8812,6 +9361,15 @@ def package_health_report():
         add("tools:autonomy-supervisor", "fail", str(exc))
 
     try:
+        add(
+            "tools:language-quality-gate",
+            "pass" if quality_gate_synthetic_check() else "fail",
+            "validates Python, C++, Klipper, G-code, and failing syntax without live machine actions",
+        )
+    except Exception as exc:
+        add("tools:language-quality-gate", "fail", str(exc))
+
+    try:
         discovery = discover_klipper_config_dirs("klipper")
         candidates = discovery.get("candidates", [])
         add(
@@ -10270,6 +10828,17 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                     "gaps": result.get("gaps", []),
                 }
             )
+            self.send_json(result)
+            return
+
+        if parsed.path == "/api/tools/quality-gate":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self.send_error(400, "Invalid JSON")
+                return
+            result = quality_gate(payload)
             self.send_json(result)
             return
 
