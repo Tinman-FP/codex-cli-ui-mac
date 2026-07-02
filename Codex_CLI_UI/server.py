@@ -39,6 +39,7 @@ QUALITY_FEEDBACK_PATH = DATA_DIR / "quality_feedback.jsonl"
 IMPROVEMENT_LAB_PATH = DATA_DIR / "improvement_lab.json"
 GOLDEN_TESTS_PATH = DATA_DIR / "golden_tests.json"
 GOLDEN_TEST_RESULTS_PATH = DATA_DIR / "golden_test_results.json"
+RESPONSE_EXAMPLES_PATH = DATA_DIR / "response_examples.json"
 MODEL_WARMUP_STATE_PATH = DATA_DIR / "model_warmup_state.json"
 LOCAL_TOOL_OUTPUT_DIR = DATA_DIR / "generated" / "printer-macros"
 LOCAL_CAD_OUTPUT_DIR = DATA_DIR / "generated" / "cad"
@@ -1353,6 +1354,110 @@ def load_quality_feedback(limit=200):
     return records
 
 
+def default_response_examples():
+    return [
+        {
+            "id": "direct-answer-outdoor-material",
+            "projectId": "tinmanx-slicer-research",
+            "title": "Direct material recommendation",
+            "prompt": "What is the best all around filament for an outdoor part in Georgia sun?",
+            "answerShape": "Use ASA. This is why: it handles UV, heat, and weather better than PLA, PETG, or ABS for outdoor brackets. You should also consider: print it with enough walls, avoid sharp stress risers, and use stainless hardware if it will stay outside.",
+            "lesson": "Lead with the pick, then explain why and practical caveats.",
+            "source": "built-in",
+        },
+        {
+            "id": "cad-created-files",
+            "projectId": "cad-modeling-projects",
+            "title": "Created CAD files",
+            "prompt": "Design a CPAP cooling duct and save the files.",
+            "answerShape": "I made the first-pass CAD package. Open this first in Fusion 360: `/path/to/design_fusion360.py`. Plain-English design: the duct uses a smooth plenum and balanced outlets. You should also consider: this is not CFD-validated until the solver actually runs.",
+            "lesson": "When files are created, say what was made, give clickable paths, then explain the engineering tradeoff.",
+            "source": "built-in",
+        },
+        {
+            "id": "blocked-but-useful",
+            "projectId": "codex-cli-ui-local-agent",
+            "title": "Useful blocker",
+            "prompt": "Find the local folder and save this there.",
+            "answerShape": "I could not confirm the target folder, so I did not touch the live machine. This is why: the configured path was not reachable. You should also consider: I saved a clearly labeled candidate locally and listed exactly what still needs confirmation.",
+            "lesson": "A blocker answer still needs a useful fallback and a clear statement of what changed.",
+            "source": "built-in",
+        },
+    ]
+
+
+def load_response_examples():
+    data = read_json(RESPONSE_EXAMPLES_PATH, {"version": 1, "items": []})
+    if not isinstance(data, dict):
+        data = {"version": 1, "items": []}
+    items = data.get("items")
+    data["items"] = items if isinstance(items, list) else []
+    return data
+
+
+def response_examples_summary(limit=8):
+    data = load_response_examples()
+    items = [item for item in data.get("items", []) if isinstance(item, dict)]
+    built_in = default_response_examples()
+    combined = [*built_in, *items]
+    return {
+        "path": str(RESPONSE_EXAMPLES_PATH),
+        "builtInCount": len(built_in),
+        "savedCount": len(items),
+        "count": len(combined),
+        "recent": list(reversed(items[-limit:])),
+    }
+
+
+def store_response_example_from_feedback(record):
+    if record.get("rating") != "good" or not record.get("answer"):
+        return None
+    item = {
+        "id": f"good-{record.get('id')}",
+        "createdAt": record.get("timestamp") or time.time(),
+        "projectId": record.get("projectId") or "general",
+        "title": compact(record.get("note") or record.get("prompt") or "Good Tinman-style answer", 120),
+        "prompt": compact(record.get("prompt") or "", 700),
+        "answerShape": compact(record.get("answer") or "", 1200),
+        "lesson": compact(record.get("note") or "Tinman marked this answer good; preserve this answer shape for similar requests.", 500),
+        "source": "good-feedback",
+    }
+    data = load_response_examples()
+    items = [existing for existing in data.get("items", []) if existing.get("id") != item["id"]]
+    items.append(item)
+    data["items"] = items[-80:]
+    data["updatedAt"] = time.time()
+    write_json_atomic(RESPONSE_EXAMPLES_PATH, data)
+    return item
+
+
+def relevant_response_examples(messages, route=None, limit=3):
+    route = route or {}
+    project_id = route.get("projectId") or "general"
+    query = latest_user_text(messages).lower()
+    combined = [*default_response_examples(), *load_response_examples().get("items", [])]
+    scored = []
+    for item in combined:
+        if not isinstance(item, dict):
+            continue
+        score = 0
+        if item.get("projectId") == project_id:
+            score += 12
+        haystack = " ".join(
+            str(item.get(key) or "").lower()
+            for key in ("title", "prompt", "lesson", "answerShape")
+        )
+        for term in [term for term in re_words(query) if term not in STOP_WORDS][:12]:
+            if term in haystack:
+                score += 3
+        if item.get("source") == "built-in":
+            score += 2
+        if score:
+            scored.append((score, item))
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return [item for _, item in scored[:limit]]
+
+
 def record_quality_feedback(payload):
     route = payload.get("route") if isinstance(payload.get("route"), dict) else {}
     messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
@@ -1379,6 +1484,7 @@ def record_quality_feedback(payload):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with QUALITY_FEEDBACK_PATH.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, separators=(",", ":")) + "\n")
+    store_response_example_from_feedback(record)
     return record
 
 
@@ -3013,6 +3119,16 @@ def build_response_quality_context(messages, route=None):
                 lines.append(f"- Good-answer lesson for {item.get('projectId', 'general')}: {note}")
         lines.append("")
 
+    examples = relevant_response_examples(messages, route or {})
+    if examples:
+        lines.append("Tinman-style answer examples to imitate in shape, not copy blindly:")
+        for item in examples:
+            lines.append(
+                f"- {item.get('title', 'Example')}: {compact(item.get('lesson') or '', 160)} "
+                f"Shape: {compact(item.get('answerShape') or '', 260)}"
+            )
+        lines.append("")
+
     return "\n".join(lines)
 
 
@@ -3122,6 +3238,7 @@ def admin_summary():
     improvement = improvement_lab_summary()
     self_healing = self_healing_summary()
     golden = golden_test_summary()
+    examples = response_examples_summary()
     projects = []
     for project_id, project in state.get("projects", {}).items():
         folders = []
@@ -3165,6 +3282,8 @@ def admin_summary():
         "selfPatchOpenCount": self_healing.get("queue", {}).get("openCount", 0),
         "goldenTestSummary": golden,
         "goldenTestCount": golden["totalCount"],
+        "responseExamples": examples,
+        "responseExampleCount": examples["count"],
         "projectCount": len(projects),
         "knowledgeCount": len(knowledge.get("items", [])),
         "projects": projects,
@@ -6101,19 +6220,33 @@ def answer_refuses_web(text):
 
 
 def answer_has_cad_artifact(text):
-    lower = str(text or "").lower()
-    artifact_terms = (
-        "data/generated/cad",
-        "/generated/cad/",
-        ".scad",
-        ".step",
-        ".stp",
-        ".stl",
-        "fusion360.py",
-        "fusion 360 python",
-        "cad-artifact",
+    raw = str(text or "")
+    lower = raw.lower()
+    if "cad-artifact" in lower or "data/generated/cad" in lower or "/generated/cad/" in lower:
+        return True
+    artifact_labels = (
+        "fusion 360 script:",
+        "openscad model:",
+        "editable scad:",
+        "duct stl:",
+        "airway stl:",
+        "design readme:",
+        "open this first in fusion 360:",
+        "i staged a first-pass",
+        "i generated an inferred",
+        "i made the first-pass cad",
+        "i prepared a first-pass",
     )
-    return any(term in lower for term in artifact_terms)
+    if any(label in lower for label in artifact_labels):
+        return True
+    return bool(
+        re.search(
+            r"/(?:Users|Applications|Volumes|private/tmp|tmp|var/folders)/[^\n`'\"<>]+"
+            r"(?:_fusion360\.py|\.scad|\.stl|\.step|\.stp)",
+            raw,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def answer_mentions_wrong_printer_status_for_cad(text):
@@ -10444,6 +10577,85 @@ def package_health_report():
         add("analysis:improvement-lab", "fail", str(exc))
 
     try:
+        examples = response_examples_summary()
+        ok = examples.get("builtInCount", 0) >= 3 and examples.get("count", 0) >= 3
+        add(
+            "response:examples-library",
+            "pass" if ok else "fail",
+            f"{examples.get('builtInCount', 0)} built-in, {examples.get('savedCount', 0)} saved",
+        )
+    except Exception as exc:
+        add("response:examples-library", "fail", str(exc))
+
+    try:
+        LOCAL_CAD_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="health-package-", dir=str(LOCAL_CAD_OUTPUT_DIR)) as tmp_dir:
+            package_messages = [
+                {
+                    "role": "user",
+                    "text": "Design a CPAP cooling duct in CAD for Fusion 360 with an 18mm inlet and clear assumptions.",
+                }
+            ]
+            package_route = {
+                "projectId": "cad-modeling-projects",
+                "project": "CAD & Modeling Projects",
+                "engine": "local",
+            }
+            artifact = stage_cad_artifact(
+                latest_user_text(package_messages),
+                target_path=tmp_dir,
+                artifact_name="health-response-package",
+            )
+            answer = format_cad_artifact_result_answer(artifact)
+            package = response_package(package_messages, package_route, answer)
+            ok = (
+                package.get("taskContract", {}).get("kind") == "CAD/design deliverable"
+                and "CAD" in package.get("roleStyle", {}).get("title", "")
+                and package.get("deliverables")
+                and package.get("assumptions")
+                and package.get("scorecard", {}).get("score", 0) >= 80
+            )
+        add(
+            "response:contract-scorecard",
+            "pass" if ok else "fail",
+            "task contract, role style, deliverables, assumptions, and scorecard generated",
+        )
+    except Exception as exc:
+        add("response:contract-scorecard", "fail", str(exc))
+
+    try:
+        reference_messages = [
+            {
+                "role": "user",
+                "text": "what file type from fusion preserves component names?",
+            }
+        ]
+        reference_route = {
+            "projectId": "cad-modeling-projects",
+            "project": "CAD & Modeling Projects",
+            "engine": "local",
+        }
+        reference_answer = fusion_component_export_direct_answer(reference_messages)
+        package = response_package(reference_messages, reference_route, reference_answer)
+        wrong_route = next(
+            (check for check in package.get("scorecard", {}).get("checks", []) if check.get("label") == "No wrong artifact route"),
+            {},
+        )
+        ok = (
+            package.get("taskContract", {}).get("kind") == "CAD reference"
+            and not answer_has_cad_artifact(reference_answer)
+            and wrong_route.get("passed")
+            and package.get("scorecard", {}).get("score", 0) >= 80
+        )
+        add(
+            "response:cad-reference-scorecard",
+            "pass" if ok else "fail",
+            "reference answers can mention CAD formats without being scored as artifact staging",
+        )
+    except Exception as exc:
+        add("response:cad-reference-scorecard", "fail", str(exc))
+
+    try:
         golden = golden_test_summary()
         ok = golden_test_generator_synthetic_check()
         add(
@@ -10750,11 +10962,263 @@ def open_local_path(path_value, mode="reveal"):
     return {"ok": True, "path": str(path), "action": action}
 
 
+LOCAL_ANSWER_PATH_RE = re.compile(
+    r"(/(?:Users|Applications|Volumes|private/tmp|tmp|var/folders)/[^\n`'\"<>]+?"
+    r"(?:\.(?:py|js|sh|command|cpp|c|h|hpp|scad|stl|step|stp|f3d|f3z|3mf|cfg|ini|json|yaml|yml|toml|plist|gcode|md|txt|pdf|csv|png|jpg|jpeg)|/))"
+    r"(?=$|[\s\]\),.;:])"
+)
+
+
+def response_role_style(route=None):
+    route = route or {}
+    project_id = route.get("projectId") or "general"
+    styles = {
+        "cad-modeling-projects": {
+            "title": "CAD Engineer",
+            "voice": "Engineering-first, plain-English design decisions, assumptions, validation limits, and clickable artifacts.",
+            "checklist": ["geometry intent", "constraints", "assumptions", "validation state", "source files"],
+        },
+        "printer-klipper-ops": {
+            "title": "Printer/Ops Tech",
+            "voice": "Direct, safety-aware, separates read-only status from live-machine changes.",
+            "checklist": ["printer platform", "read-only vs write action", "state/idle guard", "exact next step"],
+        },
+        "tinmanx-slicer-research": {
+            "title": "Materials Specialist",
+            "voice": "Clear material pick first, then print settings, caveats, and exact material-name boundaries.",
+            "checklist": ["material family", "environment", "print settings", "wrong-material rejects"],
+        },
+        "energy-power-research": {
+            "title": "Power Systems Researcher",
+            "voice": "One practical pick, verified electrical constraints, seller/manufacturer confirmation questions.",
+            "checklist": ["voltage", "RPM", "phase/output", "price", "confirmation caveat"],
+        },
+        "research-parts-reference": {
+            "title": "Parts Researcher",
+            "voice": "Exact-fit thinking with clear rejects and dimensional/material caveats.",
+            "checklist": ["exact spec", "dimensions", "material/profile", "source quality"],
+        },
+        "codex-cli-ui-local-agent": {
+            "title": "Local Agent Builder",
+            "voice": "Product-minded, implementation plus verification, with private/local boundaries called out.",
+            "checklist": ["behavior change", "local files", "verification", "GitHub/package state"],
+        },
+        "mac-system-accounts": {
+            "title": "Mac/Network Tech",
+            "voice": "Reversible diagnostics, privacy-aware, clear LAN/VPN/public-network boundaries.",
+            "checklist": ["scope", "safe diagnostic", "secret boundary", "reversible next step"],
+        },
+    }
+    default = {
+        "title": PROJECT_PLAYBOOKS.get(project_id, PROJECT_PLAYBOOKS["general"]).get("specialist", "General Helper"),
+        "voice": "Plain-spoken, useful, and concise.",
+        "checklist": ["answer", "why", "caveat", "next step"],
+    }
+    return {**default, **styles.get(project_id, {})}
+
+
+def task_contract(messages, route=None):
+    route = route or {}
+    query = latest_user_text(messages).lower()
+    route_engine = route.get("engine", "")
+    kind = "General help"
+    done = "Answer the actual question in plain language and include the useful next step."
+    if is_cad_reference_question(messages):
+        kind = "CAD reference"
+        done = "Give the format/spec answer directly; do not create CAD artifacts."
+    elif is_stl_cfd_duct_design_request(messages):
+        kind = "STL/CAD deliverable"
+        done = "Find or confirm the STL, generate usable design artifacts, list clickable paths, and state validation limits."
+    elif is_cad_design_request(messages) or is_cad_artifact_tool_request(messages):
+        kind = "CAD/design deliverable"
+        done = "Create or specify importable CAD artifacts, explain design choices, list assumptions, and state validation status."
+    elif is_read_only_printer_status_query(messages):
+        kind = "Printer status"
+        done = "Report current read-only status from the configured endpoint or say exactly why it is unreachable."
+    elif route_engine in {"local-research", "openai"} or wants_research_quality_context(messages) or wants_web_context(messages):
+        kind = "Research"
+        done = "Use current evidence, make a clear recommendation, reject weak matches, and cite source URLs."
+    elif text_has_any(query, ("write code", "python", "javascript", "c++", "cpp", "klipper", "gcode", "macro", "script", "config")):
+        kind = "Code/config"
+        done = "Produce the code/config, validate syntax when possible, and explain where to save or run it."
+    elif text_has_any(query, ("create", "make", "build", "save", "write", "upload", "find the folder", "local folder")):
+        kind = "File/action"
+        done = "Perform the local action when safe, list changed/created files, and verify the result."
+    elif text_has_any(query, ("what is", "which", "what file", "can you tell", "best", "?")):
+        kind = "Direct answer"
+        done = "Answer first, then explain why and what to consider."
+    style = response_role_style(route)
+    return {
+        "kind": kind,
+        "doneMeans": done,
+        "role": style["title"],
+        "projectId": route.get("projectId", "general"),
+        "engine": route.get("engine", "local"),
+    }
+
+
+def deliverable_type(path):
+    suffix = Path(str(path)).suffix.lower()
+    if suffix in {".py", ".js", ".sh", ".command", ".cpp", ".c", ".h", ".hpp"}:
+        return "script"
+    if suffix in {".stl", ".step", ".stp", ".f3d", ".f3z", ".scad", ".3mf"}:
+        return "cad"
+    if suffix in {".cfg", ".ini", ".json", ".yaml", ".yml", ".toml", ".plist", ".gcode"}:
+        return "config"
+    if suffix in {".md", ".txt", ".pdf", ".csv"}:
+        return "document"
+    if suffix in {".png", ".jpg", ".jpeg"}:
+        return "image"
+    return "folder" if Path(str(path)).suffix == "" else "file"
+
+
+def extract_response_deliverables(answer):
+    text = str(answer or "")
+    deliverables = []
+    seen = set()
+
+    def add_item(label, raw_path):
+        path = str(raw_path or "").strip().strip("`'\"")
+        if not path.startswith("/"):
+            return
+        path = re.sub(r"[),.;:]+$", "", path)
+        if path in seen:
+            return
+        seen.add(path)
+        exists = Path(path).expanduser().exists()
+        deliverables.append(
+            {
+                "label": compact(label or Path(path).name or "Output file", 90),
+                "path": path,
+                "kind": deliverable_type(path),
+                "exists": bool(exists),
+            }
+        )
+
+    for line in text.splitlines():
+        stripped = line.strip().lstrip("-* ")
+        match = re.match(r"(?P<label>[^:\n]{2,90}):\s*`(?P<path>/[^`]+)`", stripped)
+        if match:
+            add_item(match.group("label"), match.group("path"))
+    for match in re.finditer(r"\[([^\]]+)\]\((/[^)]+)\)", text):
+        add_item(match.group(1), match.group(2))
+    for match in re.finditer(r"`(/[^`]+)`", text):
+        add_item("", match.group(1))
+    for match in LOCAL_ANSWER_PATH_RE.finditer(text):
+        add_item("", match.group(1))
+    return deliverables[:12]
+
+
+def extract_assumption_ledger(messages, route, answer, contract=None):
+    lower = str(answer or "").lower()
+    ledger = []
+
+    def add(kind, text, status="noted"):
+        if text and len(ledger) < 8:
+            ledger.append({"kind": kind, "text": compact(text, 220), "status": status})
+
+    if "assume" in lower or "assumes" in lower:
+        match = re.search(r"(?is)([^.\n]*assum(?:e|es|ed|ption)[^.\n]*(?:[.\n]|$))", str(answer or ""))
+        add("Assumption", match.group(1).strip() if match else "The answer includes an explicit assumption.", "assumed")
+    if "no full cfd" in lower or "not pretending this is validated" in lower or "not validated" in lower:
+        add("Validation", "Full validation was not claimed; the answer marks the remaining validation work.", "limited")
+    if "offline" in lower or "unreachable" in lower or "blocked" in lower:
+        add("Blocker", "The answer identifies a blocker or unreachable dependency.", "blocked")
+    if "passed" in lower or "verified" in lower or "validated" in lower:
+        add("Verified", "The answer includes a verification or passing-check statement.", "verified")
+    if "you should also consider:" in lower:
+        caveat = str(answer or "").split("You should also consider:", 1)[-1].strip().split("\n\n", 1)[0]
+        add("Caveat", caveat, "caution")
+    if not ledger and (contract or {}).get("kind", "").lower().startswith(("cad", "stl")):
+        add("Validation", "Engineering/CAD work should still be fit-checked before final use.", "caution")
+    return ledger
+
+
+def response_scorecard(messages, route, answer, contract=None, deliverables=None, assumptions=None):
+    text = str(answer or "").strip()
+    lower = text.lower()
+    contract = contract or task_contract(messages, route)
+    deliverables = deliverables if deliverables is not None else extract_response_deliverables(text)
+    assumptions = assumptions if assumptions is not None else extract_assumption_ledger(messages, route, text, contract)
+    first = next((part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()), "")
+    checks = []
+
+    def add(label, passed, detail=""):
+        checks.append({"label": label, "passed": bool(passed), "detail": compact(detail, 180)})
+
+    add(
+        "Answer first",
+        bool(first) and not first.lower().startswith(("working notes", "recovery plan", "fusion 360 script", "openscad model")),
+        "The first visible paragraph should tell Tinman the useful answer or action.",
+    )
+    add(
+        "Plain language",
+        "####" not in text and "**" not in text and "not acceptable" not in lower,
+        "Avoid noisy markdown/report formatting.",
+    )
+    direct_needed = contract.get("kind") in {"Direct answer", "CAD reference", "Printer status"} or bool(build_direct_answer_context(messages, route or {}))
+    add(
+        "Why/caveat shape",
+        (not direct_needed) or ("this is why:" in lower and "you should also consider:" in lower),
+        "Direct answers should include why and what to consider.",
+    )
+    if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable", "File/action", "Code/config"}:
+        add("Deliverables visible", bool(deliverables), "Created or referenced files should be visible and clickable.")
+    else:
+        add("No wrong artifact route", not (contract.get("kind") == "CAD reference" and answer_has_cad_artifact(text)), "Reference questions should not stage artifacts.")
+    if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable"}:
+        add("Assumptions/validation shown", bool(assumptions), "Engineering work should show assumptions or validation limits.")
+    score = int(round(100 * sum(1 for check in checks if check["passed"]) / max(1, len(checks))))
+    return {"score": score, "status": "pass" if score >= 80 else "review", "checks": checks}
+
+
+def response_coach_answer(messages, route, answer):
+    text = strip_thinking_markup(answer)
+    query = latest_user_text(messages).lower()
+    if "return only" in query and text.lstrip().startswith("```"):
+        return text.strip()
+    text = re.sub(r"(?mi)^#{1,6}\s*", "", text)
+    text = re.sub(r"\*\*([^*\n]+)\*\*", r"\1", text)
+    text = re.sub(r"(?i)^I staged a first-pass", "I prepared a first-pass", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def response_package(messages, route, answer):
+    contract = task_contract(messages, route or {})
+    coached = response_coach_answer(messages, route or {}, answer)
+    deliverables = extract_response_deliverables(coached)
+    assumptions = extract_assumption_ledger(messages, route or {}, coached, contract)
+    scorecard = response_scorecard(messages, route or {}, coached, contract, deliverables, assumptions)
+    return {
+        "text": coached,
+        "taskContract": contract,
+        "roleStyle": response_role_style(route or {}),
+        "deliverables": deliverables,
+        "assumptions": assumptions,
+        "scorecard": scorecard,
+    }
+
+
 def emit_assistant_answer(handler, messages, route, admin_topic, text, normalize=True):
     answer = normalize_direct_answer_shape(messages, route, text) if normalize else strip_thinking_markup(text)
+    package = response_package(messages, route or {}, answer)
+    answer = package["text"]
     if answer and not (admin_topic or {}).get("testRun"):
         update_admin_activity(messages, route or {}, answer, admin_topic)
-    json_line(handler, {"type": "assistant", "text": answer, "adminTopic": admin_topic})
+    json_line(
+        handler,
+        {
+            "type": "assistant",
+            "text": answer,
+            "adminTopic": admin_topic,
+            "taskContract": package["taskContract"],
+            "roleStyle": package["roleStyle"],
+            "deliverables": package["deliverables"],
+            "assumptions": package["assumptions"],
+            "scorecard": package["scorecard"],
+        },
+    )
     return answer
 
 
