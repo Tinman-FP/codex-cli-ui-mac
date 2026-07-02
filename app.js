@@ -45,6 +45,9 @@ const els = {
   runAllTestsButton: document.getElementById("runAllTestsButton"),
   resetTestsButton: document.getElementById("resetTestsButton"),
   composerWrap: document.querySelector(".composer-wrap"),
+  attachButton: document.getElementById("attachButton"),
+  fileInput: document.getElementById("fileInput"),
+  attachmentTray: document.getElementById("attachmentTray"),
   modeSelect: document.getElementById("modeSelect"),
   managerDepthSelect: document.getElementById("managerDepthSelect"),
   accessSelect: document.getElementById("accessSelect"),
@@ -102,6 +105,7 @@ let config = {
   admin: null,
 };
 let activeController = null;
+let pendingAttachments = [];
 const testBench = {
   running: false,
   activeId: "",
@@ -209,6 +213,8 @@ function currentThread() {
 
 function setRunning(isRunning) {
   els.sendButton.disabled = isRunning;
+  els.attachButton.disabled = isRunning;
+  els.fileInput.disabled = isRunning;
   els.promptInput.disabled = isRunning;
   els.newThreadButton.disabled = isRunning;
   els.adminNavButton.disabled = isRunning;
@@ -256,6 +262,7 @@ function render() {
   renderTestBench();
   renderSidebarMode();
   renderMessages();
+  renderAttachmentTray();
   renderRunControls();
   renderLogs();
   renderMonitorSummary();
@@ -852,6 +859,65 @@ function testName(testId) {
   return (config.goldenTests || []).find((test) => test.id === testId)?.name || "test";
 }
 
+function formatFileSize(bytes) {
+  const size = Number(bytes) || 0;
+  if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(size >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+  if (size >= 1024) return `${(size / 1024).toFixed(size >= 10 * 1024 ? 0 : 1)} KB`;
+  return `${size} B`;
+}
+
+function buildAttachmentChip(attachment, options = {}) {
+  const chip = document.createElement("span");
+  chip.className = "attachment-chip";
+  chip.title = attachment.path || attachment.name || "attached file";
+
+  const name = document.createElement("span");
+  name.className = "attachment-name";
+  name.textContent = attachment.name || "attached file";
+  chip.appendChild(name);
+
+  if (attachment.size) {
+    const size = document.createElement("span");
+    size.className = "attachment-size";
+    size.textContent = formatFileSize(attachment.size);
+    chip.appendChild(size);
+  }
+
+  if (options.removable) {
+    const remove = document.createElement("button");
+    remove.className = "attachment-remove";
+    remove.type = "button";
+    remove.title = "Remove attachment";
+    remove.setAttribute("aria-label", `Remove ${attachment.name || "attachment"}`);
+    remove.dataset.attachmentId = attachment.id;
+    remove.textContent = "x";
+    chip.appendChild(remove);
+  }
+
+  return chip;
+}
+
+function renderAttachmentTray() {
+  if (!els.attachmentTray) return;
+  els.attachmentTray.innerHTML = "";
+  if (!pendingAttachments.length) {
+    els.attachmentTray.hidden = true;
+    return;
+  }
+  pendingAttachments.forEach((attachment) => {
+    els.attachmentTray.appendChild(buildAttachmentChip(attachment, { removable: true }));
+  });
+  els.attachmentTray.hidden = false;
+}
+
+function renderMessageAttachments(container, attachments) {
+  if (!Array.isArray(attachments) || !attachments.length) return;
+  const wrap = document.createElement("div");
+  wrap.className = "message-attachments";
+  attachments.forEach((attachment) => wrap.appendChild(buildAttachmentChip(attachment)));
+  container.appendChild(wrap);
+}
+
 function renderMessages() {
   const thread = currentThread();
   els.conversation.innerHTML = "";
@@ -878,6 +944,10 @@ function renderMessages() {
     role.textContent = message.role === "user" ? "You" : "Codex";
     const body = document.createElement("div");
     body.className = "message-body";
+
+    if (message.role === "user") {
+      renderMessageAttachments(body, message.attachments);
+    }
 
     if (message.role === "assistant" && message.route) {
       const route = document.createElement("div");
@@ -2026,6 +2096,68 @@ function appendLog(kind, text) {
   saveState();
 }
 
+async function fileToBase64(file) {
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
+}
+
+async function uploadAttachment(file) {
+  const dataBase64 = await fileToBase64(file);
+  const response = await fetch("/api/files/upload", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: file.name,
+      size: file.size,
+      type: file.type || "application/octet-stream",
+      dataBase64,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Upload failed with HTTP ${response.status}`);
+  }
+  const payload = await response.json();
+  if (!payload.ok) {
+    throw new Error(payload.error || "Upload failed");
+  }
+  return {
+    id: crypto.randomUUID(),
+    name: payload.name || file.name,
+    size: payload.size || file.size,
+    type: payload.contentType || file.type || "application/octet-stream",
+    path: payload.path || "",
+  };
+}
+
+async function handleFiles(files) {
+  const selected = Array.from(files || []).filter((file) => file && file.name);
+  if (!selected.length || activeController) return;
+  els.runState.textContent = "Attaching";
+  els.runState.className = "run-state warning";
+  for (const file of selected) {
+    try {
+      appendLog("event", `Uploading attachment ${file.name}`);
+      const attachment = await uploadAttachment(file);
+      pendingAttachments.push(attachment);
+      appendLog("event", `Attached ${attachment.name} (${formatFileSize(attachment.size)})`);
+      renderAttachmentTray();
+    } catch (error) {
+      appendLog("error", `Attachment failed for ${file.name}: ${error.message}`);
+      els.runState.textContent = "Attachment failed";
+      els.runState.className = "run-state error";
+      return;
+    }
+  }
+  els.runState.textContent = "Attachment ready";
+  els.runState.className = "run-state ok";
+}
+
 function clientRecoveryMessage(error, thread) {
   const reason = error?.message || "local load failure";
   const cwd = thread?.cwd || config.cwd;
@@ -2076,7 +2208,8 @@ async function recoverRunFailure(thread, pending, error) {
 async function sendPrompt() {
   const thread = currentThread();
   const text = els.promptInput.value.trim();
-  if (!thread || !text || activeController) return;
+  const attachments = pendingAttachments.slice();
+  if (!thread || (!text && !attachments.length) || activeController) return;
 
   thread.cwd = els.cwdInput.value.trim() || config.cwd;
   thread.profile = thread.profile || config.profile;
@@ -2086,13 +2219,15 @@ async function sendPrompt() {
   thread.friendlinessLevel = normalizeFriendliness(thread.friendlinessLevel || config.friendlinessLevel);
   thread.humorLevel = normalizeHumor(thread.humorLevel || config.humorLevel);
   thread.webSearch = normalizeWebSearch(thread.webSearch || config.webSearch);
-  thread.messages.push({ id: crypto.randomUUID(), role: "user", text });
+  thread.messages.push({ id: crypto.randomUUID(), role: "user", text, attachments });
   if (isUntitledThread(thread)) {
-    thread.title = text.split(/\s+/).slice(0, 7).join(" ");
+    thread.title = (text || attachments[0]?.name || "Attached file").split(/\s+/).slice(0, 7).join(" ");
   }
   thread.updatedAt = new Date().toISOString();
+  pendingAttachments = [];
   els.promptInput.value = "";
   autoSizeTextarea();
+  renderAttachmentTray();
   render();
   setRunning(true);
 
@@ -2836,6 +2971,54 @@ els.webAccessToggle.addEventListener("click", () => {
   thread.webSearch = current === "live" ? "disabled" : "live";
   saveState();
   renderRunControls();
+});
+
+els.attachButton.addEventListener("click", () => {
+  if (activeController) return;
+  els.fileInput.click();
+});
+
+els.fileInput.addEventListener("change", async () => {
+  await handleFiles(els.fileInput.files);
+  els.fileInput.value = "";
+});
+
+els.attachmentTray.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-attachment-id]");
+  if (!button || activeController) return;
+  pendingAttachments = pendingAttachments.filter((attachment) => attachment.id !== button.dataset.attachmentId);
+  renderAttachmentTray();
+});
+
+els.composerWrap.addEventListener("dragover", (event) => {
+  if (activeController) return;
+  if (event.dataTransfer?.types?.includes("Files")) {
+    event.preventDefault();
+    els.composerWrap.classList.add("drop-active");
+  }
+});
+
+els.composerWrap.addEventListener("dragleave", () => {
+  els.composerWrap.classList.remove("drop-active");
+});
+
+els.composerWrap.addEventListener("drop", async (event) => {
+  if (activeController) return;
+  const files = event.dataTransfer?.files;
+  if (files?.length) {
+    event.preventDefault();
+    els.composerWrap.classList.remove("drop-active");
+    await handleFiles(files);
+  }
+});
+
+els.promptInput.addEventListener("paste", async (event) => {
+  if (activeController) return;
+  const files = event.clipboardData?.files;
+  if (files?.length) {
+    event.preventDefault();
+    await handleFiles(files);
+  }
 });
 
 els.promptInput.addEventListener("input", autoSizeTextarea);
