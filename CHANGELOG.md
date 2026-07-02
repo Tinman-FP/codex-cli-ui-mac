@@ -1,5 +1,12 @@
 # Changelog
 
+## v2026.07.08
+
+- Upgrades CAD artifact answers from file receipts into engineering first-pass responses.
+- Adds airflow sizing for CPAP duct requests, including inlet/outlet area and ideal velocity estimates.
+- Adds PLA/PCTG/ABS cooling guidance, CFD validation limits, visible CAD working notes, and lightweight web source checks when Web Access is enabled.
+- Adds a package-health regression so CAD artifact answers must include design reasoning, airflow math, and CFD limits.
+
 ## v2026.07.07
 
 - Makes CAD/Fusion artifact staging deterministic before the local model path for CAD design requests.

@@ -1,28 +1,30 @@
-# Codex CLI UI for Mac v2026.07.07
+# Codex CLI UI for Mac v2026.07.08
 
-Bugfix release for deterministic CAD artifact fallback on local load failures.
+Response-quality release for CAD engineering answers.
 
 ## Download
 
 Download one file:
 
 ```text
-Codex_CLI_UI_Mac_v2026.07.07.dmg
+Codex_CLI_UI_Mac_v2026.07.08.dmg
 ```
 
 Open the DMG and double-click `Install Codex CLI UI.command`.
 
 ## Fixed
 
-- CAD/Fusion design prompts now use the local CAD artifact tool before falling into the local model path.
-- CAD load failures now stage Fusion 360, OpenSCAD, and README artifacts instead of returning generic runtime recovery text.
-- CAD prompt recovery no longer drifts into Moonraker, live-printer status, or config-folder recovery wording.
+- CAD/Fusion design prompts no longer return a file-staging receipt as the whole answer.
+- CAD answers now show the engineering decision behind the geometry instead of only listing generated files.
+- CAD web/industry requests no longer silently skip source checking when Web Access is enabled.
 
 ## Added
 
-- Direct `cad-artifact-tool` run path for CAD design requests.
-- CAD load-failure package-health regression.
-- CAD recovery answer that reports exact Fusion 360 script, OpenSCAD model, and README paths.
+- Visible CAD working notes for constraint parsing, airflow sizing, outlet selection, and CFD status.
+- Airflow sizing for CPAP duct requests: CFM to L/s, inlet area, outlet area, ideal inlet velocity, ideal outlet velocity, and area ratio.
+- Material-specific cooling guidance for PLA, PCTG, and ABS/ASA.
+- Lightweight web source checks for CAD duct/part-cooling prompts when Web Access is enabled.
+- Package-health regression for analytical CAD answers.
 
 ## Included
 

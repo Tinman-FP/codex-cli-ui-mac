@@ -5662,8 +5662,9 @@ def cad_readme_text(prompt, dim, paths):
     flow_low = dim["flowLowCfm"]
     flow_high = dim["flowHighCfm"]
     outlet_id = 8.0
-    outlet_area_mm2 = 2 * math.pi * (outlet_id / 2) ** 2
-    inlet_area_mm2 = math.pi * (dim["inletDiameter"] / 2) ** 2
+    metrics = cad_flow_metrics(dim)
+    outlet_area_mm2 = metrics["outletAreaMm2"]
+    inlet_area_mm2 = metrics["inletAreaMm2"]
     return f"""# CPAP Cooling Duct CAD Concept
 
 This folder contains a first-pass CPAP part-cooling duct concept generated from Tinman's prompt.
@@ -5686,8 +5687,31 @@ This folder contains a first-pass CPAP part-cooling duct concept generated from 
 
 - Inlet area is about {inlet_area_mm2:.0f} mm^2.
 - Two {outlet_id:.1f} mm outlets have combined area about {outlet_area_mm2:.0f} mm^2.
-- That outlet ratio intentionally raises exit velocity for PLA bridging/detail cooling while keeping the duct compact.
+- {flow_low:.1f}-{flow_high:.1f} CFM is about {metrics["flowLowLs"]:.1f}-{metrics["flowHighLs"]:.1f} L/s.
+- Ideal inlet velocity is about {metrics["inletVelocityLow"]:.0f}-{metrics["inletVelocityHigh"]:.0f} m/s before duct losses.
+- Ideal twin-outlet velocity is about {metrics["outletVelocityLow"]:.0f}-{metrics["outletVelocityHigh"]:.0f} m/s before duct losses.
+- The outlet-to-inlet area ratio is about {metrics["outletToInletRatio"]:.2f}; this intentionally raises exit velocity for PLA bridging/detail cooling while keeping the duct compact.
 - This is not a completed CFD result. Treat it as a parametric starting geometry for fit, smoke/flow visualization, and later CFD validation.
+
+## Design intent
+
+- Keep the body inside the 50 mm left/right width and use only the 8 mm available front envelope.
+- Treat the aft 18 mm CPAP inlet as an existing connector, then turn the flow forward into a compact pressure plenum.
+- Split the plenum into left/right balanced outlets aimed at the nozzle zone instead of trying to wrap around the sides or back.
+- Use smooth internal transitions, generous fillets, and a removable/tunable outlet insert if the first print overcools ABS/PCTG or undercools PLA.
+- Make the outside look like a swept cowl with ribs/fins, but keep the internal airway smooth.
+
+## Material cooling guidance
+
+- PLA: highest airflow; this duct can be run aggressively for bridges, overhangs, and detail.
+- PCTG: moderate airflow; start around 25-60 percent and tune for layer adhesion versus surface quality.
+- ABS/ASA: low airflow except bridges or small features; use enclosure heat and avoid blasting the part continuously.
+
+## CFD setup notes
+
+- Use a velocity inlet based on {flow_low:.1f}-{flow_high:.1f} CFM at the 18 mm inlet, pressure outlets at the two nozzles, and no-slip walls.
+- Check velocity balance at the left/right outlets, recirculation in the plenum, and the velocity vector at the nozzle tip.
+- Validate with smoke/tuft testing or a small anemometer before trusting the printed duct on long jobs.
 
 ## Fusion 360 import route
 
@@ -5739,6 +5763,34 @@ def stage_cad_artifact(prompt="", target_path=None, artifact_name=""):
     }
 
 
+def cad_flow_metrics(dim):
+    cfm_to_m3_s = 0.00047194745
+    flow_low_cfm = float(dim.get("flowLowCfm", 12.0) or 12.0)
+    flow_high_cfm = float(dim.get("flowHighCfm", 15.0) or 15.0)
+    inlet_d_mm = float(dim.get("inletDiameter", 18.0) or 18.0)
+    outlet_d_mm = 8.0
+    inlet_area_m2 = math.pi * (inlet_d_mm / 2000.0) ** 2
+    outlet_area_m2 = 2.0 * math.pi * (outlet_d_mm / 2000.0) ** 2
+    flow_low_m3_s = flow_low_cfm * cfm_to_m3_s
+    flow_high_m3_s = flow_high_cfm * cfm_to_m3_s
+    inlet_velocity_low = flow_low_m3_s / inlet_area_m2 if inlet_area_m2 else 0.0
+    inlet_velocity_high = flow_high_m3_s / inlet_area_m2 if inlet_area_m2 else 0.0
+    outlet_velocity_low = flow_low_m3_s / outlet_area_m2 if outlet_area_m2 else 0.0
+    outlet_velocity_high = flow_high_m3_s / outlet_area_m2 if outlet_area_m2 else 0.0
+    return {
+        "flowLowLs": flow_low_m3_s * 1000.0,
+        "flowHighLs": flow_high_m3_s * 1000.0,
+        "inletAreaMm2": inlet_area_m2 * 1_000_000.0,
+        "outletAreaMm2": outlet_area_m2 * 1_000_000.0,
+        "outletToInletRatio": outlet_area_m2 / inlet_area_m2 if inlet_area_m2 else 0.0,
+        "inletVelocityLow": inlet_velocity_low,
+        "inletVelocityHigh": inlet_velocity_high,
+        "outletVelocityLow": outlet_velocity_low,
+        "outletVelocityHigh": outlet_velocity_high,
+        "outletDiameter": outlet_d_mm,
+    }
+
+
 def is_cad_artifact_tool_request(messages):
     if not is_cad_design_request(messages):
         return False
@@ -5771,7 +5823,58 @@ def is_cad_artifact_tool_request(messages):
     return text_has_any(query, artifact_terms) and text_has_any(query, action_terms)
 
 
-def format_cad_artifact_result_answer(result, recovered_from_error=""):
+def cad_artifact_working_notes(result):
+    if not result.get("ok"):
+        return ["CAD artifact tool failed before design analysis could run."]
+    dim = result.get("dimensions") or {}
+    metrics = cad_flow_metrics(dim)
+    return [
+        (
+            "Parsed the CAD envelope: "
+            f"{dim.get('toolheadX', 50):.0f} x {dim.get('toolheadY', 50):.0f} x {dim.get('toolheadZ', 150):.0f} mm toolhead, "
+            f"{dim.get('inletDiameter', 18):.0f} mm inlet, {dim.get('frontClearance', 8):.0f} mm front clearance, "
+            f"nozzle {dim.get('nozzleBelow', 9):.0f} mm below the toolhead."
+        ),
+        (
+            "Sized the airflow: "
+            f"{dim.get('flowLowCfm', 12):.0f}-{dim.get('flowHighCfm', 15):.0f} CFM is "
+            f"{metrics['flowLowLs']:.1f}-{metrics['flowHighLs']:.1f} L/s through a {metrics['inletAreaMm2']:.0f} mm2 inlet."
+        ),
+        (
+            "Selected a compact front plenum with twin balanced outlets because the sides and back have zero clearance."
+        ),
+        (
+            "Marked CFD as pending: this run creates importable CAD and first-order flow math, then calls out what must be validated."
+        ),
+    ]
+
+
+def format_cad_web_evidence_section(web_evidence):
+    if web_evidence is None:
+        return ""
+    items = list((web_evidence or {}).get("items") or [])
+    error = str((web_evidence or {}).get("error") or "").strip()
+    if not items:
+        detail = error or "the local web evidence pass did not return usable public sources"
+        return (
+            "Industry/web check: I tried to gather public web evidence for the CAD request, but could not confirm usable sources in this pass. "
+            f"This is why I am treating the design as first-order engineering, not web-validated CFD. Web check detail: {compact(detail, 220)}."
+        )
+    lines = [
+        (
+            "Industry/web check: I checked public sources for 3D-printer part-cooling and duct-design cues. "
+            "I used them as general design guidance only; they do not validate this exact geometry."
+        )
+    ]
+    for item in items[:4]:
+        title = compact(item.get("title") or item.get("pageTitle") or "source", 90)
+        url = item.get("url", "")
+        if url:
+            lines.append(f"- {title}: {url}")
+    return "\n".join(lines)
+
+
+def format_cad_artifact_result_answer(result, recovered_from_error="", web_evidence=None):
     if not result.get("ok"):
         return "\n\n".join(
             [
@@ -5796,8 +5899,10 @@ def format_cad_artifact_result_answer(result, recovered_from_error=""):
     inlet = dim.get("inletDiameter", 18.0)
     front = dim.get("frontClearance", 8.0)
     nozzle = dim.get("nozzleBelow", 9.0)
-    return "\n\n".join(
-        [
+    metrics = cad_flow_metrics(dim)
+    outlet_d = metrics["outletDiameter"]
+    outlet_x = max(9.0, min(tool_x / 2 - 7.0, 15.0))
+    sections = [
             preface,
             "\n".join(
                 [
@@ -5807,17 +5912,55 @@ def format_cad_artifact_result_answer(result, recovered_from_error=""):
                 ]
             ),
             (
+                "Design decision: use a short swept front plenum fed by the aft 18 mm CPAP inlet, then split into two balanced "
+                f"{outlet_d:.0f} mm ID outlet paths near X +/-{outlet_x:.0f} mm. I am keeping the duct inside the 50 mm width and using "
+                f"the available {front:.0f} mm front envelope instead of wrapping around the sides or back, because your hard side/back clearance is zero. "
+                "The outlets are aimed toward the nozzle zone rather than straight down so the flow hits the fresh bead and nearby overhangs without blasting the heater block."
+            ),
+            (
+                "Airflow sizing: "
+                f"{flow_low:.0f}-{flow_high:.0f} CFM is about {metrics['flowLowLs']:.1f}-{metrics['flowHighLs']:.1f} L/s. "
+                f"The {inlet:.0f} mm inlet area is about {metrics['inletAreaMm2']:.0f} mm2, giving an ideal inlet velocity of "
+                f"{metrics['inletVelocityLow']:.0f}-{metrics['inletVelocityHigh']:.0f} m/s before losses. "
+                f"Two {outlet_d:.0f} mm outlets total about {metrics['outletAreaMm2']:.0f} mm2, so the ideal outlet velocity would be "
+                f"{metrics['outletVelocityLow']:.0f}-{metrics['outletVelocityHigh']:.0f} m/s before bend, plenum, and outlet losses. "
+                f"That {metrics['outletToInletRatio']:.2f} outlet/inlet area ratio is deliberate: compact, high velocity, and tunable."
+            ),
+            (
+                "Material cooling plan: PLA gets the most benefit from this layout, especially bridges and small layers. "
+                "For PCTG, start with moderate fan power and watch layer adhesion versus surface finish. "
+                "For ABS/ASA, treat the duct as bridge/detail assist, not full-time cooling; enclosure temperature and low airflow matter more than maximum blast."
+            ),
+            (
+                "CFD/validation plan: no full CFD solver was run in this local pass, so I am not pretending this is validated. "
+                f"The CFD setup should use a velocity inlet equivalent to {flow_low:.0f}-{flow_high:.0f} CFM at the 18 mm inlet, "
+                "pressure outlets at the two nozzles, no-slip walls, and checks for left/right balance, plenum recirculation, and vectors around the nozzle tip. "
+                "Before a final print, do a smoke/tuft test or anemometer check and tune outlet ID between roughly 8-10 mm if the fan is choking or the part is undercooled."
+            ),
+            (
+                "Style direction: keep the internal airway smooth, but shape the outside like a low-profile swept cowl with shallow ribs or fins. "
+                "That gives it the aggressive look you asked for without putting decorative turbulence inside the duct."
+            ),
+    ]
+    web_section = format_cad_web_evidence_section(web_evidence)
+    if web_section:
+        sections.append(web_section)
+    sections.extend(
+        [
+            (
                 "This is why: the prompt is a CAD/design deliverable, so the useful recovery is an importable artifact. "
                 f"The staged concept uses a {tool_x:.0f} x {tool_y:.0f} x {tool_z:.0f} mm toolhead envelope, "
                 f"{inlet:.0f} mm CPAP inlet, {front:.0f} mm front clearance, and nozzle target about {nozzle:.0f} mm below the toolhead. "
                 f"It assumes roughly {flow_low:.0f}-{flow_high:.0f} CFM free-flow and uses a compact plenum with twin outlet paths aimed near the nozzle zone."
             ),
             (
-                "You should also consider: this is not a completed CFD result. No CFD solver was run locally. "
-                "Treat the files as a parametric starting point for Fusion 360 fit checks, outlet aiming, flow visualization, and later CFD validation before final printing."
+                "You should also consider: the aft-inlet/back-clearance wording conflicts slightly, so I treated the 18 mm aft inlet as an existing connector "
+                "and did not add extra rear growth. If that connector itself must fit inside the same zero-back-clearance envelope, the next revision needs a top-entry "
+                "or angled elbow. Treat these files as a parametric starting point for Fusion 360 fit checks, outlet aiming, flow visualization, and later CFD validation before final printing."
             ),
         ]
     )
+    return "\n\n".join(sections)
 
 
 def cad_artifact_recovery_answer(messages, error_text=""):
@@ -6400,6 +6543,15 @@ def local_research_queries(query, route):
                 "site:ebay.com 300rpm permanent magnet generator 3 phase 96v",
             ]
         )
+    elif is_cad_design_request([{"role": "user", "text": query}]):
+        queries.extend(
+            [
+                "3D printer part cooling duct CFD PLA ABS PETG outlet design",
+                "CPAP blower 3D printer part cooling duct nozzle design",
+                "3D printer part cooling duct airflow PLA ABS PETG",
+                "Fusion 360 3D printer cooling duct CFD design",
+            ]
+        )
     elif wants_public_printer_research([{"role": "user", "text": query}]):
         queries.extend(
             [
@@ -6954,6 +7106,40 @@ def package_health_report():
         )
     except Exception as exc:
         add("tools:cad-load-failure-recovery", "fail", str(exc))
+
+    try:
+        LOCAL_CAD_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="health-", dir=str(LOCAL_CAD_OUTPUT_DIR)) as tmp_dir:
+            artifact = stage_cad_artifact(
+                (
+                    "I have a printer toolhead that measures 50mm in the x direction x 50mm in the y direction "
+                    "and 150mm in the z direction. The CPAP inlet duct is 18mm in diameter, located 15mm aft. "
+                    "I have a CPAP fan that creates 12-15 CFM. The physical limits are 0mm left/right/back and "
+                    "8mm in the front. The nozzle tip is 9mm below the toolhead. Design using CFD thinking for "
+                    "PLA, ABS, and PCTG."
+                ),
+                target_path=tmp_dir,
+                artifact_name="health-cpap-brief",
+            )
+            brief = format_cad_artifact_result_answer(artifact)
+            notes = cad_artifact_working_notes(artifact)
+            ok = (
+                "Design decision:" in brief
+                and "Airflow sizing:" in brief
+                and "Material cooling plan:" in brief
+                and "CFD/validation plan:" in brief
+                and "outlet/inlet area ratio" in brief
+                and "not pretending this is validated" in brief
+                and len(notes) >= 4
+                and any("Parsed the CAD envelope" in note for note in notes)
+            )
+        add(
+            "tools:cad-engineering-brief",
+            "pass" if ok else "fail",
+            "CAD artifact answers include design reasoning, airflow math, and CFD limits",
+        )
+    except Exception as exc:
+        add("tools:cad-engineering-brief", "fail", str(exc))
 
     try:
         analysis = build_analytical_context(
@@ -7689,6 +7875,73 @@ def ensure_source_links(text, evidence_pack):
     return answer + "\n".join(lines)
 
 
+def cad_web_research_evidence(query, limit=4):
+    try:
+        queries = [
+            "3D printer part cooling duct CFD PLA ABS PETG outlet design",
+            "CPAP blower 3D printer part cooling duct nozzle design",
+        ]
+        lower = str(query or "").lower()
+        if "fusion" in lower:
+            queries.append("Fusion 360 3D printer cooling duct CFD design")
+        if "pctg" in lower or "petg" in lower:
+            queries.append("3D printer part cooling PETG PCTG fan duct airflow")
+        items = []
+        seen = set()
+        for search_query in queries[:4]:
+            for item in search_web_free(search_query, limit=max(limit * 2, 8)):
+                url = item.get("url", "")
+                if not url or url in seen:
+                    continue
+                seen.add(url)
+                items.append(
+                    {
+                        "title": item.get("title", ""),
+                        "url": url,
+                        "snippet": item.get("snippet", ""),
+                        "source": item.get("source", ""),
+                    }
+                )
+        def source_score(item):
+            haystack = " ".join([item.get("title", ""), item.get("snippet", ""), item.get("url", "")]).lower()
+            domain = urllib.parse.urlparse(item.get("url", "")).netloc.lower()
+            score = 0
+            for term, points in (
+                ("cfd", 10),
+                ("part cooling", 9),
+                ("cooling duct", 9),
+                ("fan duct", 7),
+                ("airflow", 6),
+                ("3d printer", 5),
+                ("blower", 4),
+                ("pla", 3),
+                ("petg", 3),
+                ("abs", 3),
+            ):
+                if term in haystack:
+                    score += points
+            for domain_term, points in (
+                ("sciencedirect.com", 24),
+                ("springer.com", 20),
+                ("mdpi.com", 18),
+                ("researchgate.net", 14),
+                ("printables.com", 14),
+                ("prusa3d.com", 14),
+                ("github.com", 8),
+                ("reprap.org", 8),
+            ):
+                if domain_term in domain:
+                    score += points
+            if "2026 guide" in haystack or "blog.uavmodel.com" in domain:
+                score -= 16
+            return score
+
+        items.sort(key=source_score, reverse=True)
+        return {"items": items[:limit], "queries": queries[:4]}
+    except Exception as exc:
+        return {"items": [], "error": str(exc)}
+
+
 def run_local_research(
     messages,
     route,
@@ -8344,6 +8597,8 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                         "text": f"Staged CAD artifacts at {tool_result.get('targetDir')}.",
                     },
                 )
+                for note in cad_artifact_working_notes(tool_result):
+                    json_line(self, {"type": "thought", "text": note})
             except Exception as exc:
                 tool_result = {"ok": False, "error": str(exc)}
                 json_line(
@@ -8353,12 +8608,48 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                         "text": f"Local CAD artifact tool failed: {exc}",
                     },
                 )
+            web_evidence = None
+            if wants_web_context(messages):
+                if web_search == "live":
+                    json_line(
+                        self,
+                        {
+                            "type": "thought",
+                            "text": "Checking free public web sources for duct-design and part-cooling guidance.",
+                        },
+                    )
+                    web_evidence = cad_web_research_evidence(latest_user_text(messages))
+                    if web_evidence.get("items"):
+                        json_line(
+                            self,
+                            {
+                                "type": "thought",
+                                "text": f"Found {len(web_evidence.get('items') or [])} public source links for the industry check.",
+                            },
+                        )
+                    else:
+                        json_line(
+                            self,
+                            {
+                                "type": "thought",
+                                "text": "Web source check did not return usable evidence, so the answer labels the design as first-order only.",
+                            },
+                        )
+                else:
+                    web_evidence = {"items": [], "error": "Web Access is off for this run."}
+                    json_line(
+                        self,
+                        {
+                            "type": "thought",
+                            "text": "Web Access is off, so the CAD answer will not claim web-backed validation.",
+                        },
+                    )
             emit_assistant_answer(
                 self,
                 messages,
                 route,
                 admin_topic,
-                format_cad_artifact_result_answer(tool_result),
+                format_cad_artifact_result_answer(tool_result, web_evidence=web_evidence),
                 normalize=False,
             )
             json_line(self, {"type": "done", "returnCode": 0 if tool_result.get("ok") else 1})
