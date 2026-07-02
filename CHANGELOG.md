@@ -6,9 +6,11 @@
 - Creates the `qblade-import`, `qblade-linux`, `qblade-runner-build`, and `qblade` helpers so QBlade CE downloads are validated before use and run through a Linux Docker runner on macOS.
 - Accepts official Safari-extracted QBlade folders, rejects incomplete `Unconfirmed*.crdownload` downloads, and runs QBlade through Xvfb with the Qt runtime libraries it needs.
 - Adds mechanical/structural design detection for brackets, mounts, holders, loads, stress, deflection, FEA, FEM, and safety-factor prompts.
-- Adds a structural FEA preflight endpoint that captures load/material/safety-factor assumptions, resolves attached geometry, stages a CalculiX input deck, and runs a solver seed case when `ccx` is available.
+- Upgrades the structural FEA endpoint from seed-case-only to attached STL/STEP geometry meshing with Gmsh, CalculiX solving, result parsing, and a seed fallback when real meshing fails.
+- Adds automatic fixed/load face selection, printed-part material allowables/process notes, stress/deflection/safety-factor summaries, and PNG result previews.
+- Makes generated `.inp`, `.msh`, `.dat`, `.frd`, and `.geo` engineering files clickable in chat responses.
 - Routes mechanical and structural design prompts into CAD/Modeling instead of printer status or generic CAD fallbacks.
-- Adds package-health regressions for aero toolchain visibility, structural toolchain visibility, structural preflight output, and structural routing.
+- Adds package-health regressions for aero toolchain visibility, real structural FEA output, structural reports/previews, and structural routing.
 
 ## v2026.07.12
 

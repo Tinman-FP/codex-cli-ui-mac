@@ -9494,16 +9494,96 @@ def format_aero_cfd_preflight_answer(result):
 
 
 STRUCTURAL_MATERIAL_LIBRARY = {
-    "pla": {"label": "PLA printed part", "elasticModulusMpa": 3000, "poisson": 0.35, "yieldMpa": 35, "notes": "Good stiffness, poor heat/creep resistance; design conservatively for outdoor or hot environments."},
-    "petg": {"label": "PETG printed part", "elasticModulusMpa": 2100, "poisson": 0.38, "yieldMpa": 28, "notes": "Tougher than PLA but more flexible; watch creep under sustained load."},
-    "asa": {"label": "ASA printed part", "elasticModulusMpa": 2200, "poisson": 0.35, "yieldMpa": 30, "notes": "Better UV/weather resistance; good default for outdoor printed parts."},
-    "abs": {"label": "ABS printed part", "elasticModulusMpa": 2100, "poisson": 0.35, "yieldMpa": 30, "notes": "Tough and heat tolerant, but enclosure/warping matter."},
-    "pctg": {"label": "PCTG printed part", "elasticModulusMpa": 1900, "poisson": 0.38, "yieldMpa": 32, "notes": "Tough ductile option; usually more flexible than PLA or fiber-filled materials."},
-    "nylon": {"label": "Nylon printed part", "elasticModulusMpa": 1600, "poisson": 0.39, "yieldMpa": 45, "notes": "Tough and fatigue-friendly, but moisture and creep must be managed."},
-    "pa-cf": {"label": "PA-CF printed part", "elasticModulusMpa": 5500, "poisson": 0.34, "yieldMpa": 70, "notes": "Stiff engineering filament; anisotropy and layer adhesion still control design."},
-    "pet-cf": {"label": "PET-CF printed part", "elasticModulusMpa": 6500, "poisson": 0.34, "yieldMpa": 75, "notes": "Stiff and dimensionally stable; excellent candidate for structural printed brackets when dry and printed correctly."},
-    "aluminum 6061": {"label": "Aluminum 6061-T6", "elasticModulusMpa": 69000, "poisson": 0.33, "yieldMpa": 276, "notes": "Good all-around machined structural material."},
-    "steel": {"label": "Mild steel", "elasticModulusMpa": 200000, "poisson": 0.30, "yieldMpa": 250, "notes": "High stiffness and ductility; corrosion protection may matter."},
+    "pla": {
+        "label": "PLA printed part",
+        "elasticModulusMpa": 3000,
+        "poisson": 0.35,
+        "yieldMpa": 35,
+        "printedAllowableMpa": 14,
+        "process": "Use many perimeters, avoid heat and sustained outdoor load, orient layers so tension is not across Z.",
+        "notes": "Good stiffness, poor heat/creep resistance; design conservatively for outdoor or hot environments.",
+    },
+    "petg": {
+        "label": "PETG printed part",
+        "elasticModulusMpa": 2100,
+        "poisson": 0.38,
+        "yieldMpa": 28,
+        "printedAllowableMpa": 12,
+        "process": "Use thick walls and generous radii; creep can dominate brackets that hold load for days.",
+        "notes": "Tougher than PLA but more flexible; watch creep under sustained load.",
+    },
+    "asa": {
+        "label": "ASA printed part",
+        "elasticModulusMpa": 2200,
+        "poisson": 0.35,
+        "yieldMpa": 30,
+        "printedAllowableMpa": 13,
+        "process": "Use enclosure heat, high wall count, and layer orientation that keeps UV/weather loads in-plane.",
+        "notes": "Better UV/weather resistance; good default for outdoor printed parts.",
+    },
+    "abs": {
+        "label": "ABS printed part",
+        "elasticModulusMpa": 2100,
+        "poisson": 0.35,
+        "yieldMpa": 30,
+        "printedAllowableMpa": 13,
+        "process": "Use an enclosure, avoid sharp internal corners, and confirm layer adhesion before trusting shock loads.",
+        "notes": "Tough and heat tolerant, but enclosure/warping matter.",
+    },
+    "pctg": {
+        "label": "PCTG printed part",
+        "elasticModulusMpa": 1900,
+        "poisson": 0.38,
+        "yieldMpa": 32,
+        "printedAllowableMpa": 14,
+        "process": "Use generous section depth and fillets; tune cooling so layer bonding stays strong.",
+        "notes": "Tough ductile option; usually more flexible than PLA or fiber-filled materials.",
+    },
+    "nylon": {
+        "label": "Nylon printed part",
+        "elasticModulusMpa": 1600,
+        "poisson": 0.39,
+        "yieldMpa": 45,
+        "printedAllowableMpa": 18,
+        "process": "Dry aggressively, use high wall count, and account for moisture-driven stiffness changes.",
+        "notes": "Tough and fatigue-friendly, but moisture and creep must be managed.",
+    },
+    "pa-cf": {
+        "label": "PA-CF printed part",
+        "elasticModulusMpa": 5500,
+        "poisson": 0.34,
+        "yieldMpa": 70,
+        "printedAllowableMpa": 32,
+        "process": "Keep primary tension/compression in the XY plane; use dried filament, hardened nozzle, and large radii.",
+        "notes": "Stiff engineering filament; anisotropy and layer adhesion still control design.",
+    },
+    "pet-cf": {
+        "label": "PET-CF printed part",
+        "elasticModulusMpa": 6500,
+        "poisson": 0.34,
+        "yieldMpa": 75,
+        "printedAllowableMpa": 36,
+        "process": "Print dry, keep structural fibers/layers aligned with load paths, and avoid Z-peel-critical lugs.",
+        "notes": "Stiff and dimensionally stable; excellent candidate for structural printed brackets when dry and printed correctly.",
+    },
+    "aluminum 6061": {
+        "label": "Aluminum 6061-T6",
+        "elasticModulusMpa": 69000,
+        "poisson": 0.33,
+        "yieldMpa": 276,
+        "printedAllowableMpa": 276,
+        "process": "Use normal machined-part assumptions; inspect stress risers and fastener bearing separately.",
+        "notes": "Good all-around machined structural material.",
+    },
+    "steel": {
+        "label": "Mild steel",
+        "elasticModulusMpa": 200000,
+        "poisson": 0.30,
+        "yieldMpa": 250,
+        "printedAllowableMpa": 250,
+        "process": "Use normal isotropic metal assumptions; corrosion protection and fatigue details may matter.",
+        "notes": "High stiffness and ductility; corrosion protection may matter.",
+    },
 }
 
 
@@ -9525,6 +9605,83 @@ def structural_material_from_text(text):
         if any(term in lower for term in terms):
             return {**STRUCTURAL_MATERIAL_LIBRARY[key], "key": key}
     return {**STRUCTURAL_MATERIAL_LIBRARY["aluminum 6061"], "key": "aluminum 6061", "assumed": True}
+
+
+def structural_face_from_text(text, role="fixed"):
+    lower = str(text or "").lower()
+    if role == "fixed":
+        patterns = [
+            (("fixed on the bottom", "clamped on the bottom", "mounted on the bottom", "base is fixed", "bottom is fixed", "at the base"), "min_z"),
+            (("fixed on top", "top is fixed", "ceiling mounted"), "max_z"),
+            (("fixed on the back", "back is fixed", "rear is fixed", "aft is fixed", "mounted to the back"), "min_y"),
+            (("fixed on the front", "front is fixed"), "max_y"),
+            (("fixed on the left", "left is fixed"), "min_x"),
+            (("fixed on the right", "right is fixed"), "max_x"),
+            (("cantilever", "wall mounted", "bolted to wall", "mounted to wall"), "min_x"),
+        ]
+        default = "min_x"
+    else:
+        patterns = [
+            (("load on the bottom", "force on the bottom"), "min_z"),
+            (("load on top", "force on top", "top load"), "max_z"),
+            (("load on the back", "force on the back", "rear load"), "min_y"),
+            (("load on the front", "force on the front", "front load"), "max_y"),
+            (("load on the left", "force on the left"), "min_x"),
+            (("load on the right", "force on the right"), "max_x"),
+            (("free end", "tip load", "end load"), "opposite"),
+        ]
+        default = "opposite"
+    for terms, face in patterns:
+        if any(term in lower for term in terms):
+            return face
+    axis_match = re.search(rf"{role}(?:ed)?(?:\s+face|\s+side)?[^a-z0-9]{{0,18}}(?:at|on|=|:)?\s*(min|max)[-_ ]?([xyz])", lower)
+    if axis_match:
+        return f"{axis_match.group(1)}_{axis_match.group(2)}"
+    return default
+
+
+def opposite_structural_face(face):
+    opposites = {
+        "min_x": "max_x",
+        "max_x": "min_x",
+        "min_y": "max_y",
+        "max_y": "min_y",
+        "min_z": "max_z",
+        "max_z": "min_z",
+    }
+    return opposites.get(face, "max_x")
+
+
+def structural_load_vector_from_text(text):
+    lower = str(text or "").lower()
+    explicit = re.search(
+        r"(?:load|force)\s+(?:vector|direction)[^0-9+\-]{0,16}\(?\s*([+\-]?[0-9]+(?:\.[0-9]+)?)\s*,\s*([+\-]?[0-9]+(?:\.[0-9]+)?)\s*,\s*([+\-]?[0-9]+(?:\.[0-9]+)?)",
+        lower,
+    )
+    if explicit:
+        values = [float(explicit.group(i)) for i in range(1, 4)]
+    elif re.search(r"\b(?:down|downward|gravity|weight|hanging|vertical load)\b", lower):
+        values = [0.0, 0.0, -1.0]
+    elif re.search(r"\b(?:up|upward|pulling up)\b", lower):
+        values = [0.0, 0.0, 1.0]
+    elif re.search(r"\b(?:wind|side load|sideways|lateral)\b", lower):
+        values = [1.0, 0.0, 0.0]
+    elif re.search(r"\b(?:x direction|along x|\+x)\b", lower):
+        values = [1.0, 0.0, 0.0]
+    elif re.search(r"\b(?:-x|negative x)\b", lower):
+        values = [-1.0, 0.0, 0.0]
+    elif re.search(r"\b(?:y direction|along y|\+y)\b", lower):
+        values = [0.0, 1.0, 0.0]
+    elif re.search(r"\b(?:-y|negative y)\b", lower):
+        values = [0.0, -1.0, 0.0]
+    elif re.search(r"\b(?:z direction|along z|\+z)\b", lower):
+        values = [0.0, 0.0, 1.0]
+    elif re.search(r"\b(?:-z|negative z)\b", lower):
+        values = [0.0, 0.0, -1.0]
+    else:
+        values = [0.0, 0.0, -1.0]
+    magnitude = math.sqrt(sum(value * value for value in values)) or 1.0
+    return [round(value / magnitude, 6) for value in values]
 
 
 def structural_analysis_parameters(messages):
@@ -9552,11 +9709,18 @@ def structural_analysis_parameters(messages):
     )
     if dim_match:
         dims = [float(dim_match.group(i)) for i in range(1, 4)]
+    fixed_face = structural_face_from_text(text, role="fixed")
+    load_face = structural_face_from_text(text, role="load")
+    if load_face == "opposite":
+        load_face = opposite_structural_face(fixed_face)
     return {
         "loadN": round(load_n, 3),
         "safetyFactor": safety_factor,
         "material": structural_material_from_text(text),
         "dimensionsMm": dims,
+        "fixedFace": fixed_face,
+        "loadFace": load_face,
+        "loadVector": structural_load_vector_from_text(text),
         "promptExcerpt": compact(text, 1000),
     }
 
@@ -9705,15 +9869,461 @@ S
     return {"caseDir": str(case_dir), "inputPath": str(inp), "run": run}
 
 
+def structural_allowable_mpa(material):
+    material = material or {}
+    return float(
+        material.get("printedAllowableMpa")
+        or material.get("allowableMpa")
+        or material.get("yieldMpa")
+        or 1.0
+    )
+
+
+def structural_face_axis(face):
+    face = str(face or "min_x").lower()
+    axes = {"x": 0, "y": 1, "z": 2}
+    axis = axes.get(face[-1:], 0)
+    side = "max" if face.startswith("max") else "min"
+    return axis, side
+
+
+def select_mesh_face_nodes(points, face, tolerance=None):
+    try:
+        import numpy as np
+    except Exception as exc:
+        return {"ok": False, "error": f"numpy is not available: {exc}", "nodes": []}
+    pts = np.asarray(points, dtype=float)
+    if pts.size == 0:
+        return {"ok": False, "error": "mesh has no nodes", "nodes": []}
+    mins = pts.min(axis=0)
+    maxs = pts.max(axis=0)
+    spans = np.maximum(maxs - mins, 1e-9)
+    axis, side = structural_face_axis(face)
+    target = maxs[axis] if side == "max" else mins[axis]
+    tol = float(tolerance if tolerance is not None else max(0.35, spans[axis] * 0.025))
+    selected = np.where(np.abs(pts[:, axis] - target) <= tol)[0] + 1
+    if selected.size < 3:
+        order = np.argsort(np.abs(pts[:, axis] - target))
+        selected = order[: max(1, min(8, len(order)))] + 1
+        tol = float(np.max(np.abs(pts[selected - 1, axis] - target))) if selected.size else tol
+    return {
+        "ok": bool(selected.size),
+        "face": face,
+        "axis": "xyz"[axis],
+        "side": side,
+        "targetCoordinateMm": round(float(target), 6),
+        "toleranceMm": round(float(tol), 6),
+        "nodeCount": int(selected.size),
+        "nodes": [int(value) for value in selected.tolist()],
+    }
+
+
+def calculix_cell_blocks(mesh):
+    supported = {
+        "tetra": ("C3D4", 4),
+        "tetra10": ("C3D10", 10),
+        "hexahedron": ("C3D8", 8),
+        "hexahedron20": ("C3D20", 20),
+        "wedge": ("C3D6", 6),
+        "pyramid": ("C3D5", 5),
+    }
+    blocks = []
+    element_id = 1
+    for cell_block in getattr(mesh, "cells", []):
+        cell_type = getattr(cell_block, "type", "")
+        data = getattr(cell_block, "data", [])
+        if cell_type not in supported or len(data) == 0:
+            continue
+        calculix_type, expected = supported[cell_type]
+        rows = []
+        for row in data:
+            if len(row) < expected:
+                continue
+            rows.append((element_id, [int(value) + 1 for value in row[:expected]]))
+            element_id += 1
+        if rows:
+            blocks.append(
+                {
+                    "cellType": cell_type,
+                    "calculixType": calculix_type,
+                    "elementSet": f"E{calculix_type}",
+                    "elements": rows,
+                }
+            )
+    return blocks
+
+
+def write_calculix_set(file_obj, keyword, name, ids, per_line=16):
+    file_obj.write(f"*{keyword}, {keyword}={name}\n")
+    values = [int(value) for value in ids]
+    for start in range(0, len(values), per_line):
+        file_obj.write(",".join(str(value) for value in values[start : start + per_line]) + "\n")
+
+
+def gmsh_string(value):
+    return str(value).replace("\\", "/").replace('"', '\\"')
+
+
+def structural_mesh_size(geometry):
+    extents = [float(value or 0.0) for value in (geometry or {}).get("extents", [])[:3]]
+    characteristic = max(extents) if extents else 60.0
+    if characteristic <= 0:
+        characteristic = 60.0
+    max_size = max(2.0, min(characteristic / 8.0, 25.0))
+    min_size = max(0.75, min(max_size / 3.0, 6.0))
+    return round(min_size, 4), round(max_size, 4)
+
+
+def run_gmsh_mesh_command(command, cwd):
+    started = time.time()
+    try:
+        proc = subprocess.run(
+            command,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=300,
+            env={**os.environ, "PATH": PATH_FOR_CODEX},
+        )
+        return {
+            "ran": True,
+            "ok": proc.returncode == 0,
+            "returnCode": proc.returncode,
+            "durationMs": round((time.time() - started) * 1000),
+            "stdout": compact(proc.stdout, 1500),
+            "stderr": compact(proc.stderr, 1800),
+            "command": " ".join(command),
+        }
+    except Exception as exc:
+        return {
+            "ran": True,
+            "ok": False,
+            "error": str(exc),
+            "durationMs": round((time.time() - started) * 1000),
+            "command": " ".join(command),
+        }
+
+
+def generate_structural_volume_mesh(case_dir, source_geometry, solver_stl, geometry):
+    gmsh = command_path("gmsh")
+    if not gmsh:
+        return {"ok": False, "ran": False, "error": "Gmsh is not available."}
+    if not python_module_available("meshio"):
+        return {"ok": False, "ran": False, "error": "meshio is not available."}
+    case_dir = Path(case_dir)
+    case_dir.mkdir(parents=True, exist_ok=True)
+    source_geometry = Path(source_geometry).expanduser()
+    solver_stl = Path(solver_stl).expanduser() if solver_stl else source_geometry
+    min_size, max_size = structural_mesh_size(geometry)
+    mesh_path = case_dir / "structural_real_mesh.msh"
+    geo_path = case_dir / "mesh_from_surface.geo"
+    attempts = []
+
+    if source_geometry.suffix.lower() in {".step", ".stp"}:
+        direct = run_gmsh_mesh_command(
+            [
+                gmsh,
+                str(source_geometry),
+                "-3",
+                "-format",
+                "msh2",
+                "-clmin",
+                str(min_size),
+                "-clmax",
+                str(max_size),
+                "-o",
+                str(mesh_path),
+            ],
+            case_dir,
+        )
+        attempts.append({"method": "gmsh-step-direct", **direct})
+        if direct.get("ok") and mesh_path.exists():
+            return {
+                "ok": True,
+                "method": "gmsh-step-direct",
+                "meshPath": str(mesh_path),
+                "geoPath": "",
+                "minMeshSizeMm": min_size,
+                "maxMeshSizeMm": max_size,
+                "attempts": attempts,
+            }
+
+    local_stl = case_dir / "structural_surface.stl"
+    if solver_stl.exists():
+        shutil.copy2(solver_stl, local_stl)
+    geo_path.write_text(
+        "\n".join(
+            [
+                f'Merge "{gmsh_string(local_stl.name)}";',
+                "Mesh.Algorithm3D = 10;",
+                "Mesh.Optimize = 1;",
+                f"Mesh.CharacteristicLengthMin = {min_size:.6g};",
+                f"Mesh.CharacteristicLengthMax = {max_size:.6g};",
+                "Surface Loop(1) = Surface{:};",
+                "Volume(1) = {1};",
+                'Physical Volume("PART") = {1};',
+                "Mesh 3;",
+                f'Save "{gmsh_string(mesh_path.name)}";',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    surface = run_gmsh_mesh_command([gmsh, "-3", str(geo_path), "-format", "msh2", "-o", str(mesh_path)], case_dir)
+    attempts.append({"method": "gmsh-stl-surface-volume", **surface})
+    return {
+        "ok": surface.get("ok") and mesh_path.exists(),
+        "method": "gmsh-stl-surface-volume",
+        "meshPath": str(mesh_path) if mesh_path.exists() else "",
+        "geoPath": str(geo_path),
+        "surfacePath": str(local_stl) if local_stl.exists() else "",
+        "minMeshSizeMm": min_size,
+        "maxMeshSizeMm": max_size,
+        "attempts": attempts,
+        "error": "" if surface.get("ok") else surface.get("error") or surface.get("stderr") or "Gmsh failed to create a volume mesh.",
+    }
+
+
+def von_mises_mpa(sxx, syy, szz, sxy, sxz, syz):
+    return math.sqrt(
+        0.5 * ((sxx - syy) ** 2 + (syy - szz) ** 2 + (szz - sxx) ** 2)
+        + 3.0 * (sxy**2 + sxz**2 + syz**2)
+    )
+
+
+def parse_calculix_dat_summary(dat_path, material, target_safety_factor):
+    dat_path = Path(dat_path)
+    if not dat_path.exists():
+        return {"ok": False, "error": "CalculiX .dat result file was not generated."}
+    max_disp = 0.0
+    max_disp_node = 0
+    max_vm = 0.0
+    max_vm_element = 0
+    displacement_rows = 0
+    stress_rows = 0
+    mode = ""
+    for raw_line in dat_path.read_text(errors="ignore").splitlines():
+        line = raw_line.strip()
+        lower = line.lower()
+        if "displacements" in lower and "for set" in lower:
+            mode = "displacement"
+            continue
+        if "stresses" in lower and "for set" in lower:
+            mode = "stress"
+            continue
+        if not line:
+            continue
+        parts = line.split()
+        if mode == "displacement" and len(parts) >= 4 and parts[0].lstrip("-").isdigit():
+            try:
+                node = int(parts[0])
+                ux, uy, uz = (float(parts[1]), float(parts[2]), float(parts[3]))
+            except ValueError:
+                continue
+            mag = math.sqrt(ux * ux + uy * uy + uz * uz)
+            displacement_rows += 1
+            if mag > max_disp:
+                max_disp = mag
+                max_disp_node = node
+        elif mode == "stress" and len(parts) >= 8 and parts[0].lstrip("-").isdigit():
+            try:
+                elem = int(parts[0])
+                sxx, syy, szz, sxy, sxz, syz = [float(value) for value in parts[2:8]]
+            except ValueError:
+                continue
+            vm = von_mises_mpa(sxx, syy, szz, sxy, sxz, syz)
+            stress_rows += 1
+            if vm > max_vm:
+                max_vm = vm
+                max_vm_element = elem
+    allowable = structural_allowable_mpa(material)
+    achieved = allowable / max_vm if max_vm > 0 else None
+    return {
+        "ok": displacement_rows > 0 or stress_rows > 0,
+        "displacementRows": displacement_rows,
+        "stressRows": stress_rows,
+        "maxDisplacementMm": round(max_disp, 6),
+        "maxDisplacementNode": max_disp_node,
+        "maxVonMisesMpa": round(max_vm, 6),
+        "maxVonMisesElement": max_vm_element,
+        "allowableMpa": round(allowable, 6),
+        "targetSafetyFactor": float(target_safety_factor or 1.0),
+        "achievedSafetyFactor": round(achieved, 3) if achieved is not None else None,
+        "passesSafetyFactor": bool(achieved is not None and achieved >= float(target_safety_factor or 1.0)),
+    }
+
+
+def write_structural_result_preview(path, mesh_info, fixed_selection, load_selection, summary):
+    try:
+        import numpy as np
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    points = np.asarray(mesh_info.get("points") or [], dtype=float)
+    if points.size == 0:
+        return {"ok": False, "error": "No mesh points available for preview."}
+    fixed_nodes = np.asarray([(node - 1) for node in fixed_selection.get("nodes", [])], dtype=int)
+    load_nodes = np.asarray([(node - 1) for node in load_selection.get("nodes", [])], dtype=int)
+    sample = np.arange(len(points))
+    if len(sample) > 6000:
+        sample = np.linspace(0, len(points) - 1, 6000).astype(int)
+    fig, axs = plt.subplots(1, 2, figsize=(13, 5.5))
+    views = [(0, 1, "X", "Y"), (0, 2, "X", "Z")]
+    for ax, (a, b, x_label, y_label) in zip(axs, views):
+        ax.scatter(points[sample, a], points[sample, b], s=5, c="#94a3b8", alpha=0.5, linewidths=0)
+        if fixed_nodes.size:
+            ax.scatter(points[fixed_nodes, a], points[fixed_nodes, b], s=18, c="#2563eb", label="fixed")
+        if load_nodes.size:
+            ax.scatter(points[load_nodes, a], points[load_nodes, b], s=18, c="#dc2626", label="load")
+        ax.set_xlabel(f"{x_label} mm")
+        ax.set_ylabel(f"{y_label} mm")
+        ax.set_aspect("equal", adjustable="box")
+        ax.grid(True, alpha=0.18)
+        ax.legend(loc="best")
+    fig.suptitle(
+        (
+            f"Structural FEA preview | max disp {summary.get('maxDisplacementMm', 0)} mm | "
+            f"max VM {summary.get('maxVonMisesMpa', 0)} MPa | SF {summary.get('achievedSafetyFactor') or 'n/a'}"
+        )
+    )
+    fig.tight_layout()
+    fig.savefig(path, dpi=170)
+    plt.close(fig)
+    return {"ok": True, "path": str(path)}
+
+
+def write_calculix_real_geometry_case(target, source_geometry, solver_stl, params, geometry):
+    target = Path(target)
+    case_dir = target / "calculix_real_geometry"
+    case_dir.mkdir(parents=True, exist_ok=True)
+    material = params.get("material") or STRUCTURAL_MATERIAL_LIBRARY["aluminum 6061"]
+    mesh_result = generate_structural_volume_mesh(case_dir, source_geometry, solver_stl, geometry)
+    result = {"ok": False, "caseDir": str(case_dir), "mesh": mesh_result}
+    if not mesh_result.get("ok"):
+        result["error"] = mesh_result.get("error") or "Real geometry meshing failed."
+        return result
+    try:
+        import meshio
+        import numpy as np
+
+        mesh = meshio.read(mesh_result["meshPath"])
+        points = np.asarray(mesh.points[:, :3], dtype=float)
+        blocks = calculix_cell_blocks(mesh)
+        if points.size == 0 or not blocks:
+            result["error"] = "Mesh was created but contains no supported 3D elements for CalculiX."
+            return result
+        fixed = select_mesh_face_nodes(points, params.get("fixedFace") or "min_x")
+        load = select_mesh_face_nodes(points, params.get("loadFace") or opposite_structural_face(params.get("fixedFace")))
+        if not fixed.get("ok") or not load.get("ok"):
+            result["error"] = "Could not select fixed/load node sets from the mesh."
+            result["fixedSelection"] = fixed
+            result["loadSelection"] = load
+            return result
+        material_name = calculix_identifier(material.get("key", "material"))
+        input_path = case_dir / "real_geometry_static.inp"
+        load_vector = [float(value) for value in params.get("loadVector") or [0.0, 0.0, -1.0]]
+        load_n = float(params.get("loadN") or 100.0)
+        per_node = [load_n * component / max(1, int(load.get("nodeCount") or 1)) for component in load_vector]
+        all_nodes = list(range(1, len(points) + 1))
+        all_elements = []
+        with input_path.open("w", encoding="utf-8") as fh:
+            fh.write("*HEADING\nCodex CLI UI real-geometry structural FEA\n")
+            fh.write("*NODE\n")
+            for index, point in enumerate(points, 1):
+                fh.write(f"{index},{point[0]:.9g},{point[1]:.9g},{point[2]:.9g}\n")
+            for block in blocks:
+                fh.write(f"*ELEMENT, TYPE={block['calculixType']}, ELSET={block['elementSet']}\n")
+                for element_id, node_ids in block["elements"]:
+                    all_elements.append(element_id)
+                    fh.write(f"{element_id}," + ",".join(str(node_id) for node_id in node_ids) + "\n")
+            write_calculix_set(fh, "NSET", "FIXED", fixed["nodes"])
+            write_calculix_set(fh, "NSET", "LOADFACE", load["nodes"])
+            write_calculix_set(fh, "NSET", "NALL", all_nodes)
+            write_calculix_set(fh, "ELSET", "EALL", all_elements)
+            fh.write(f"*MATERIAL, NAME={material_name}\n")
+            fh.write("*ELASTIC\n")
+            fh.write(f"{float(material.get('elasticModulusMpa') or 69000):.9g},{float(material.get('poisson') or 0.33):.9g}\n")
+            fh.write(f"*SOLID SECTION, ELSET=EALL, MATERIAL={material_name}\n")
+            fh.write("*BOUNDARY\nFIXED,1,3,0\n")
+            fh.write("*STEP\n*STATIC\n*CLOAD\n")
+            for node_id in load["nodes"]:
+                for dof, value in enumerate(per_node, 1):
+                    if abs(value) > 1e-12:
+                        fh.write(f"{node_id},{dof},{value:.9g}\n")
+            fh.write("*NODE PRINT, NSET=NALL\nU\n")
+            fh.write("*EL PRINT, ELSET=EALL\nS\n")
+            fh.write("*NODE FILE\nU\n*EL FILE\nS\n*END STEP\n")
+        ccx = command_path("ccx")
+        run = {"ran": False, "ok": False, "error": "CalculiX ccx is not available."}
+        if ccx:
+            started = time.time()
+            proc = subprocess.run(
+                [ccx, "-i", "real_geometry_static"],
+                cwd=case_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=240,
+                env={**os.environ, "PATH": PATH_FOR_CODEX},
+            )
+            run = {
+                "ran": True,
+                "ok": proc.returncode == 0 and (case_dir / "real_geometry_static.dat").exists(),
+                "returnCode": proc.returncode,
+                "durationMs": round((time.time() - started) * 1000),
+                "stdout": compact(proc.stdout, 1600),
+                "stderr": compact(proc.stderr, 1600),
+                "frdPath": str(case_dir / "real_geometry_static.frd") if (case_dir / "real_geometry_static.frd").exists() else "",
+                "datPath": str(case_dir / "real_geometry_static.dat") if (case_dir / "real_geometry_static.dat").exists() else "",
+            }
+        summary = parse_calculix_dat_summary(run.get("datPath", ""), material, params.get("safetyFactor", 2.5)) if run.get("datPath") else {"ok": False}
+        preview_path = target / "STRUCTURAL_FEA_PREVIEW.png"
+        preview = write_structural_result_preview(
+            preview_path,
+            {"points": points.tolist()},
+            fixed,
+            load,
+            summary,
+        )
+        result.update(
+            {
+                "ok": bool(run.get("ok") and summary.get("ok")),
+                "inputPath": str(input_path),
+                "run": run,
+                "summary": summary,
+                "previewPath": str(preview_path) if preview_path.exists() else "",
+                "preview": preview,
+                "fixedSelection": {key: value for key, value in fixed.items() if key != "nodes"} | {"nodes": fixed["nodes"][:60]},
+                "loadSelection": {key: value for key, value in load.items() if key != "nodes"} | {"nodes": load["nodes"][:60]},
+                "meshStats": {
+                    "nodes": int(len(points)),
+                    "elements": int(sum(len(block["elements"]) for block in blocks)),
+                    "elementTypes": sorted({block["calculixType"] for block in blocks}),
+                },
+            }
+        )
+        return result
+    except Exception as exc:
+        result["error"] = str(exc)
+        return result
+
+
 def structural_precheck_text(result):
     params = result.get("params") or {}
     material = params.get("material") or {}
     geometry = result.get("geometry") or {}
     toolchain = result.get("toolchain") or {}
+    real = result.get("realFea") or {}
+    real_summary = real.get("summary") or {}
+    mesh_stats = real.get("meshStats") or {}
     lines = [
         "# Mechanical/Structural Preflight",
         "",
-        "This is a first-pass engineering package. It does not claim final strength until real loads, constraints, material/process data, mesh quality, and solver results are validated.",
+        "This is a mechanical/structural analysis package. When real geometry is available, it attempts a Gmsh volume mesh and a CalculiX static solve before falling back to the seed case.",
         "",
         "## Request",
         "",
@@ -9722,10 +10332,15 @@ def structural_precheck_text(result):
         "## Design Inputs",
         "",
         f"- Load assumption: {params.get('loadN', 100.0):.3f} N.",
+        f"- Load direction vector: {params.get('loadVector')}.",
         f"- Safety factor target: {params.get('safetyFactor', 2.5):.2f}.",
+        f"- Fixed face selection: {params.get('fixedFace', 'min_x')}.",
+        f"- Load face selection: {params.get('loadFace', 'max_x')}.",
         f"- Material: {material.get('label', 'unknown')} ({'assumed' if material.get('assumed') else 'from prompt'}).",
         f"- Elastic modulus: {material.get('elasticModulusMpa')} MPa.",
-        f"- Nominal yield/allowable reference: {material.get('yieldMpa')} MPa before safety factor/process knockdowns.",
+        f"- Nominal yield reference: {material.get('yieldMpa')} MPa.",
+        f"- Printed/process allowable used for safety-factor summary: {structural_allowable_mpa(material):.3f} MPa.",
+        f"- Process note: {material.get('process', '')}",
         f"- Material note: {material.get('notes', '')}",
         "",
         "## Geometry",
@@ -9733,6 +10348,23 @@ def structural_precheck_text(result):
         f"- Source geometry: `{result.get('geometryPath') or 'not found'}`",
         f"- Solver/preflight STL: `{result.get('solverStlPath') or 'not generated'}`",
         f"- Mesh read: faces={geometry.get('faces', 0)} vertices={geometry.get('vertices', 0)} extents={geometry.get('extents')} watertight={geometry.get('watertight')}",
+        "",
+        "## Real-Geometry FEA",
+        "",
+        f"- Ran real geometry mesh/solve: {bool(real.get('run', {}).get('ran'))}",
+        f"- Real solve passed: {bool(real.get('ok'))}",
+        f"- Real case folder: `{real.get('caseDir') or 'not generated'}`",
+        f"- Real CalculiX input deck: `{real.get('inputPath') or 'not generated'}`",
+        f"- Real mesh: `{(real.get('mesh') or {}).get('meshPath') or 'not generated'}`",
+        f"- Result DAT: `{(real.get('run') or {}).get('datPath') or 'not generated'}`",
+        f"- Result FRD: `{(real.get('run') or {}).get('frdPath') or 'not generated'}`",
+        f"- Preview image: `{real.get('previewPath') or 'not generated'}`",
+        f"- Mesh nodes/elements: {mesh_stats.get('nodes', 0)} / {mesh_stats.get('elements', 0)}.",
+        f"- Fixed selection: {real.get('fixedSelection') or {}}",
+        f"- Load selection: {real.get('loadSelection') or {}}",
+        f"- Max displacement: {real_summary.get('maxDisplacementMm', 'n/a')} mm.",
+        f"- Max von Mises stress: {real_summary.get('maxVonMisesMpa', 'n/a')} MPa.",
+        f"- Achieved safety factor: {real_summary.get('achievedSafetyFactor', 'n/a')} against target {params.get('safetyFactor', 2.5):.2f}.",
         "",
         "## Toolchain",
         "",
@@ -9769,6 +10401,103 @@ def structural_precheck_text(result):
     return "\n".join(lines) + "\n"
 
 
+def structural_report_text(result):
+    params = result.get("params") or {}
+    material = params.get("material") or {}
+    geometry = result.get("geometry") or {}
+    real = result.get("realFea") or {}
+    summary = real.get("summary") or {}
+    mesh_stats = real.get("meshStats") or {}
+    seed = result.get("calculixSeed") or {}
+    seed_run = seed.get("run") or {}
+    solved = bool(real.get("ok"))
+    lines = [
+        "# Structural FEA Report",
+        "",
+        "## Plain-English Result",
+        "",
+    ]
+    if solved:
+        safety = summary.get("achievedSafetyFactor")
+        verdict = "passes the target safety factor" if summary.get("passesSafetyFactor") else "does not yet pass the target safety factor"
+        lines.append(
+            f"The attached geometry was meshed and solved with CalculiX. Under the current assumptions it {verdict}: achieved safety factor {safety} versus target {params.get('safetyFactor', 2.5):.2f}."
+        )
+    else:
+        lines.append(
+            "The real-geometry solve did not complete, so this report falls back to the seed case and records exactly what blocked the real mesh/solve."
+        )
+    lines.extend(
+        [
+            "",
+            "## Files",
+            "",
+            f"- Source geometry: `{result.get('geometryPath') or 'not found'}`",
+            f"- Converted solver STL: `{result.get('solverStlPath') or 'not generated'}`",
+            f"- Real mesh: `{(real.get('mesh') or {}).get('meshPath') or 'not generated'}`",
+            f"- Real CalculiX deck: `{real.get('inputPath') or 'not generated'}`",
+            f"- Result DAT: `{(real.get('run') or {}).get('datPath') or 'not generated'}`",
+            f"- Result FRD: `{(real.get('run') or {}).get('frdPath') or 'not generated'}`",
+            f"- Preview image: `{real.get('previewPath') or 'not generated'}`",
+            f"- Case JSON: `{result.get('caseSetupPath') or 'not generated'}`",
+            "",
+            "## Inputs And Assumptions",
+            "",
+            f"- Load: {params.get('loadN', 100.0):.3f} N.",
+            f"- Load vector: {params.get('loadVector')}.",
+            f"- Fixed face: {params.get('fixedFace', 'min_x')}.",
+            f"- Loaded face: {params.get('loadFace', 'max_x')}.",
+            f"- Material: {material.get('label', 'unknown')}.",
+            f"- Elastic modulus: {material.get('elasticModulusMpa')} MPa.",
+            f"- Poisson ratio: {material.get('poisson')}.",
+            f"- Printed/process allowable used: {structural_allowable_mpa(material):.3f} MPa.",
+            f"- Target safety factor: {params.get('safetyFactor', 2.5):.2f}.",
+            f"- Process note: {material.get('process', '')}",
+            "",
+            "## Geometry And Mesh",
+            "",
+            f"- Geometry extents: {geometry.get('extents')} mm.",
+            f"- STL watertight: {geometry.get('watertight')}.",
+            f"- Mesh nodes: {mesh_stats.get('nodes', 0)}.",
+            f"- Mesh elements: {mesh_stats.get('elements', 0)}.",
+            f"- Element types: {', '.join(mesh_stats.get('elementTypes') or []) or 'none'}.",
+            f"- Fixed node selection: {real.get('fixedSelection') or {}}",
+            f"- Load node selection: {real.get('loadSelection') or {}}",
+            "",
+            "## Result Summary",
+            "",
+            f"- CalculiX real solve ran: {bool((real.get('run') or {}).get('ran'))}.",
+            f"- CalculiX real solve passed: {bool(real.get('ok'))}.",
+            f"- Max displacement: {summary.get('maxDisplacementMm', 'n/a')} mm at node {summary.get('maxDisplacementNode', 'n/a')}.",
+            f"- Max von Mises stress: {summary.get('maxVonMisesMpa', 'n/a')} MPa at element {summary.get('maxVonMisesElement', 'n/a')}.",
+            f"- Achieved safety factor: {summary.get('achievedSafetyFactor', 'n/a')}.",
+            f"- Safety-factor pass: {summary.get('passesSafetyFactor', False)}.",
+            "",
+            "## Engineering Caveats",
+            "",
+            "- The load and constraint faces are automatically inferred from the prompt and mesh bounding box; confirm them before trusting the result.",
+            "- FDM printed parts are anisotropic. Layer direction, wall count, infill, drying, temperature, UV, creep, and fastener bearing can control the real failure mode.",
+            "- This is a first useful FEA pass, not a certified design result. Refine constraints, contact/bolts, mesh size, load cases, and material test data before release-critical use.",
+            "",
+            "## Fallback Seed Case",
+            "",
+            f"- Seed deck: `{seed.get('inputPath') or 'not generated'}`",
+            f"- Seed result: `{seed_run.get('frdPath') or 'not generated'}`",
+            f"- Seed solve ran: {seed_run.get('ran', False)}.",
+        ]
+    )
+    if not solved:
+        lines.extend(
+            [
+                "",
+                "## Real Solve Blocker",
+                "",
+                real.get("error") or (real.get("mesh") or {}).get("error") or "Unknown real-geometry solve failure.",
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
 def stage_structural_fea_preflight(messages, cwd="", target_path=None):
     params = structural_analysis_parameters(messages)
     slug = slugify(latest_user_text(messages), fallback="structural-fea")[:48]
@@ -9787,6 +10516,7 @@ def stage_structural_fea_preflight(messages, cwd="", target_path=None):
         "toolchain": toolchain,
     }
     analysis = {}
+    real_fea = {}
     if resolved.get("path"):
         source = Path(resolved["path"]).expanduser()
         copied_name = sanitize_filename(source.name, fallback="source-geometry")
@@ -9805,6 +10535,14 @@ def stage_structural_fea_preflight(messages, cwd="", target_path=None):
         if conversion.get("ok"):
             analysis = analyze_stl_geometry(solver_stl)
             result["geometry"] = analysis
+            real_fea = write_calculix_real_geometry_case(
+                target,
+                copied_source,
+                solver_stl,
+                params,
+                analysis if analysis.get("ok") else {},
+            )
+            result["realFea"] = real_fea
     seed = write_calculix_seed_case(
         target,
         params,
@@ -9812,11 +10550,13 @@ def stage_structural_fea_preflight(messages, cwd="", target_path=None):
         source_label="geometry bounding box" if result.get("geometryPath") else "dimension/default bounding box",
     )
     result["calculixSeed"] = seed
-    result["ok"] = bool(toolchain.get("solverAvailable") and seed.get("run", {}).get("ran"))
+    result["ok"] = bool((real_fea.get("ok") if real_fea else False) or (toolchain.get("solverAvailable") and seed.get("run", {}).get("ran")))
     result["precheckPath"] = str(target / "STRUCTURAL_FEA_PRECHECK.md")
+    result["reportPath"] = str(target / "STRUCTURAL_FEA_REPORT.md")
     result["caseSetupPath"] = str(target / "case_setup.json")
     (target / "case_setup.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     (target / "STRUCTURAL_FEA_PRECHECK.md").write_text(structural_precheck_text(result), encoding="utf-8")
+    (target / "STRUCTURAL_FEA_REPORT.md").write_text(structural_report_text(result), encoding="utf-8")
     return result
 
 
@@ -9827,6 +10567,15 @@ def structural_fea_preflight_working_notes(result):
     if result.get("geometryPath"):
         geometry = result.get("geometry") or {}
         notes.append(f"Resolved geometry: {result.get('geometryPath')} with extents {geometry.get('extents')} mm.")
+        real = result.get("realFea") or {}
+        if real.get("ok"):
+            mesh_stats = real.get("meshStats") or {}
+            summary = real.get("summary") or {}
+            notes.append(
+                f"Ran real-geometry CalculiX FEA: {mesh_stats.get('nodes', 0)} nodes, {mesh_stats.get('elements', 0)} elements, max stress {summary.get('maxVonMisesMpa')} MPa."
+            )
+        else:
+            notes.append(f"Real-geometry FEA did not complete: {compact(real.get('error') or (real.get('mesh') or {}).get('error') or 'unknown blocker', 180)}")
     else:
         notes.append("No geometry was found, so I staged the preflight and a default/dimension-based CalculiX seed case instead of inventing final stress results.")
     seed = result.get("calculixSeed") or {}
@@ -9838,16 +10587,31 @@ def structural_fea_preflight_working_notes(result):
 def format_structural_fea_preflight_answer(result):
     params = result.get("params") or {}
     material = params.get("material") or {}
+    real = result.get("realFea") or {}
+    real_run = real.get("run") or {}
+    real_summary = real.get("summary") or {}
+    mesh_stats = real.get("meshStats") or {}
     seed = result.get("calculixSeed") or {}
     run = seed.get("run") or {}
+    if real.get("ok"):
+        opener = "I ran a first-pass real-geometry FEA on that part."
+    elif result.get("geometryPath"):
+        opener = "I staged the structural package, but the real-geometry FEA needs review before trusting it."
+    else:
+        opener = "I staged a mechanical/structural preflight package, but I need a geometry file before I can run real FEA."
     lines = [
-        "I staged a mechanical/structural preflight package for that part.",
+        opener,
         "",
+        f"- Engineering report: `{result.get('reportPath')}`",
         f"- Preflight: `{result.get('precheckPath')}`",
         f"- Case setup: `{result.get('caseSetupPath')}`",
-        f"- CalculiX input deck: `{seed.get('inputPath')}`",
-        f"- CalculiX case folder: `{seed.get('caseDir')}`",
-        f"- CalculiX result: `{run.get('frdPath') or 'not generated'}`",
+        f"- Real CalculiX deck: `{real.get('inputPath') or 'not generated'}`",
+        f"- Real mesh: `{(real.get('mesh') or {}).get('meshPath') or 'not generated'}`",
+        f"- Real DAT result: `{real_run.get('datPath') or 'not generated'}`",
+        f"- Real FRD result: `{real_run.get('frdPath') or 'not generated'}`",
+        f"- Result preview: `{real.get('previewPath') or 'not generated'}`",
+        f"- Seed fallback deck: `{seed.get('inputPath')}`",
+        f"- Seed fallback result: `{run.get('frdPath') or 'not generated'}`",
     ]
     if result.get("geometryPath"):
         geometry = result.get("geometry") or {}
@@ -9857,12 +10621,36 @@ def format_structural_fea_preflight_answer(result):
                 f"- Mesh read: {geometry.get('faces', 0)} faces, {geometry.get('vertices', 0)} vertices, extents {geometry.get('extents')} mm, watertight={geometry.get('watertight')}",
             ]
         )
+    if real.get("ok"):
+        lines.extend(
+            [
+                "",
+                (
+                    f"FEA result: {mesh_stats.get('nodes', 0)} nodes, {mesh_stats.get('elements', 0)} elements, "
+                    f"max displacement {real_summary.get('maxDisplacementMm')} mm, max von Mises stress {real_summary.get('maxVonMisesMpa')} MPa."
+                ),
+                (
+                    f"Safety factor: achieved {real_summary.get('achievedSafetyFactor')} against target {params.get('safetyFactor', 2.5):.2f} "
+                    f"using {structural_allowable_mpa(material):.1f} MPa printed/process allowable for {material.get('label', 'unknown')}."
+                ),
+            ]
+        )
+    elif result.get("geometryPath"):
+        lines.extend(
+            [
+                "",
+                f"Real FEA blocker: {compact(real.get('error') or (real.get('mesh') or {}).get('error') or 'unknown mesh/solver issue', 320)}",
+            ]
+        )
     lines.extend(
         [
             "",
-            f"Engineering basis: load assumption {params.get('loadN', 100.0):.1f} N, safety factor {params.get('safetyFactor', 2.5):.2f}, material {material.get('label', 'unknown')}.",
-            f"This is why: mechanical design needs loads, constraints, material/process data, and failure modes before geometry is trustworthy. CalculiX available={result.get('toolchain', {}).get('solverAvailable')}, mesh tools available={result.get('toolchain', {}).get('meshAvailable')}, CAD available={result.get('toolchain', {}).get('cadAvailable')}.",
-            "You should also consider: this is not final validated FEA yet. The seed case proves the solver path and creates a starting deck; the next pass needs real constraints, bolt/contact details, print orientation or machining process, mesh refinement, and result review.",
+            (
+                f"Engineering basis: load {params.get('loadN', 100.0):.1f} N along {params.get('loadVector')}, "
+                f"fixed face {params.get('fixedFace')}, loaded face {params.get('loadFace')}, safety factor {params.get('safetyFactor', 2.5):.2f}, material {material.get('label', 'unknown')}."
+            ),
+            f"This is why: the upgraded path uses attached geometry, Gmsh meshing, CalculiX solving, result parsing, and a clickable report/preview instead of stopping at a fake or generic seed case.",
+            "You should also consider: confirm the fixed face, loaded face, bolt/contact details, real print orientation, wall/infill settings, mesh refinement, and material test data before treating the result as release-ready.",
         ]
     )
     return "\n".join(lines)
@@ -11632,22 +12420,32 @@ def package_health_report():
             ]
             result = stage_structural_fea_preflight(structural_messages, cwd=tmp_dir, target_path=tmp_path / "case")
             answer = format_structural_fea_preflight_answer(result)
+            real = result.get("realFea") or {}
+            real_run = real.get("run") or {}
+            summary = real.get("summary") or {}
             seed = result.get("calculixSeed") or {}
-            run = seed.get("run") or {}
             ok = (
                 is_structural_mechanical_design_request(structural_messages)
                 and result.get("ok")
+                and real.get("ok")
                 and Path(result.get("precheckPath", "")).exists()
+                and Path(result.get("reportPath", "")).exists()
                 and Path(result.get("caseSetupPath", "")).exists()
+                and Path(real.get("inputPath", "")).exists()
+                and Path((real.get("mesh") or {}).get("meshPath", "")).exists()
+                and Path(real_run.get("datPath", "")).exists()
+                and Path(real.get("previewPath", "")).exists()
+                and summary.get("ok")
+                and summary.get("maxVonMisesMpa", 0) > 0
+                and "first-pass real-geometry FEA" in answer
+                and "Safety factor:" in answer
+                and "Seed fallback deck:" in answer
                 and Path(seed.get("inputPath", "")).exists()
-                and run.get("ran")
-                and "mechanical/structural preflight package" in answer
-                and "not final validated FEA yet" in answer
             )
         add(
             "tools:structural-fea-preflight",
             "pass" if ok else "fail",
-            "structural requests stage CalculiX seed case and validation limits",
+            "structural STL requests mesh real geometry, solve CalculiX, parse results, and write report/preview",
         )
     except Exception as exc:
         add("tools:structural-fea-preflight", "fail", str(exc))

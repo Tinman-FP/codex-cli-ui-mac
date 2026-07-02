@@ -1321,7 +1321,7 @@ function renderMessageText(container, message) {
   container.textContent = text;
 }
 
-const LOCAL_PATH_INLINE_PATTERN = /(\/(?:Users|Applications|Volumes|private\/tmp|tmp|var\/folders)\/[^`"'<>]*?\.(?:py|scad|stl|step|stp|f3d|f3z|json|md|cfg|ini|txt|gcode|3mf|pdf|png|jpg|jpeg|csv|log|sh|command|cpp|cxx|cc|c|h|hpp|js|html|css|yaml|yml|toml|plist))(?=[$\s\]\),.;:]|$)|(\/(?:Users|Applications|Volumes|private\/tmp|tmp|var\/folders)\/[^\s`"'<>),;]+)/g;
+const LOCAL_PATH_INLINE_PATTERN = /(\/(?:Users|Applications|Volumes|private\/tmp|tmp|var\/folders)\/[^`"'<>]*?\.(?:py|scad|stl|step|stp|f3d|f3z|json|md|cfg|ini|txt|gcode|3mf|pdf|png|jpg|jpeg|csv|log|sh|command|cpp|cxx|cc|c|h|hpp|js|html|css|yaml|yml|toml|plist|inp|msh|dat|frd|geo))(?=[$\s\]\),.;:]|$)|(\/(?:Users|Applications|Volumes|private\/tmp|tmp|var\/folders)\/[^\s`"'<>),;]+)/g;
 
 function looksLikeLocalPath(value) {
   return /^\/(?:Users|Applications|Volumes|private\/tmp|tmp|var\/folders)\//.test(String(value || "").trim());
