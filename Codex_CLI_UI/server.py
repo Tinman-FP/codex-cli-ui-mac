@@ -1050,14 +1050,18 @@ model_warmup_runtime = {"running": False}
 model_warmup_lock = threading.Lock()
 ASSISTANT_STYLE_RULES = [
     "The user's preferred name is Tinman. Use Tinman naturally, especially when greeting, acknowledging, or clarifying.",
+    "Sound like a capable teammate, not a diagnostic console. A brief natural acknowledgement is good; then get to the useful answer.",
     "Stay practical and specific; mention files, commands, and outcomes when they matter.",
     "When the user is asking for help, avoid cold disclaimers and generic helpdesk phrasing.",
+    "Do not lead final answers with raw tool receipts, staged-file lists, or internal process notes. Lead with what was done or the answer Tinman needs.",
+    "Translate technical work into plain language before details: what changed, why it matters, what to click/open, and what to check next.",
     "If you cannot do something, say exactly what blocked it and what would unblock it.",
     "If a tool, file load, shell command, API call, or local runtime fails, do not stop at the raw error. Retry or pivot when possible; otherwise say what failed, what was not completed, what you did or did not change, and the next concrete recovery step.",
     "For direct questions, the first sentence must be the answer or action. Use the exact plain-language shape: `Use/do/pick X.` `This is why:` with the core reason. `You should also consider:` with one or two practical caveats. Do not use Markdown bold labels for those parts.",
     "When Tinman asks for the best option, make a clear pick before listing alternatives. Do not start with a broad survey unless he asks for comparison or research.",
     "For direct advice, do not use Markdown headings or tables unless Tinman specifically asks for a comparison, report, or research table.",
     "This UI renders plain text, so avoid Markdown bold/heading markers. Use backticks for paths, commands, and exact values.",
+    "When you create files, put each important absolute path on its own line or in backticks so the UI can make it clickable.",
     "At the start of each run, quietly review the private startup inventory for machines, SSH aliases, and Mac resources. Use it when relevant; do not recite the whole inventory unless Tinman asks.",
     "Never reveal or request raw SSH passwords in chat. Use SSH keys, SSH config aliases, or macOS Keychain references.",
     "Do not reveal hidden chain-of-thought. Share only useful summaries, progress, and conclusions.",
@@ -7373,11 +7377,11 @@ def format_cad_artifact_result_answer(result, recovered_from_error="", web_evide
         )
 
     dim = result.get("dimensions") or {}
-    preface = "I staged a first-pass CPAP cooling duct CAD package."
+    preface = "I made a first-pass CPAP cooling duct CAD package for you, Tinman. The useful files are below, and the UI should let you click each path to reveal it."
     if recovered_from_error:
         preface = (
-            "The local model failed, so I used the CAD artifact tool instead of stopping at a runtime error. "
-            "I staged a first-pass CPAP cooling duct CAD package."
+            "The local model failed, so I pivoted instead of stopping there. "
+            "I made a first-pass CPAP cooling duct CAD package for you, Tinman. The useful files are below, and the UI should let you click each path to reveal it."
         )
     flow_low = dim.get("flowLowCfm", 12.0)
     flow_high = dim.get("flowHighCfm", 15.0)
@@ -7394,19 +7398,19 @@ def format_cad_artifact_result_answer(result, recovered_from_error="", web_evide
             preface,
             "\n".join(
                 [
-                    f"- Fusion 360 script: `{result.get('fusionScriptPath')}`",
-                    f"- OpenSCAD model: `{result.get('openScadPath')}`",
-                    f"- Design README: `{result.get('readmePath')}`",
+                    f"Open this first in Fusion 360: `{result.get('fusionScriptPath')}`",
+                    f"Editable OpenSCAD backup: `{result.get('openScadPath')}`",
+                    f"Design notes and assumptions: `{result.get('readmePath')}`",
                 ]
             ),
             (
-                "Design decision: use a short swept front plenum fed by the aft 18 mm CPAP inlet, then split into two balanced "
+                "Plain-English design: this uses a short swept front plenum fed by the aft 18 mm CPAP inlet, then splits into two balanced "
                 f"{outlet_d:.0f} mm ID outlet paths near X +/-{outlet_x:.0f} mm. I am keeping the duct inside the 50 mm width and using "
                 f"the available {front:.0f} mm front envelope instead of wrapping around the sides or back, because your hard side/back clearance is zero. "
                 "The outlets are aimed toward the nozzle zone rather than straight down so the flow hits the fresh bead and nearby overhangs without blasting the heater block."
             ),
             (
-                "Airflow sizing: "
+                "Why the sizing makes sense: "
                 f"{flow_low:.0f}-{flow_high:.0f} CFM is about {metrics['flowLowLs']:.1f}-{metrics['flowHighLs']:.1f} L/s. "
                 f"The {inlet:.0f} mm inlet area is about {metrics['inletAreaMm2']:.0f} mm2, giving an ideal inlet velocity of "
                 f"{metrics['inletVelocityLow']:.0f}-{metrics['inletVelocityHigh']:.0f} m/s before losses. "
@@ -9925,6 +9929,17 @@ def package_health_report():
         target = APP_DIR / path
         add(f"file:{path}", "pass" if target.exists() else "fail", str(target))
 
+    try:
+        resolved = normalize_local_open_path(f"{APP_DIR / 'server.py'}:12")
+        ok = resolved == (APP_DIR / "server.py").resolve()
+        add(
+            "ui:clickable-local-paths",
+            "pass" if ok else "fail",
+            "absolute local paths can resolve to Finder-reveal targets",
+        )
+    except Exception as exc:
+        add("ui:clickable-local-paths", "fail", str(exc))
+
     py_compile = subprocess.run(
         ["/usr/bin/python3", "-m", "py_compile", str(APP_DIR / "server.py")],
         stdout=subprocess.PIPE,
@@ -10072,8 +10087,8 @@ def package_health_report():
         ]
         recovery = cad_artifact_recovery_answer(cad_messages, error_text="Load failed")
         ok = (
-            "Fusion 360 script:" in recovery
-            and "OpenSCAD model:" in recovery
+            "Open this first in Fusion 360:" in recovery
+            and "Editable OpenSCAD backup:" in recovery
             and "local model failed" in recovery.lower()
             and "Recovery plan:" not in recovery
             and "Moonraker" not in recovery
@@ -10103,8 +10118,8 @@ def package_health_report():
             brief = format_cad_artifact_result_answer(artifact)
             notes = cad_artifact_working_notes(artifact)
             ok = (
-                "Design decision:" in brief
-                and "Airflow sizing:" in brief
+                "Plain-English design:" in brief
+                and "Why the sizing makes sense:" in brief
                 and "Material cooling plan:" in brief
                 and "CFD/validation plan:" in brief
                 and "outlet/inlet area ratio" in brief
@@ -10694,6 +10709,45 @@ def normalize_direct_answer_shape(messages, route, text):
         answer = answer.rstrip() + f"\n\nYou should also consider: {caveat}"
 
     return answer.strip()
+
+
+def normalize_local_open_path(value):
+    raw = urllib.parse.unquote(str(value or "").strip().strip("`'\""))
+    if raw.startswith("file://"):
+        raw = urllib.parse.urlparse(raw).path
+    if not raw:
+        raise ValueError("No local path was provided.")
+    candidate = Path(raw).expanduser()
+    if not candidate.exists():
+        line_match = re.match(r"^(.+?):\d+(?::\d+)?$", raw)
+        if line_match:
+            candidate = Path(line_match.group(1)).expanduser()
+    if not candidate.is_absolute():
+        raise ValueError("Only absolute local paths can be opened.")
+    if not candidate.exists():
+        raise FileNotFoundError(f"Path does not exist: {raw}")
+    return candidate.resolve()
+
+
+def open_local_path(path_value, mode="reveal"):
+    path = normalize_local_open_path(path_value)
+    mode = safe_choice(mode, {"reveal", "open"}, "reveal")
+    if mode == "open" or path.is_dir():
+        args = ["/usr/bin/open", str(path)]
+        action = "open"
+    else:
+        args = ["/usr/bin/open", "-R", str(path)]
+        action = "reveal"
+    proc = subprocess.run(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=8,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError((proc.stderr or proc.stdout or "open command failed").strip())
+    return {"ok": True, "path": str(path), "action": action}
 
 
 def emit_assistant_answer(handler, messages, route, admin_topic, text, normalize=True):
@@ -11559,6 +11613,20 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 return
             result = quality_gate(payload)
             self.send_json(result)
+            return
+
+        if parsed.path == "/api/files/open":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self.send_json({"ok": False, "error": "Invalid JSON"}, status=400)
+                return
+            try:
+                result = open_local_path(payload.get("path"), mode=payload.get("mode") or "reveal")
+                self.send_json(result)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
             return
 
         if parsed.path == "/api/tools/install-free-tool":

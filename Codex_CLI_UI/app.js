@@ -1098,31 +1098,12 @@ function renderMessages() {
       body.appendChild(topic);
     }
 
-    if (message.role === "assistant" && Array.isArray(message.thoughts) && message.thoughts.length) {
-      const thoughts = document.createElement("details");
-      thoughts.className = "thoughts-card";
-      thoughts.open = Boolean(message.running);
-      const thoughtsTitle = document.createElement("div");
-      thoughtsTitle.className = "thoughts-title";
-      thoughtsTitle.textContent = message.running
-        ? "Working notes"
-        : `Worked through ${message.thoughts.length} step${message.thoughts.length === 1 ? "" : "s"}`;
-      const summary = document.createElement("summary");
-      summary.appendChild(thoughtsTitle);
-      thoughts.appendChild(summary);
-      message.thoughts.slice(-8).forEach((thought) => {
-        const item = document.createElement("div");
-        item.className = "thought-item";
-        item.textContent = thought;
-        thoughts.appendChild(item);
-      });
-      body.appendChild(thoughts);
-    }
-
     const answer = document.createElement("div");
     answer.className = "answer-text";
     renderMessageText(answer, message);
     body.appendChild(answer);
+    const thoughts = buildThoughtsCard(message);
+    if (thoughts) body.appendChild(thoughts);
     if (message.role === "assistant" && !message.running && String(message.text || "").trim()) {
       body.appendChild(buildFeedbackActions(message));
     }
@@ -1132,6 +1113,30 @@ function renderMessages() {
 
   if (touchedIds) saveState();
   els.conversation.scrollTop = els.conversation.scrollHeight;
+}
+
+function buildThoughtsCard(message) {
+  if (message.role !== "assistant" || !Array.isArray(message.thoughts) || !message.thoughts.length) {
+    return null;
+  }
+  const thoughts = document.createElement("details");
+  thoughts.className = "thoughts-card";
+  thoughts.open = Boolean(message.running);
+  const thoughtsTitle = document.createElement("div");
+  thoughtsTitle.className = "thoughts-title";
+  thoughtsTitle.textContent = message.running
+    ? "What I’m checking"
+    : `Work receipts · ${message.thoughts.length} step${message.thoughts.length === 1 ? "" : "s"}`;
+  const summary = document.createElement("summary");
+  summary.appendChild(thoughtsTitle);
+  thoughts.appendChild(summary);
+  message.thoughts.slice(-8).forEach((thought) => {
+    const item = document.createElement("div");
+    item.className = "thought-item";
+    item.textContent = thought;
+    thoughts.appendChild(item);
+  });
+  return thoughts;
 }
 
 function buildFeedbackActions(message) {
@@ -1178,6 +1183,53 @@ function renderMessageText(container, message) {
     return;
   }
   container.textContent = text;
+}
+
+const LOCAL_PATH_INLINE_PATTERN = /(\/(?:Users|Applications|Volumes|private\/tmp|tmp|var\/folders)\/[^`"'<>]*?\.(?:py|scad|stl|step|stp|f3d|f3z|json|md|cfg|ini|txt|gcode|3mf|pdf|png|jpg|jpeg|csv|log|sh|command|cpp|cxx|cc|c|h|hpp|js|html|css|yaml|yml|toml|plist))(?=[$\s\]\),.;:]|$)|(\/(?:Users|Applications|Volumes|private\/tmp|tmp|var\/folders)\/[^\s`"'<>),;]+)/g;
+
+function looksLikeLocalPath(value) {
+  return /^\/(?:Users|Applications|Volumes|private\/tmp|tmp|var\/folders)\//.test(String(value || "").trim());
+}
+
+function cleanLocalPathLabel(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .replace(/[),.;:]+$/g, "");
+}
+
+function buildLocalPathLink(path, label, codeStyle = false) {
+  const clean = cleanLocalPathLabel(path);
+  const anchor = document.createElement("a");
+  anchor.href = "#";
+  anchor.className = codeStyle ? "local-file-link code-link" : "local-file-link";
+  anchor.dataset.localPath = clean;
+  anchor.title = "Reveal this local file in Finder";
+  if (codeStyle) {
+    const code = document.createElement("code");
+    code.textContent = label || clean;
+    anchor.appendChild(code);
+  } else {
+    anchor.textContent = label || clean;
+  }
+  return anchor;
+}
+
+function appendTextWithLocalPaths(parent, text) {
+  const source = String(text || "");
+  let lastIndex = 0;
+  for (const match of source.matchAll(LOCAL_PATH_INLINE_PATTERN)) {
+    const raw = match[0];
+    const path = cleanLocalPathLabel(raw);
+    if (match.index > lastIndex) {
+      parent.appendChild(document.createTextNode(source.slice(lastIndex, match.index)));
+    }
+    parent.appendChild(buildLocalPathLink(path, raw));
+    lastIndex = match.index + raw.length;
+  }
+  if (lastIndex < source.length) {
+    parent.appendChild(document.createTextNode(source.slice(lastIndex)));
+  }
 }
 
 function renderMarkdown(container, text) {
@@ -1294,39 +1346,48 @@ function renderMarkdown(container, text) {
 }
 
 function appendInlineMarkdown(parent, text) {
-  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^)\s]+(?:\s+"[^"]*")?\))/g;
+  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\((?:https?:\/\/[^)\s]+|\/[^)]+)(?:\s+"[^"]*")?\))/g;
   let lastIndex = 0;
   const source = String(text || "");
   for (const match of source.matchAll(pattern)) {
     if (match.index > lastIndex) {
-      parent.appendChild(document.createTextNode(source.slice(lastIndex, match.index)));
+      appendTextWithLocalPaths(parent, source.slice(lastIndex, match.index));
     }
     const token = match[0];
     if (token.startsWith("`")) {
-      const code = document.createElement("code");
-      code.textContent = token.slice(1, -1);
-      parent.appendChild(code);
+      const codeText = token.slice(1, -1);
+      if (looksLikeLocalPath(codeText)) {
+        parent.appendChild(buildLocalPathLink(codeText, codeText, true));
+      } else {
+        const code = document.createElement("code");
+        code.textContent = codeText;
+        parent.appendChild(code);
+      }
     } else if (token.startsWith("**")) {
       const strong = document.createElement("strong");
       strong.textContent = token.slice(2, -2);
       parent.appendChild(strong);
     } else {
-      const link = token.match(/^\[([^\]]+)\]\((https?:\/\/[^)\s]+)(?:\s+"[^"]*")?\)$/);
+      const link = token.match(/^\[([^\]]+)\]\(((?:https?:\/\/[^)\s]+|\/[^)]+))(?:\s+"[^"]*")?\)$/);
       if (link) {
-        const anchor = document.createElement("a");
-        anchor.href = link[2];
-        anchor.target = "_blank";
-        anchor.rel = "noopener noreferrer";
-        anchor.textContent = link[1];
-        parent.appendChild(anchor);
+        if (looksLikeLocalPath(link[2])) {
+          parent.appendChild(buildLocalPathLink(link[2], link[1]));
+        } else {
+          const anchor = document.createElement("a");
+          anchor.href = link[2];
+          anchor.target = "_blank";
+          anchor.rel = "noopener noreferrer";
+          anchor.textContent = link[1];
+          parent.appendChild(anchor);
+        }
       } else {
-        parent.appendChild(document.createTextNode(token));
+        appendTextWithLocalPaths(parent, token);
       }
     }
     lastIndex = match.index + token.length;
   }
   if (lastIndex < source.length) {
-    parent.appendChild(document.createTextNode(source.slice(lastIndex)));
+    appendTextWithLocalPaths(parent, source.slice(lastIndex));
   }
 }
 
@@ -1642,6 +1703,27 @@ async function updateSelfPatchItem(id, action) {
     renderAdmin();
   } catch (error) {
     appendLog("warning", `Self-patch update failed: ${error.message}`);
+  }
+}
+
+async function openLocalPath(path) {
+  const clean = cleanLocalPathLabel(path);
+  if (!clean) return;
+  try {
+    const response = await fetch("/api/files/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: clean, mode: "reveal" }),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || `open ${response.status}`);
+    els.runState.textContent = result.action === "open" ? "Opened" : "Revealed";
+    els.runState.className = "run-state ok";
+    appendLog("event", `Opened local path ${clean}`);
+  } catch (error) {
+    els.runState.textContent = "Open failed";
+    els.runState.className = "run-state error";
+    appendLog("warning", `Could not open local path: ${error.message}`);
   }
 }
 
@@ -2381,6 +2463,24 @@ async function recoverRunFailure(thread, pending, error) {
   }
 }
 
+function workingIntroForPrompt(text, attachments = []) {
+  const lower = String(text || "").toLowerCase();
+  const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
+  if (hasAttachments) {
+    return `I’m on it, Tinman. I’ll inspect the attachment${attachments.length === 1 ? "" : "s"}, use the right tools, and bring back the useful result in plain language.`;
+  }
+  if (lower.includes("search") || lower.includes("find") || lower.includes("compare")) {
+    return "I’m on it, Tinman. I’ll check the evidence first, make a clear pick if there is one, and keep the answer practical.";
+  }
+  if (lower.includes("create") || lower.includes("make") || lower.includes("design") || lower.includes("write")) {
+    return "I’m on it, Tinman. I’ll build the useful thing, verify it where I can, and make the output easy to open.";
+  }
+  if (lower.includes("fix") || lower.includes("debug") || lower.includes("diagnose")) {
+    return "I’m on it, Tinman. I’ll trace the real blocker, try the safe recovery path, and explain the fix plainly.";
+  }
+  return "I’m on it, Tinman. I’ll check the right path and bring back the answer in plain English.";
+}
+
 async function sendPrompt() {
   const thread = currentThread();
   const text = els.promptInput.value.trim();
@@ -2407,7 +2507,13 @@ async function sendPrompt() {
   render();
   setRunning(true);
 
-  const pending = { id: crypto.randomUUID(), role: "assistant", text: "", running: true, thoughts: [] };
+  const pending = {
+    id: crypto.randomUUID(),
+    role: "assistant",
+    text: workingIntroForPrompt(text, attachments),
+    running: true,
+    thoughts: [],
+  };
   thread.messages.push(pending);
   renderMessages();
 
@@ -3071,6 +3177,12 @@ els.copyButton.addEventListener("click", async () => {
 });
 
 els.conversation.addEventListener("click", (event) => {
+  const localPathLink = event.target.closest("[data-local-path]");
+  if (localPathLink) {
+    event.preventDefault();
+    openLocalPath(localPathLink.dataset.localPath);
+    return;
+  }
   const button = event.target.closest("[data-feedback-id]");
   if (!button || activeController) return;
   sendMessageFeedback(button.dataset.feedbackId, button.dataset.feedbackRating);
