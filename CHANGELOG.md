@@ -1,5 +1,13 @@
 # Changelog
 
+## v2026.07.03
+
+- Adds the Golden Test Generator so Improvement Lab items become saved runnable regression tests.
+- Records Test Bench pass/fail history in local `data/golden_test_results.json`.
+- Feeds failed golden tests back into the Improvement Lab as high-priority regression items.
+- Shows saved golden-test and failing-test counts in the Admin UI.
+- Keeps public package defaults generic while preserving local-only runtime data.
+
 ## v2026.07.02
 
 - Adds Manager, Coder, Review, Local Research, and Cloud Research mode wiring in the UI runtime.

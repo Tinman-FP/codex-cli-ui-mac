@@ -5,7 +5,7 @@ A local Mac UI for the bundled Codex CLI and the local Ollama profiles.
 ## Run
 
 ```bash
-cd ~/Applications/Codex_CLI_UI
+cd "$HOME/Applications/Codex_CLI_UI"
 python3 server.py
 ```
 
@@ -26,7 +26,7 @@ The standalone app is a native AppKit/WebKit wrapper. It opens Codex CLI UI in i
 ## Native App Build
 
 ```bash
-cd ~/Applications/Codex_CLI_UI
+cd "$HOME/Applications/Codex_CLI_UI"
 mkdir -p build
 clang -fobjc-arc -framework Cocoa -framework WebKit native/CodexCLIUI.m -o build/CodexCLIUI
 ```
@@ -60,7 +60,8 @@ The server binds to `127.0.0.1` by default and streams `codex exec --json` outpu
 - `Friendly` can be set to `Focused`, `Warm`, or `High`; `Humor` can be set to `Off`, `Light`, or `Playful`. The server keeps humor out of safety-critical, legal, medical, financial, printer-control, password, and precision troubleshooting answers.
 - `Manager` Balanced/Full now runs a local Quality Coach pass after review/polish. The rubric favors direct answers, clear picks, `This is why:`, practical caveats, source grounding for current facts, and clean formatting.
 - Finished assistant replies include local `Good` and `Fix this` feedback actions. Feedback is stored in `data/quality_feedback.jsonl` and reused as project-specific answer-quality lessons.
-- `Fix this` feedback and capability gaps now flow into the Admin `Improvement Lab`, where they can be reviewed, archived, or promoted into regression-test candidates.
+- `Fix this` feedback and capability gaps now flow into the Admin `Improvement Lab`, where they can be reviewed, archived, or promoted into saved golden regression tests.
+- The Test Bench records pass/fail history in `data/golden_test_results.json`; failed golden tests automatically create high-priority Improvement Lab items so weak responses become repeatable fixes.
 - Tool/run failures now have a recovery path. If the local worker hits a load failure or returns no final answer, the UI/server produce a useful recovery answer that says what failed, what was not confirmed, and the next concrete fallback instead of ending with raw `Run failed` text.
 - The Tool Recovery Engine classifies failures such as missing commands, missing Git remotes, disabled web paths, Klipper config discovery gaps, local load failures, and permission boundaries, then chooses a free/safe recovery path before retry guidance.
 - The capability manager lets local Codex notice missing free tools, inspect an allowlisted installer catalog, check available storage, install small/free tools through Homebrew, then retry the job. It asks before paid, unknown, large, or low-storage downloads.
@@ -69,7 +70,7 @@ The server binds to `127.0.0.1` by default and streams `codex exec --json` outpu
 - The self-learning layer stores compact durable lessons, procedures, formulas, local paths, and source pointers while rejecting volatile facts such as current prices, latest specs, live printer status, news, schedules, and secrets.
 - The right rail includes a live `Model Health` graph for Ollama, model stack, Manager pass timing, memory, disk, load, and Qidi reachability.
 - Active runs show concise `Working notes` in the assistant message while Codex is thinking and using tools.
-- The `Admin` screen includes topic cleanup, stable knowledge Promote/Delete controls, the Improvement Lab, model warmup, performance benchmark runs, and a package health check.
+- The `Admin` screen includes topic cleanup, stable knowledge Promote/Delete controls, the Improvement Lab, saved golden-test counts, model warmup, performance benchmark runs, and a package health check.
 
 Terminal shortcuts:
 
@@ -81,7 +82,7 @@ codex-careful
 ## Import Codex History
 
 ```bash
-cd ~/Applications/Codex_CLI_UI
+cd "$HOME/Applications/Codex_CLI_UI"
 python3 import_codex_history.py
 ```
 
@@ -158,5 +159,5 @@ curl -X POST http://127.0.0.1:8765/api/tools/recover \
 ```
 
 ```bash
-~/Applications/Codex_CLI_UI/.venv/bin/python
+"$HOME/Applications/Codex_CLI_UI/.venv/bin/python"
 ```

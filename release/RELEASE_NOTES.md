@@ -1,13 +1,13 @@
-# Codex CLI UI for Mac v2026.07.02
+# Codex CLI UI for Mac v2026.07.03
 
-Feature release with the local manager workflow, Improvement Lab, and Tool Recovery Engine.
+Feature release focused on making the local agent improve itself through saved regression tests.
 
 ## Download
 
 Download one file:
 
 ```text
-Codex_CLI_UI_Mac_v2026.07.02.dmg
+Codex_CLI_UI_Mac_v2026.07.03.dmg
 ```
 
 Open the DMG and double-click `Install Codex CLI UI.command`.
@@ -19,11 +19,13 @@ Open the DMG and double-click `Install Codex CLI UI.command`.
 - User LaunchAgent installer
 - Fast, Careful, Coder, Review, Manager, and Local Research modes
 - Web Access, access level, reasoning, friendliness, and humor controls
-- Admin Improvement Lab for feedback, tool gaps, and regression-test candidates
+- Admin Improvement Lab for feedback, tool gaps, and regression failures
+- Golden Test Generator that promotes Improvement Lab items into saved runnable prompt tests
+- Test Bench result history with automatic feedback into the Improvement Lab when a test fails
 - Tool Recovery Engine for missing commands, Git remote gaps, disabled web paths, Klipper config discovery, load failures, and permissions
 - Capability manager with free allowlisted tool installs and storage checks
 - Klipper config discovery and macro-staging helpers
-- Package health checker
+- Package health checker with a golden-test-generator check
 - Privacy-safe local data/log folders
 
 ## Requirements

@@ -32,6 +32,8 @@ ADMIN_STATE_PATH = DATA_DIR / "admin_cleanup_state.json"
 ADMIN_KNOWLEDGE_PATH = DATA_DIR / "stable_knowledge.json"
 QUALITY_FEEDBACK_PATH = DATA_DIR / "quality_feedback.jsonl"
 IMPROVEMENT_LAB_PATH = DATA_DIR / "improvement_lab.json"
+GOLDEN_TESTS_PATH = DATA_DIR / "golden_tests.json"
+GOLDEN_TEST_RESULTS_PATH = DATA_DIR / "golden_test_results.json"
 MODEL_WARMUP_STATE_PATH = DATA_DIR / "model_warmup_state.json"
 LOCAL_TOOL_OUTPUT_DIR = DATA_DIR / "generated" / "printer-macros"
 CAPABILITY_TOOL_LOG_PATH = DATA_DIR / "capability_tool_log.jsonl"
@@ -107,6 +109,7 @@ QIDI_CONTEXT_TERMS = {
     "qidi",
     "plus 4",
     "plus4",
+    "private-vpn",
     "tailscale",
     "moonraker",
     "printer",
@@ -624,7 +627,7 @@ GOLDEN_TESTS = [
         "webSearch": "disabled",
         "expectedProjectId": "general",
         "directAnswer": True,
-        "requiredTerms": ["Documents/Codex"],
+        "requiredTerms": [str(HOME_DIR)],
         "forbiddenTerms": ["cannot access", "i do not have"],
         "goal": "Prove local command work returns a final answer.",
     },
@@ -683,6 +686,246 @@ GOLDEN_TESTS = [
         "goal": "Prove web requests use Local Research and cite a source.",
     },
 ]
+
+
+def default_generated_golden_tests():
+    now = time.time()
+    return {
+        "version": 1,
+        "createdAt": now,
+        "updatedAt": now,
+        "tests": [],
+    }
+
+
+def load_generated_golden_tests():
+    data = read_json(GOLDEN_TESTS_PATH, default_generated_golden_tests())
+    if not isinstance(data, dict):
+        data = default_generated_golden_tests()
+    data.setdefault("version", 1)
+    data.setdefault("createdAt", time.time())
+    data.setdefault("updatedAt", time.time())
+    tests = data.get("tests")
+    data["tests"] = tests if isinstance(tests, list) else []
+    return data
+
+
+def save_generated_golden_tests(data):
+    data["updatedAt"] = time.time()
+    write_json_atomic(GOLDEN_TESTS_PATH, data)
+
+
+def normalize_test_terms(terms, limit=8):
+    clean = []
+    for term in terms or []:
+        text = compact(str(term or "").strip().lower(), 80)
+        if text and text not in clean:
+            clean.append(text)
+        if len(clean) >= limit:
+            break
+    return clean
+
+
+def generated_golden_test_from_improvement(item):
+    item = item or {}
+    item_id = item.get("id") or improvement_item_id("improvement-test", item.get("prompt"), item.get("title"))
+    prompt = compact(item.get("prompt") or item.get("title") or item.get("evidence") or "Answer this request with the improved response standard.", 700)
+    evidence = " ".join(str(item.get(key, "")) for key in ("prompt", "title", "evidence", "recommendation", "nextAction")).lower()
+    project_id = str(item.get("projectId") or "general")
+    web_like = any(term in evidence for term in ("web", "search", "source", "price", "current", "latest", "availability", "stock", "today"))
+    tool_like = item.get("type") == "tool-gap" or any(term in evidence for term in ("tool", "command not found", "missing command", "recovery", "load failed", "no final"))
+    printer_like = project_id in {"printer-klipper-ops", "3d-printers"} or any(term in evidence for term in ("printer", "klipper", "moonraker", "marlin", "prusa", "qidi"))
+    direct_like = any(term in prompt.lower() for term in ("what is", "what should", "best", "can you tell", "which", "diagnose", "write", "fix"))
+
+    required = []
+    any_terms = []
+    forbidden = [
+        "run failed",
+        "no final message returned",
+        "no response",
+        "i do not have access",
+        "i don't have access",
+        "you can check it yourself",
+    ]
+
+    if web_like:
+        any_terms.extend(("source", "http", "sources checked"))
+    elif tool_like:
+        required.extend(("recovery", "retry"))
+    elif direct_like:
+        required.extend(("this is why", "you should also consider"))
+
+    if printer_like:
+        any_terms.extend(("printer", "firmware", "klipper", "marlin", "moonraker", "configured endpoint"))
+        forbidden.extend(("octoprint", "pronterface"))
+
+    if "direct" in evidence and not required:
+        required.extend(("this is why", "you should also consider"))
+
+    title = compact(item.get("title") or "Improvement regression", 58)
+    return {
+        "id": f"improvement-{item_id}",
+        "name": title,
+        "group": "Improvement",
+        "prompt": prompt,
+        "profile": "manager",
+        "managerDepth": "fast",
+        "webSearch": "live" if web_like else "disabled",
+        "expectedProjectId": project_id if project_id and project_id != "general" else "",
+        "directAnswer": bool(direct_like and not web_like),
+        "directTerms": [],
+        "requiredTerms": normalize_test_terms(required),
+        "anyTerms": normalize_test_terms(any_terms),
+        "forbiddenTerms": normalize_test_terms(forbidden, limit=12),
+        "requiresSource": bool(web_like),
+        "goal": compact(item.get("recommendation") or item.get("nextAction") or "Prevent this improvement item from regressing.", 260),
+        "source": "improvement-lab",
+        "improvementId": item_id,
+        "createdAt": time.time(),
+    }
+
+
+def upsert_generated_golden_test(test):
+    data = load_generated_golden_tests()
+    tests = data.get("tests", [])
+    existing = next((item for item in tests if item.get("id") == test.get("id")), None)
+    now = time.time()
+    if existing:
+        created = existing.get("createdAt") or test.get("createdAt") or now
+        existing.update(test)
+        existing["createdAt"] = created
+        existing["updatedAt"] = now
+        result = existing
+    else:
+        test["createdAt"] = test.get("createdAt") or now
+        test["updatedAt"] = now
+        tests.append(test)
+        result = test
+    data["tests"] = sorted(tests, key=lambda item: item.get("updatedAt") or item.get("createdAt") or 0, reverse=True)
+    save_generated_golden_tests(data)
+    return result
+
+
+def golden_tests():
+    generated = load_generated_golden_tests().get("tests", [])
+    tests = []
+    seen = set()
+    for test in [*GOLDEN_TESTS, *generated]:
+        test_id = test.get("id")
+        if not test_id or test_id in seen:
+            continue
+        seen.add(test_id)
+        tests.append(test)
+    return tests
+
+
+def default_golden_test_results():
+    return {"version": 1, "updatedAt": 0, "results": {}}
+
+
+def load_golden_test_results():
+    data = read_json(GOLDEN_TEST_RESULTS_PATH, default_golden_test_results())
+    if not isinstance(data, dict):
+        data = default_golden_test_results()
+    data.setdefault("version", 1)
+    data.setdefault("updatedAt", 0)
+    results = data.get("results")
+    data["results"] = results if isinstance(results, dict) else {}
+    return data
+
+
+def golden_test_summary():
+    generated = load_generated_golden_tests().get("tests", [])
+    result_data = load_golden_test_results().get("results", {})
+    failing = sum(1 for item in result_data.values() if item.get("lastStatus") == "fail")
+    passing = sum(1 for item in result_data.values() if item.get("lastStatus") == "pass")
+    return {
+        "path": str(GOLDEN_TESTS_PATH),
+        "resultPath": str(GOLDEN_TEST_RESULTS_PATH),
+        "builtInCount": len(GOLDEN_TESTS),
+        "generatedCount": len(generated),
+        "totalCount": len(golden_tests()),
+        "passingCount": passing,
+        "failingCount": failing,
+        "results": result_data,
+    }
+
+
+def record_golden_test_result(payload):
+    test = payload.get("test") if isinstance(payload.get("test"), dict) else {}
+    result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+    test_id = str(test.get("id") or result.get("id") or "").strip()
+    if not test_id:
+        return {"ok": False, "error": "Missing test id."}
+    status = "pass" if result.get("status") == "pass" else "fail"
+    now = time.time()
+    data = load_golden_test_results()
+    current = data["results"].get(test_id, {})
+    if status == "pass":
+        current["passCount"] = int(current.get("passCount") or 0) + 1
+        current["passStreak"] = int(current.get("passStreak") or 0) + 1
+        current["failStreak"] = 0
+    else:
+        current["failCount"] = int(current.get("failCount") or 0) + 1
+        current["failStreak"] = int(current.get("failStreak") or 0) + 1
+        current["passStreak"] = 0
+    current.update(
+        {
+            "id": test_id,
+            "name": compact(test.get("name") or result.get("name") or test_id, 120),
+            "lastStatus": status,
+            "lastRunAt": now,
+            "lastRoute": result.get("route") or {},
+            "lastFailingChecks": [
+                check.get("label")
+                for check in (result.get("checks") or [])
+                if isinstance(check, dict) and check.get("passed") is False
+            ][:8],
+        }
+    )
+    data["results"][test_id] = current
+    data["updatedAt"] = now
+    write_json_atomic(GOLDEN_TEST_RESULTS_PATH, data)
+
+    improvement = None
+    if status == "fail":
+        failing = ", ".join(current.get("lastFailingChecks") or ["test"])
+        improvement = store_improvement_item(
+            {
+                "id": improvement_item_id("golden-test-failure", test_id, failing),
+                "type": "regression-failure",
+                "severity": "high",
+                "source": "Golden test bench",
+                "projectId": test.get("expectedProjectId") or "codex-cli-ui-local-agent",
+                "project": "Codex CLI UI Local Agent",
+                "title": f"Regression failed: {compact(test.get('name') or test_id, 72)}",
+                "prompt": test.get("prompt") or "",
+                "evidence": f"Failing checks: {failing}",
+                "recommendation": "Fix the routing, answer rubric, tool path, or generated test expectation that caused this regression.",
+                "nextAction": "Rerun the golden test after the fix. If it passes consistently, keep the generated test as a guardrail.",
+            }
+        )
+    return {"ok": True, "summary": current, "improvement": improvement}
+
+
+def golden_test_generator_synthetic_check():
+    item = {
+        "id": "synthetic-improvement",
+        "type": "answer-quality",
+        "title": "Improve direct outdoor filament answer",
+        "prompt": "What is the best filament for an outdoor flag pole holder?",
+        "recommendation": "Answer directly with This is why and You should also consider.",
+        "projectId": "tinmanx-slicer-research",
+    }
+    test = generated_golden_test_from_improvement(item)
+    return bool(
+        test.get("id") == "improvement-synthetic-improvement"
+        and test.get("group") == "Improvement"
+        and "this is why" in test.get("requiredTerms", [])
+        and "run failed" in test.get("forbiddenTerms", [])
+    )
+
+
 BENCHMARK_TESTS = [
     {
         "id": "fast-direct",
@@ -1126,6 +1369,7 @@ def improvement_lab_item_summary(item):
         "reviewedAt": item.get("reviewedAt"),
         "archivedAt": item.get("archivedAt"),
         "promotedTestAt": item.get("promotedTestAt"),
+        "goldenTestId": item.get("goldenTestId"),
     }
 
 
@@ -1266,6 +1510,7 @@ def improvement_lab_summary(limit=40):
     data = load_improvement_lab()
     items = [item for item in data.get("items", []) if isinstance(item, dict)]
     visible = [item for item in items if item.get("status") != "archived"]
+    golden = golden_test_summary()
     visible.sort(
         key=lambda item: (
             improvement_status_rank(item.get("status")),
@@ -1290,6 +1535,8 @@ def improvement_lab_summary(limit=40):
         "fixCount": by_type.get("answer-quality", 0),
         "toolGapCount": by_type.get("tool-gap", 0),
         "testCandidateCount": sum(1 for item in visible if item.get("type") == "answer-quality" and not item.get("promotedTestAt")),
+        "goldenTestCount": golden.get("generatedCount", 0),
+        "goldenFailingCount": golden.get("failingCount", 0),
         "byType": by_type,
         "bySeverity": by_severity,
         "items": [improvement_lab_item_summary(item) for item in visible[:limit]],
@@ -1317,11 +1564,13 @@ def update_improvement_lab_item(action, item_id):
         target.pop("archivedAt", None)
         target["updatedAt"] = now
     elif action in {"promote-test", "promote"}:
+        golden_test = upsert_generated_golden_test(generated_golden_test_from_improvement(target))
         target["status"] = "reviewed"
         target["reviewedAt"] = now
         target["promotedTestAt"] = now
+        target["goldenTestId"] = golden_test.get("id")
         target["updatedAt"] = now
-        target["nextAction"] = "Promoted to a regression-test candidate. Add it to the golden prompts when the expected answer shape is clear."
+        target["nextAction"] = "Promoted to a saved golden test. Rerun the test bench after related answer or tool changes."
     else:
         return {"ok": False, "error": "Unsupported improvement action."}
 
@@ -1335,7 +1584,11 @@ def update_improvement_lab_item(action, item_id):
         ),
     )
     write_json_atomic(IMPROVEMENT_LAB_PATH, data)
-    return {"ok": True, "action": action, "id": item_id, "item": improvement_lab_item_summary(target)}
+    result = {"ok": True, "action": action, "id": item_id, "item": improvement_lab_item_summary(target)}
+    if action in {"promote-test", "promote"}:
+        result["goldenTest"] = golden_test
+        result["goldenTests"] = golden_tests()
+    return result
 
 
 def improvement_lab_synthetic_check():
@@ -1635,7 +1888,7 @@ def is_printer_machine(machine):
     name = str(machine.get("name", "")).lower()
     notes = str(machine.get("notes", "")).lower()
     text = f"{name} {notes}"
-    if any(term in name for term in ("router", "netgear")):
+    if any(term in name for term in ("router", "private-vpn", "netgear")):
         return False
     printer_terms = (
         "qidi",
@@ -1977,7 +2230,7 @@ def format_offline_printer_status(printer, query):
         [
             f"I checked the configured {name} {service} endpoint at `{endpoint}`, and it is offline/unreachable right now.",
             f"This is why: {why}, so I cannot give a trustworthy live reading from stale data.",
-            "You should also consider: confirm the printer is powered on and the VPN/Tailscale route is connected, then ask again and I will re-check it.",
+            "You should also consider: confirm the printer is powered on and the MakersVPN/Tailscale route is connected, then ask again and I will re-check it.",
         ]
     )
 
@@ -2686,6 +2939,7 @@ def admin_summary():
     knowledge = load_stable_knowledge()
     quality = quality_feedback_summary()
     improvement = improvement_lab_summary()
+    golden = golden_test_summary()
     projects = []
     for project_id, project in state.get("projects", {}).items():
         folders = []
@@ -2724,6 +2978,8 @@ def admin_summary():
         "recentQualityFeedback": quality["recent"],
         "improvementLab": improvement,
         "improvementCount": improvement["openCount"],
+        "goldenTestSummary": golden,
+        "goldenTestCount": golden["totalCount"],
         "projectCount": len(projects),
         "knowledgeCount": len(knowledge.get("items", [])),
         "projects": projects,
@@ -3464,11 +3720,7 @@ def build_local_context(messages):
             "- Printer fleet status comes from read-only probes of the private machine inventory.",
             "- Moonraker printers include live state, nozzle, bed, progress, and humidity where the object exists.",
             "- Other printer types currently include link reachability unless credentials/API details are configured.",
-            (
-                f"- Optional Qidi Plus 4 Moonraker endpoint from environment: {QIDI_MOONRAKER_URL}"
-                if QIDI_MOONRAKER_URL
-                else "- No bundled printer endpoint is configured; use `data/private/machines.json` or `QIDI_MOONRAKER_URL` locally."
-            ),
+            f"- Legacy Qidi Plus 4 Moonraker endpoint: {QIDI_MOONRAKER_URL}",
             "- For read-only status questions, use the live printer data below before saying access is unavailable.",
             "- If a known printer is offline in this JSON, say `I checked the configured printer endpoint and it is offline/unreachable`; do not say `I do not have access` or send Tinman to generic OctoPrint/Pronterface steps.",
             "- For writes, uploads, restarts, or movement, verify standby state and ask before taking action.",
@@ -4361,9 +4613,8 @@ def candidate_matches_hint(candidate, hint):
 
 def discover_klipper_config_dirs(hint="", scan=False):
     known = [
-        (str(HOME_DIR / "Downloads" / "ratrig_config"), "home-downloads-ratrig-config"),
-        (str(HOME_DIR / "Documents" / "Codex" / "ratrig_config"), "home-documents-codex-ratrig-config"),
-        (str(HOME_DIR / "Applications" / "Codex_CLI_UI" / "printer-configs"), "installed-printer-configs"),
+        (str(HOME_DIR / "Downloads" / "ratrig_config"), "current-klipper-config-ratrig"),
+        (str(HOME_DIR / "Documents" / "Codex"), "local-codex-workspace"),
     ]
     candidates = []
     seen = set()
@@ -4376,7 +4627,7 @@ def discover_klipper_config_dirs(hint="", scan=False):
     if scan:
         scan_roots = [
             HOME_DIR / "Downloads",
-            HOME_DIR / "Documents",
+            HOME_DIR / "Documents" / "Codex",
             HOME_DIR / "Applications",
         ]
         for root in scan_roots:
@@ -5746,6 +5997,17 @@ def package_health_report():
     except Exception as exc:
         add("analysis:improvement-lab", "fail", str(exc))
 
+    try:
+        golden = golden_test_summary()
+        ok = golden_test_generator_synthetic_check()
+        add(
+            "analysis:golden-test-generator",
+            "pass" if ok else "fail",
+            f"{golden.get('generatedCount', 0)} generated, {golden.get('failingCount', 0)} failing",
+        )
+    except Exception as exc:
+        add("analysis:golden-test-generator", "fail", str(exc))
+
     health = ollama_health()
     add(
         "ollama:service",
@@ -6365,7 +6627,7 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                     "startupSummary": summarize_startup_context(startup_context),
                     "history": history_summary,
                     "admin": admin_summary(),
-                    "goldenTests": GOLDEN_TESTS,
+                    "goldenTests": golden_tests(),
                     "benchmarks": BENCHMARK_TESTS,
                     "modelWarmup": model_warmup_summary(),
                     "localTools": local_tool_catalog(),
@@ -6486,7 +6748,7 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/test-bench":
-            self.send_json({"tests": GOLDEN_TESTS})
+            self.send_json({"tests": golden_tests(), "summary": golden_test_summary()})
             return
 
         if path == "/":
@@ -6611,6 +6873,25 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 str(payload.get("id") or "").strip(),
             )
             self.send_json({**result, "admin": admin_summary(), "improvementLab": improvement_lab_summary()})
+            return
+
+        if parsed.path == "/api/test-bench/result":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self.send_error(400, "Invalid JSON")
+                return
+            result = record_golden_test_result(payload)
+            self.send_json(
+                {
+                    **result,
+                    "testResult": result.get("summary"),
+                    "goldenTestSummary": golden_test_summary(),
+                    "admin": admin_summary(),
+                    "improvementLab": improvement_lab_summary(),
+                }
+            )
             return
 
         if parsed.path == "/api/tools/recover":

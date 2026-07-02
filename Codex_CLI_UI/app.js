@@ -344,6 +344,7 @@ function renderAdmin() {
   const knowledge = admin.knowledge || [];
   const recent = admin.recentTopics || [];
   const improvement = admin.improvementLab || {};
+  const golden = admin.goldenTestSummary || {};
 
   if (els.adminCountText) {
     els.adminCountText.textContent = `${improvement.openCount || admin.knowledgeCount || knowledge.length}`;
@@ -360,6 +361,7 @@ function renderAdmin() {
       ["Stable Notes", `${admin.knowledgeCount || knowledge.length}`],
       ["Quality Lessons", `${admin.qualityFeedbackCount || 0}`],
       ["Improvements", `${improvement.openCount || 0}`],
+      ["Golden Tests", `${golden.totalCount || admin.goldenTestCount || 0}`],
       ["Recent Topics", `${recent.length}`],
     ].forEach(([label, value]) => {
       const item = document.createElement("div");
@@ -499,7 +501,8 @@ function renderImprovementLab(lab) {
       ["Answer Fixes", `${lab.fixCount || 0}`],
       ["Tool Gaps", `${lab.toolGapCount || 0}`],
       ["Test Candidates", `${lab.testCandidateCount || 0}`],
-      ["Reviewed", `${lab.reviewedCount || 0}`],
+      ["Saved Tests", `${lab.goldenTestCount || 0}`],
+      ["Failing", `${lab.goldenFailingCount || 0}`],
     ].forEach(([label, value]) => {
       const item = document.createElement("div");
       item.className = "admin-summary-item";
@@ -543,7 +546,7 @@ function renderImprovementLab(lab) {
     const recommendation = document.createElement("p");
     recommendation.textContent = item.recommendation || item.evidence || "";
     const next = document.createElement("em");
-    next.textContent = item.nextAction || "";
+    next.textContent = item.goldenTestId ? `Golden test: ${item.goldenTestId}` : item.nextAction || "";
     copy.append(meta, title, recommendation);
     if (next.textContent) copy.appendChild(next);
 
@@ -1387,10 +1390,33 @@ async function updateImprovementItem(id, action) {
     if (!response.ok) throw new Error(`improvement ${response.status}`);
     const result = await response.json();
     if (result.admin) config.admin = result.admin;
+    if (result.goldenTests) config.goldenTests = result.goldenTests;
+    if (result.goldenTest) appendLog("status", `Saved golden test: ${result.goldenTest.name || result.goldenTest.id}`);
     if (!result.ok) appendLog("warning", result.error || "Improvement action failed");
     renderAdmin();
   } catch (error) {
     appendLog("warning", `Improvement update failed: ${error.message}`);
+  }
+}
+
+async function recordGoldenTestResult(test, result) {
+  try {
+    const response = await fetch("/api/test-bench/result", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ test, result }),
+    });
+    if (!response.ok) throw new Error(`test result ${response.status}`);
+    const payload = await response.json();
+    if (payload.admin) config.admin = payload.admin;
+    if (payload.goldenTestSummary && config.admin) {
+      config.admin.goldenTestSummary = payload.goldenTestSummary;
+      config.admin.goldenTestCount = payload.goldenTestSummary.totalCount || config.admin.goldenTestCount || 0;
+    }
+    return payload;
+  } catch (error) {
+    appendLog("warning", `Golden test result was not recorded: ${error.message}`);
+    return null;
   }
 }
 
@@ -2145,7 +2171,9 @@ async function runTestBench(tests) {
       };
       renderTestBench();
       const run = await runGoldenTest(test, activeController.signal);
-      testBench.results[test.id] = evaluateGoldenTest(test, run);
+      const result = evaluateGoldenTest(test, run);
+      testBench.results[test.id] = result;
+      await recordGoldenTestResult(test, result);
       renderTestBench();
     }
     els.runState.textContent = "Tests complete";
