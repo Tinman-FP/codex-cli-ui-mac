@@ -4425,6 +4425,25 @@ def disk_free_bytes(path=APP_DIR):
         return 0
 
 
+APP_BUNDLE_COMMAND_PATHS = {
+    "freecad": [
+        "/Applications/FreeCAD.app/Contents/Resources/bin/freecad",
+        "/Applications/FreeCAD.app/Contents/MacOS/FreeCAD",
+    ],
+    "FreeCADCmd": [
+        "/Applications/FreeCAD.app/Contents/Resources/bin/freecadcmd",
+        "/Applications/FreeCAD.app/Contents/Resources/bin/FreeCADCmd",
+    ],
+    "freecadcmd": [
+        "/Applications/FreeCAD.app/Contents/Resources/bin/freecadcmd",
+        "/Applications/FreeCAD.app/Contents/Resources/bin/FreeCADCmd",
+    ],
+    "gmsh": [
+        "/Applications/FreeCAD.app/Contents/Resources/bin/gmsh",
+    ],
+}
+
+
 def command_path(command):
     path = shutil.which(command, path=PATH_FOR_CODEX)
     if path:
@@ -4432,6 +4451,10 @@ def command_path(command):
     bundled = Path("/Applications/Codex.app/Contents/Resources/cua_node/bin") / command
     if bundled.exists() and os.access(bundled, os.X_OK):
         return str(bundled)
+    for candidate in APP_BUNDLE_COMMAND_PATHS.get(command, []):
+        candidate_path = Path(candidate)
+        if candidate_path.exists() and os.access(candidate_path, os.X_OK):
+            return str(candidate_path)
     return ""
 
 
@@ -5221,9 +5244,9 @@ def local_tool_catalog():
             "stage": "POST /api/tools/cad-artifact",
             "description": "Stage a Fusion 360 Python script, OpenSCAD model, and README for a CAD design request.",
         },
-        "stlCfdDuctPreflight": {
+        "stlCfdDuctDesigner": {
             "run": "automatic on STL + CPAP/part-cooling duct requests",
-            "description": "Find attached or named STL files, inspect mesh geometry, capture clearance/wall constraints, and stage an OpenFOAM-ready CFD preflight before any generic duct template can answer.",
+            "description": "Find attached or named STL files, inspect mesh geometry, infer CPAP ports, generate an editable duct model/STL, and stage OpenFOAM-ready validation files before any generic duct template can answer.",
         },
     }
 
@@ -5242,7 +5265,7 @@ def build_local_tools_context():
             "- For Klipper acceleration/RGB macro staging, call `POST http://127.0.0.1:8765/api/tools/klipper-accel-rgb`.",
             "- These Klipper tools write only local files. Do not upload, restart, or alter a live printer unless idle/standby has been verified through Moonraker.",
             "- For CAD artifact staging, call `POST http://127.0.0.1:8765/api/tools/cad-artifact` with JSON like `{\"prompt\":\"design a CPAP cooling duct for Fusion 360\"}`.",
-            "- For STL-based CPAP/part-cooling duct requests, use the automatic STL/CFD preflight first; do not use the generic CPAP CAD artifact path until the STL is found and inspected.",
+            "- For STL-based CPAP/part-cooling duct requests, use the automatic STL duct designer first. Find the STL, inspect the mesh, infer or ask for ports, generate an editable CAD/STL artifact, and stage CFD validation files before considering a generic CPAP CAD artifact path.",
             "",
         ]
     )
