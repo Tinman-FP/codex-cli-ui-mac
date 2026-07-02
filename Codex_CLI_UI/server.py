@@ -26,7 +26,6 @@ from urllib.parse import unquote, urlparse
 
 
 APP_DIR = Path(__file__).resolve().parent
-HOME_DIR = Path.home()
 DATA_DIR = APP_DIR / "data"
 PRIVATE_DATA_DIR = DATA_DIR / "private"
 MACHINE_INVENTORY_PATH = PRIVATE_DATA_DIR / "machines.json"
@@ -43,6 +42,7 @@ RESPONSE_EXAMPLES_PATH = DATA_DIR / "response_examples.json"
 MODEL_WARMUP_STATE_PATH = DATA_DIR / "model_warmup_state.json"
 LOCAL_TOOL_OUTPUT_DIR = DATA_DIR / "generated" / "printer-macros"
 LOCAL_CAD_OUTPUT_DIR = DATA_DIR / "generated" / "cad"
+LOCAL_AERO_OUTPUT_DIR = DATA_DIR / "generated" / "aero-cfd"
 LOCAL_QUALITY_OUTPUT_DIR = DATA_DIR / "generated" / "quality-gates"
 UPLOAD_DIR = DATA_DIR / "uploads"
 CAPABILITY_TOOL_LOG_PATH = DATA_DIR / "capability_tool_log.jsonl"
@@ -62,7 +62,7 @@ CODEX_BIN = os.environ.get(
     "CODEX_BIN", "/Applications/Codex.app/Contents/Resources/codex"
 )
 DEFAULT_PROFILE = os.environ.get("CODEX_PROFILE", "manager")
-DEFAULT_CWD = os.environ.get("CODEX_CWD", str(HOME_DIR / "Documents" / "Codex"))
+DEFAULT_CWD = os.environ.get("CODEX_CWD", "/Users/williamtinney/Documents/Codex")
 DEFAULT_HOST = os.environ.get("CODEX_UI_HOST", "127.0.0.1")
 DEFAULT_PORT = int(os.environ.get("CODEX_UI_PORT", "8765"))
 DEFAULT_ACCESS_LEVEL = os.environ.get("CODEX_ACCESS_LEVEL", "danger-full-access")
@@ -81,19 +81,19 @@ FREE_ONLY = os.environ.get("CODEX_FREE_ONLY", "1").strip().lower() not in {
     "false",
     "no",
 }
-QIDI_MOONRAKER_URL = os.environ.get("QIDI_MOONRAKER_URL", "")
+QIDI_MOONRAKER_URL = os.environ.get("QIDI_MOONRAKER_URL", "http://192.168.50.145:7125")
 PYTHON_USER_BIN = (
-    HOME_DIR
+    Path.home()
     / "Library"
     / "Python"
     / f"{sys.version_info.major}.{sys.version_info.minor}"
     / "bin"
 )
 PATH_FOR_CODEX = (
-    f"{HOME_DIR}/.local/bin:{PYTHON_USER_BIN}:/usr/local/bin:/opt/homebrew/bin:/Applications/Codex.app/Contents/Resources:"
+    f"/Users/williamtinney/.local/bin:{PYTHON_USER_BIN}:/usr/local/bin:/opt/homebrew/bin:/Applications/Codex.app/Contents/Resources:"
     "/Applications/Codex.app/Contents/Resources/cua_node/bin:"
     "/usr/bin:/bin:/usr/sbin:/sbin:"
-    f"{HOME_DIR}/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin"
+    "/Users/williamtinney/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin"
 )
 ACCESS_LEVELS = {"read-only", "workspace-write", "danger-full-access"}
 REASONING_LEVELS = {"low", "medium", "high"}
@@ -131,7 +131,7 @@ QIDI_CONTEXT_TERMS = {
     "qidi",
     "plus 4",
     "plus4",
-    "private-vpn",
+    "makersvpn",
     "tailscale",
     "moonraker",
     "printer",
@@ -466,6 +466,15 @@ PROJECT_QUERY_HINTS = {
         "duct",
         "cpap",
         "cfd",
+        "aero",
+        "aerodynamic",
+        "airfoil",
+        "drag",
+        "lift",
+        "downforce",
+        "openfoam",
+        "paraview",
+        "vspaero",
         "cooling duct",
         "part cooling",
     ),
@@ -596,12 +605,15 @@ PROJECT_PLAYBOOKS = {
         "triggers": (
             "p51", "fusion 360", "cad", "model", "fuselage", "wing",
             "rudder", "stl", ".step", "step file", "stp", "printable", "3d model",
-            "duct", "cpap", "cfd", "cooling duct", "part cooling", "imported into fusion",
+            "duct", "cpap", "cfd", "aero", "aerodynamic", "airfoil", "drag",
+            "lift", "downforce", "pressure drop", "openfoam", "paraview",
+            "vspaero", "cooling duct", "part cooling", "imported into fusion",
         ),
         "rules": (
             "Keep manufacturability and print orientation in view, not only geometry.",
             "When converting or designing files, verify dimensions and exported artifacts.",
             "For CAD design requests, create a concrete artifact path whenever feasible and state assumptions, dimensions, and import route.",
+            "For aerodynamic or CFD requests, run geometry/toolchain preflight first, stage OpenFOAM-ready files when geometry is available, and never claim solved CFD unless the solver actually ran.",
         ),
     },
     "research-parts-reference": {
@@ -692,7 +704,7 @@ GOLDEN_TESTS = [
         "webSearch": "disabled",
         "expectedProjectId": "general",
         "directAnswer": True,
-        "requiredTerms": [str(HOME_DIR)],
+        "requiredTerms": ["/Users/williamtinney"],
         "forbiddenTerms": ["cannot access", "i do not have"],
         "goal": "Prove local command work returns a final answer.",
     },
@@ -1222,6 +1234,15 @@ FREE_TOOL_MANIFEST = {
         "free": True,
         "autoInstall": True,
     },
+    "gmsh": {
+        "label": "Gmsh",
+        "commands": ["gmsh"],
+        "brew": ["gmsh"],
+        "estimatedBytes": 900 * MIB,
+        "capabilities": ["surface/volume meshing", "CFD/FEA mesh preparation", "geometry pre-processing"],
+        "free": True,
+        "autoInstall": True,
+    },
     "freecad": {
         "label": "FreeCAD",
         "commands": ["freecad", "FreeCADCmd"],
@@ -1230,6 +1251,34 @@ FREE_TOOL_MANIFEST = {
         "capabilities": ["parametric CAD", "STEP/STL export"],
         "free": True,
         "autoInstall": False,
+    },
+    "docker-openfoam": {
+        "label": "Docker/OpenFOAM",
+        "commands": ["docker"],
+        "brew": ["docker"],
+        "estimatedBytes": 600 * MIB,
+        "capabilities": ["OpenFOAM container execution", "surfaceCheck", "snappyHexMesh/simpleFoam runtime when images are present"],
+        "free": True,
+        "autoInstall": False,
+    },
+    "paraview": {
+        "label": "ParaView",
+        "commands": ["paraview"],
+        "brewCask": ["paraview"],
+        "estimatedBytes": 2200 * MIB,
+        "capabilities": ["CFD result visualization", "VTK/OpenFOAM post-processing", "streamlines/slices/pressure and velocity plots"],
+        "free": True,
+        "autoInstall": False,
+    },
+    "python-aero-stack": {
+        "label": "Python Aero/Optimization Stack",
+        "commands": [],
+        "pythonModules": ["aerosandbox", "openmdao", "neuralfoil"],
+        "pip": ["aerosandbox", "openmdao"],
+        "estimatedBytes": 450 * MIB,
+        "capabilities": ["airfoil estimates", "aerodynamic sizing calculations", "engineering optimization", "design trade studies"],
+        "free": True,
+        "autoInstall": True,
     },
 }
 COMMAND_TO_FREE_TOOL = {
@@ -2081,7 +2130,7 @@ def is_printer_machine(machine):
     name = str(machine.get("name", "")).lower()
     notes = str(machine.get("notes", "")).lower()
     text = f"{name} {notes}"
-    if any(term in name for term in ("router", "private-vpn", "netgear")):
+    if any(term in name for term in ("router", "makersvpn", "netgear")):
         return False
     printer_terms = (
         "qidi",
@@ -4706,6 +4755,22 @@ APP_BUNDLE_COMMAND_PATHS = {
     "gmsh": [
         "/Applications/FreeCAD.app/Contents/Resources/bin/gmsh",
     ],
+    "paraview": [
+        "/Applications/ParaView.app/Contents/MacOS/paraview",
+        "/Applications/ParaView-*.app/Contents/MacOS/paraview",
+    ],
+    "pvpython": [
+        "/Applications/ParaView.app/Contents/bin/pvpython",
+        "/Applications/ParaView-*.app/Contents/bin/pvpython",
+    ],
+    "vsp": [
+        "/Applications/OpenVSP.app/Contents/MacOS/vsp",
+        "/Applications/OpenVSP-*.app/Contents/MacOS/vsp",
+    ],
+    "vspaero": [
+        "/Applications/OpenVSP.app/Contents/Resources/vspaero",
+        "/Applications/OpenVSP-*.app/Contents/Resources/vspaero",
+    ],
 }
 
 
@@ -4717,9 +4782,9 @@ def command_path(command):
     if bundled.exists() and os.access(bundled, os.X_OK):
         return str(bundled)
     for candidate in APP_BUNDLE_COMMAND_PATHS.get(command, []):
-        candidate_path = Path(candidate)
-        if candidate_path.exists() and os.access(candidate_path, os.X_OK):
-            return str(candidate_path)
+        for candidate_path in sorted(Path("/").glob(candidate.lstrip("/")) if "*" in candidate else [Path(candidate)]):
+            if candidate_path.exists() and os.access(candidate_path, os.X_OK):
+                return str(candidate_path)
     return ""
 
 
@@ -4743,25 +4808,36 @@ def resolve_free_tool_id(tool_or_command):
 def tool_installed(manifest):
     commands = manifest.get("commands") or []
     paths = {command: command_path(command) for command in commands}
-    return bool(commands) and all(paths.values()), paths
+    modules = {
+        module: python_module_available(module)
+        for module in manifest.get("pythonModules", [])
+    }
+    command_ok = (not commands) or all(paths.values())
+    module_ok = (not modules) or all(modules.values())
+    installed = bool(commands or modules) and command_ok and module_ok
+    return installed, paths, modules
 
 
 def capability_tool_catalog():
     free_bytes = disk_free_bytes(APP_DIR)
     tools = []
     for tool_id, manifest in FREE_TOOL_MANIFEST.items():
-        installed, paths = tool_installed(manifest)
+        installed, paths, modules = tool_installed(manifest)
         estimated = int(manifest.get("estimatedBytes") or 0)
         tools.append(
             {
                 "id": tool_id,
                 "label": manifest.get("label", tool_id),
                 "commands": manifest.get("commands", []),
+                "pythonModules": manifest.get("pythonModules", []),
                 "installed": installed,
                 "paths": paths,
+                "modules": modules,
                 "free": bool(manifest.get("free")),
-                "installer": "brew" if manifest.get("brew") else "",
+                "installer": "brew-cask" if manifest.get("brewCask") else "brew" if manifest.get("brew") else "pip-user" if manifest.get("pip") else "",
                 "brew": manifest.get("brew", []),
+                "brewCask": manifest.get("brewCask", []),
+                "pip": manifest.get("pip", []),
                 "estimatedBytes": estimated,
                 "estimatedSize": human_bytes(estimated),
                 "capabilities": manifest.get("capabilities", []),
@@ -4796,19 +4872,24 @@ def evaluate_free_tool_install(tool_or_command, approved=False):
             "askTinman": "I need a free install path or approval for an alternate tool before downloading anything.",
         }
     manifest = FREE_TOOL_MANIFEST[tool_id]
-    installed, paths = tool_installed(manifest)
+    installed, paths, modules = tool_installed(manifest)
     estimated = int(manifest.get("estimatedBytes") or 0)
     free_bytes = disk_free_bytes(APP_DIR)
     brew = shutil.which("brew", path=PATH_FOR_CODEX)
+    python = shutil.which("python3", path=PATH_FOR_CODEX) or sys.executable
     result = {
         "ok": True,
         "tool": tool_id,
         "label": manifest.get("label", tool_id),
         "commands": manifest.get("commands", []),
+        "pythonModules": manifest.get("pythonModules", []),
         "paths": paths,
+        "modules": modules,
         "installed": installed,
         "free": bool(manifest.get("free")),
         "brew": manifest.get("brew", []),
+        "brewCask": manifest.get("brewCask", []),
+        "pip": manifest.get("pip", []),
         "estimatedBytes": estimated,
         "estimatedSize": human_bytes(estimated),
         "freeBytes": free_bytes,
@@ -4837,7 +4918,16 @@ def evaluate_free_tool_install(tool_or_command, approved=False):
             }
         )
         return result
-    if not brew or not manifest.get("brew"):
+    if manifest.get("pip") and not python:
+        result.update(
+            {
+                "needsApproval": True,
+                "reason": "No working Python installer is available for this allowlisted tool.",
+                "askTinman": "I found the free Python tool, but I need a working python3 path before I can add it.",
+            }
+        )
+        return result
+    if (manifest.get("brew") or manifest.get("brewCask")) and not brew:
         result.update(
             {
                 "needsApproval": True,
@@ -4882,7 +4972,13 @@ def evaluate_free_tool_install(tool_or_command, approved=False):
     result.update(
         {
             "canInstall": True,
-            "installCommand": " ".join([brew, "install", *manifest.get("brew", [])]),
+            "installCommand": " ".join(
+                [brew, "install", "--cask", *manifest.get("brewCask", [])]
+                if manifest.get("brewCask")
+                else [brew, "install", *manifest.get("brew", [])]
+                if manifest.get("brew")
+                else [python, "-m", "pip", "install", "--user", *manifest.get("pip", []), "--upgrade-strategy", "only-if-needed"]
+            ),
             "reason": "Free allowlisted tool and storage check passed.",
         }
     )
@@ -4896,9 +4992,14 @@ def install_free_tool(tool_or_command, approved=False, dry_run=False, reason="")
         append_capability_log({"action": "install-evaluate", **decision})
         record_improvement_from_capability_result(decision)
         return decision
-    brew = shutil.which("brew", path=PATH_FOR_CODEX)
     manifest = FREE_TOOL_MANIFEST[decision["tool"]]
-    cmd = [brew, "install", *manifest.get("brew", [])]
+    if manifest.get("brewCask"):
+        cmd = [shutil.which("brew", path=PATH_FOR_CODEX), "install", "--cask", *manifest.get("brewCask", [])]
+    elif manifest.get("brew"):
+        cmd = [shutil.which("brew", path=PATH_FOR_CODEX), "install", *manifest.get("brew", [])]
+    else:
+        python = shutil.which("python3", path=PATH_FOR_CODEX) or sys.executable
+        cmd = [python, "-m", "pip", "install", "--user", *manifest.get("pip", []), "--upgrade-strategy", "only-if-needed"]
     started = time.time()
     try:
         proc = subprocess.run(
@@ -4921,11 +5022,12 @@ def install_free_tool(tool_or_command, approved=False, dry_run=False, reason="")
         append_capability_log({"action": "install-error", **result})
         record_improvement_from_capability_result(result)
         return result
-    installed, paths = tool_installed(manifest)
+    installed, paths, modules = tool_installed(manifest)
     result = {
         **decision,
         "installed": installed,
         "paths": paths,
+        "modules": modules,
         "returnCode": proc.returncode,
         "stdout": compact(proc.stdout or "", 1200),
         "stderr": compact(proc.stderr or "", 1200),
@@ -6600,6 +6702,10 @@ def local_tool_catalog():
             "run": "automatic on STL + CPAP/part-cooling duct requests",
             "description": "Find attached or named STL files, inspect mesh geometry, infer CPAP ports, generate an editable duct model/STL, and stage OpenFOAM-ready validation files before any generic duct template can answer.",
         },
+        "aeroCfdPreflight": {
+            "run": "POST /api/tools/aero-cfd-preflight or automatic on aerodynamic/CFD geometry-analysis requests",
+            "description": "Resolve STL/STEP/STP/OBJ/3MF geometry, convert to solver STL when possible, inspect mesh scale/watertightness, stage an OpenFOAM external-flow scaffold, and run surfaceCheck when OpenFOAM Docker is available.",
+        },
     }
 
 
@@ -6621,6 +6727,7 @@ def build_local_tools_context():
             "- These Klipper tools write only local files. Do not upload, restart, or alter a live printer unless idle/standby has been verified through Moonraker.",
             "- For CAD artifact staging, call `POST http://127.0.0.1:8765/api/tools/cad-artifact` with JSON like `{\"prompt\":\"design a CPAP cooling duct for Fusion 360\"}`.",
             "- For STL-based CPAP/part-cooling duct requests, use the automatic STL duct designer first. Find the STL, inspect the mesh, infer or ask for ports, generate an editable CAD/STL artifact, and stage CFD validation files before considering a generic CPAP CAD artifact path.",
+            "- For aerodynamic/CFD component analysis, call `POST http://127.0.0.1:8765/api/tools/aero-cfd-preflight` with the messages/cwd. Use it before claiming CFD readiness; it stages OpenFOAM external-flow files and surface checks when geometry is available.",
             "",
         ]
     )
@@ -6790,9 +6897,15 @@ def candidate_matches_hint(candidate, hint):
 
 def discover_klipper_config_dirs(hint="", scan=False):
     known = [
-        (str(HOME_DIR / "Downloads" / "ratrig_config"), "home-downloads-ratrig-config"),
-        (str(HOME_DIR / "Documents" / "Codex" / "ratrig_config"), "home-documents-codex-ratrig-config"),
-        (str(HOME_DIR / "Applications" / "Codex_CLI_UI" / "printer-configs"), "installed-printer-configs"),
+        ("/Users/williamtinney/Downloads/ratrig_config", "current-klipper-config-ratrig"),
+        (
+            "/Users/williamtinney/Documents/Codex/2026-05-22/on-the-qidi-i-am-attempting/ratrig_audit/config",
+            "known-klipper-config-ratrig-audit",
+        ),
+        (
+            "/Users/williamtinney/Applications/Flightops_Tracker/docs/ratrig_baseline_20260314_190144/ratrig_config",
+            "known-klipper-config-ratrig-baseline",
+        ),
     ]
     candidates = []
     seen = set()
@@ -6804,9 +6917,9 @@ def discover_klipper_config_dirs(hint="", scan=False):
 
     if scan:
         scan_roots = [
-            HOME_DIR / "Downloads",
-            HOME_DIR / "Documents",
-            HOME_DIR / "Applications",
+            Path("/Users/williamtinney/Downloads"),
+            Path("/Users/williamtinney/Documents/Codex/2026-05-22/on-the-qidi-i-am-attempting"),
+            Path("/Users/williamtinney/Applications/Flightops_Tracker/docs"),
         ]
         for root in scan_roots:
             if not root.exists():
@@ -7688,8 +7801,109 @@ def resolve_stl_file(messages, cwd=""):
                         "source": "filename search",
                         "name": candidate.name,
                         "searched": searched,
+                }
+    return {"path": None, "source": "", "name": refs[0] if refs else "", "searched": searched}
+
+
+GEOMETRY_FILE_EXTENSIONS = (".stl", ".step", ".stp", ".obj", ".3mf")
+
+
+def geometry_names_from_text(text, extensions=GEOMETRY_FILE_EXTENSIONS):
+    ext_pattern = "|".join(re.escape(ext.lstrip(".")) for ext in extensions)
+    pattern = re.compile(rf"([A-Za-z0-9_./~()#&+ -]{{1,220}}\.(?:{ext_pattern}))", re.IGNORECASE)
+    names = []
+    for match in pattern.finditer(str(text or "")):
+        name = match.group(1).strip().strip("`'\"")
+        if name:
+            names.append(name)
+    return names
+
+
+def resolve_geometry_file(messages, cwd="", extensions=GEOMETRY_FILE_EXTENSIONS):
+    extensions = tuple(ext.lower() for ext in extensions)
+    attachments = message_attachments(messages)
+    for attachment in reversed(attachments):
+        name = str(attachment.get("name") or "")
+        path = str(attachment.get("path") or "")
+        if name.lower().endswith(extensions) or path.lower().endswith(extensions):
+            candidate = Path(path).expanduser()
+            if candidate.exists() and candidate.is_file():
+                return {
+                    "path": candidate,
+                    "source": "attached upload",
+                    "name": name or candidate.name,
+                    "searched": [],
+                }
+
+    latest = latest_user_text(messages)
+    refs = geometry_names_from_text(latest, extensions)
+    searched = []
+    roots = [
+        Path(cwd or DEFAULT_CWD).expanduser(),
+        APP_DIR / "CPAP Inputs",
+        APP_DIR,
+        UPLOAD_DIR,
+        Path(DEFAULT_CWD).expanduser(),
+        Path.home() / "Downloads",
+        Path.home() / "Desktop",
+        Path.home() / "Documents",
+    ]
+    seen_roots = []
+    for ref in refs:
+        ref_path = Path(ref).expanduser()
+        direct_candidates = []
+        if ref_path.is_absolute():
+            direct_candidates.append(ref_path)
+        else:
+            for root in roots:
+                direct_candidates.append(root / ref_path)
+        for candidate in direct_candidates:
+            searched.append(str(candidate))
+            if candidate.exists() and candidate.is_file():
+                return {
+                    "path": candidate,
+                    "source": "filename reference",
+                    "name": candidate.name,
+                    "searched": searched,
+                }
+        basename = ref_path.name
+        for root in roots[:5]:
+            root = Path(root)
+            if root in seen_roots:
+                continue
+            seen_roots.append(root)
+            for candidate in iter_named_file_matches(root, basename, max_depth=4, limit=6):
+                searched.append(str(candidate))
+                if candidate.exists() and candidate.is_file():
+                    return {
+                        "path": candidate,
+                        "source": "filename search",
+                        "name": candidate.name,
+                        "searched": searched,
                     }
     return {"path": None, "source": "", "name": refs[0] if refs else "", "searched": searched}
+
+
+def is_aero_cfd_analysis_request(messages):
+    query = latest_user_text(messages).lower()
+    if not query:
+        return False
+    aero_terms = (
+        "aero", "aerodynamic", "airfoil", "lift", "drag", "downforce",
+        "pressure drop", "external flow", "wind tunnel", "openfoam", "paraview",
+        "vspaero", "xfoil", "qblade", "streamline", "coefficient of drag",
+        "cd ", "cl ", "cfd",
+    )
+    analysis_terms = (
+        "analyze", "analysis", "simulate", "simulation", "run", "check",
+        "validate", "mesh", "solve", "solver", "flow", "component", "body",
+        "duct", "wing", "blade", "propeller", "shroud", "fairing",
+    )
+    has_geometry_hint = bool(geometry_names_from_text(query)) or any(
+        str(item.get("name") or item.get("path") or "").lower().endswith(GEOMETRY_FILE_EXTENSIONS)
+        for item in message_attachments(messages)
+    )
+    return text_has_any(query, aero_terms) and (text_has_any(query, analysis_terms) or has_geometry_hint)
 
 
 def is_stl_cfd_duct_design_request(messages):
@@ -7852,20 +8066,35 @@ def cfd_toolchain_status():
     commands = {
         "openscad": command_path("openscad"),
         "gmsh": command_path("gmsh"),
+        "docker": command_path("docker"),
         "simpleFoam": command_path("simpleFoam"),
         "blockMesh": command_path("blockMesh"),
         "snappyHexMesh": command_path("snappyHexMesh"),
         "surfaceFeatureExtract": command_path("surfaceFeatureExtract"),
         "checkMesh": command_path("checkMesh"),
         "freecad": command_path("FreeCADCmd") or command_path("freecad"),
+        "paraview": command_path("paraview"),
+        "pvpython": command_path("pvpython"),
+        "vsp": command_path("vsp"),
+        "vspaero": command_path("vspaero"),
+        "xfoil": command_path("xfoil"),
+        "SU2_CFD": command_path("SU2_CFD"),
+        "openmdao": command_path("openmdao"),
+        "wingproj": command_path("wingproj"),
     }
     modules = {
+        "numpy": python_module_available("numpy"),
+        "scipy": python_module_available("scipy"),
         "trimesh": python_module_available("trimesh"),
         "meshio": python_module_available("meshio"),
         "gmsh": python_module_available("gmsh"),
         "pyvista": python_module_available("pyvista"),
+        "vtk": python_module_available("vtk"),
         "cadquery": python_module_available("cadquery"),
         "OCP": python_module_available("OCP"),
+        "aerosandbox": python_module_available("aerosandbox"),
+        "openmdao": python_module_available("openmdao"),
+        "neuralfoil": python_module_available("neuralfoil"),
     }
     docker = docker_openfoam_status()
     openfoam_local = bool(commands["simpleFoam"] and commands["blockMesh"] and commands["snappyHexMesh"])
@@ -7878,6 +8107,12 @@ def cfd_toolchain_status():
         "openfoamLocal": openfoam_local,
         "openfoamDocker": openfoam_docker,
         "meshingAvailable": bool(commands["gmsh"] or modules["gmsh"] or modules["meshio"]),
+        "visualizationAvailable": bool(commands["paraview"] or commands["pvpython"] or modules["pyvista"]),
+        "cadKernelAvailable": bool(commands["freecad"] or modules["cadquery"] or modules["OCP"]),
+        "airfoilToolsAvailable": bool(commands["xfoil"]),
+        "aircraftToolsAvailable": bool(commands["vsp"] or commands["vspaero"]),
+        "aeroModelingAvailable": bool(modules["aerosandbox"] or modules["neuralfoil"]),
+        "optimizationAvailable": bool(commands["openmdao"] or modules["openmdao"]),
     }
 
 
@@ -7891,6 +8126,9 @@ IMPORTANT_PYTHON_MODULES = [
     "gmsh",
     "pyvista",
     "vtk",
+    "aerosandbox",
+    "openmdao",
+    "neuralfoil",
     "skimage",
     "matplotlib",
     "rtree",
@@ -7942,7 +8180,7 @@ def scan_path_commands():
 
 def scan_app_bundles():
     apps = {}
-    for root in [Path("/Applications"), HOME_DIR / "Applications"]:
+    for root in [Path("/Applications"), Path.home() / "Applications"]:
         if not root.exists():
             continue
         for pattern in ("*.app", "*/*.app"):
@@ -8647,6 +8885,546 @@ def run_openfoam_surface_check(case_dir, stl_name, toolchain):
         "durationMs": round((time.time() - started) * 1000),
         "summary": compact(output, 1800),
     }
+
+
+def aero_analysis_parameters(messages):
+    text = latest_user_text(messages)
+    lower = text.lower()
+    speed_ms = cad_number_any(
+        (
+            r"([0-9]+(?:\.[0-9]+)?)\s*m/s\b",
+            r"([0-9]+(?:\.[0-9]+)?)\s*meter(?:s)?\s+per\s+second",
+        ),
+        lower,
+        20.0,
+    )
+    mph_match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*mph\b", lower)
+    if mph_match:
+        speed_ms = float(mph_match.group(1)) * 0.44704
+    angle = cad_number_any(
+        (
+            r"angle\s+of\s+attack[^0-9-]{0,16}(-?[0-9]+(?:\.[0-9]+)?)",
+            r"\bao?a\b[^0-9-]{0,12}(-?[0-9]+(?:\.[0-9]+)?)",
+            r"(-?[0-9]+(?:\.[0-9]+)?)\s*deg(?:ree)?(?:s)?\s+(?:aoa|angle\s+of\s+attack)",
+        ),
+        lower,
+        0.0,
+    )
+    density = cad_number_any(
+        (
+            r"density[^0-9]{0,16}([0-9]+(?:\.[0-9]+)?)\s*kg/m\^?3",
+            r"rho[^0-9]{0,16}([0-9]+(?:\.[0-9]+)?)",
+        ),
+        lower,
+        1.225,
+    )
+    viscosity = cad_number_any(
+        (
+            r"nu[^0-9]{0,16}([0-9]+(?:\.[0-9]+)?(?:e-?[0-9]+)?)",
+            r"kinematic\s+viscosity[^0-9]{0,16}([0-9]+(?:\.[0-9]+)?(?:e-?[0-9]+)?)",
+        ),
+        lower,
+        1.5e-5,
+    )
+    return {
+        "speedMs": speed_ms,
+        "angleOfAttackDeg": angle,
+        "airDensityKgM3": density,
+        "kinematicViscosityM2S": viscosity,
+        "promptExcerpt": compact(text, 1000),
+    }
+
+
+def aero_domain_plan(analysis, params):
+    extents = analysis.get("extents") or [1.0, 1.0, 1.0]
+    characteristic = max(float(value or 0.0) for value in extents) or 1.0
+    speed = float(params.get("speedMs") or 0.0)
+    nu = float(params.get("kinematicViscosityM2S") or 1.5e-5)
+    length_m = characteristic / 1000.0
+    reynolds = speed * length_m / nu if nu else 0.0
+    return {
+        "characteristicLengthMm": round(characteristic, 3),
+        "recommendedUpstreamMm": round(characteristic * 5, 3),
+        "recommendedDownstreamMm": round(characteristic * 10, 3),
+        "recommendedSideClearanceMm": round(characteristic * 5, 3),
+        "recommendedTopBottomClearanceMm": round(characteristic * 5, 3),
+        "estimatedReynolds": round(reynolds, 0),
+        "flowDirection": "+X",
+    }
+
+
+def convert_geometry_to_stl(source_path, target_stl):
+    source_path = Path(source_path).expanduser()
+    target_stl = Path(target_stl).expanduser()
+    suffix = source_path.suffix.lower()
+    if suffix == ".stl":
+        shutil.copy2(source_path, target_stl)
+        return {"ok": True, "method": "copy", "source": str(source_path), "target": str(target_stl)}
+    if suffix in {".obj", ".3mf"}:
+        try:
+            import trimesh
+
+            mesh = trimesh.load(source_path, force="scene")
+            mesh.export(target_stl)
+            return {"ok": target_stl.exists(), "method": "trimesh-export", "source": str(source_path), "target": str(target_stl)}
+        except Exception as exc:
+            return {"ok": False, "method": "trimesh-export", "error": str(exc), "source": str(source_path), "target": str(target_stl)}
+    if suffix in {".step", ".stp"}:
+        freecad = command_path("FreeCADCmd") or command_path("freecad")
+        if not freecad:
+            return {"ok": False, "method": "freecad-step-export", "error": "FreeCADCmd is not available.", "source": str(source_path), "target": str(target_stl)}
+        script = target_stl.with_suffix(".convert_step_to_stl.py")
+        script.write_text(
+            "\n".join(
+                [
+                    "import sys",
+                    "import FreeCAD",
+                    "import Import",
+                    "import Mesh",
+                    "source = sys.argv[1]",
+                    "target = sys.argv[2]",
+                    "doc = FreeCAD.newDocument('aero_convert')",
+                    "Import.insert(source, doc.Name)",
+                    "doc.recompute()",
+                    "objects = [obj for obj in doc.Objects if hasattr(obj, 'Shape')]",
+                    "if not objects:",
+                    "    raise RuntimeError('No shape objects were imported from STEP/STP')",
+                    "Mesh.export(objects, target)",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        started = time.time()
+        proc = subprocess.run(
+            [freecad, "-c", str(script), str(source_path), str(target_stl)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=240,
+            env={**os.environ, "PATH": PATH_FOR_CODEX},
+        )
+        return {
+            "ok": proc.returncode == 0 and target_stl.exists(),
+            "method": "freecad-step-export",
+            "source": str(source_path),
+            "target": str(target_stl),
+            "returnCode": proc.returncode,
+            "durationMs": round((time.time() - started) * 1000),
+            "stdout": compact(proc.stdout, 800),
+            "stderr": compact(proc.stderr, 1200),
+            "scriptPath": str(script),
+        }
+    return {"ok": False, "method": "unsupported", "error": f"Unsupported geometry format: {suffix}", "source": str(source_path), "target": str(target_stl)}
+
+
+def write_aero_openfoam_case_skeleton(target, stl_name, params, analysis, toolchain):
+    case_dir = target / "openfoam_external_flow_case"
+    for folder in (
+        case_dir / "0",
+        case_dir / "constant" / "triSurface",
+        case_dir / "system",
+    ):
+        folder.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(target / stl_name, case_dir / "constant" / "triSurface" / "source.stl")
+    velocity = float(params.get("speedMs") or 20.0)
+    nu = float(params.get("kinematicViscosityM2S") or 1.5e-5)
+    (case_dir / "0" / "U").write_text(
+        f"""FoamFile
+{{
+    version 2.0;
+    format ascii;
+    class volVectorField;
+    object U;
+}}
+dimensions [0 1 -1 0 0 0 0];
+internalField uniform ({velocity:.6g} 0 0);
+boundaryField
+{{
+    inlet {{ type fixedValue; value uniform ({velocity:.6g} 0 0); }}
+    outlet {{ type pressureInletOutletVelocity; value uniform ({velocity:.6g} 0 0); }}
+    farfield {{ type freestreamVelocity; freestreamValue uniform ({velocity:.6g} 0 0); }}
+    body {{ type noSlip; }}
+}}
+""",
+        encoding="utf-8",
+    )
+    (case_dir / "0" / "p").write_text(
+        """FoamFile
+{
+    version 2.0;
+    format ascii;
+    class volScalarField;
+    object p;
+}
+dimensions [0 2 -2 0 0 0 0];
+internalField uniform 0;
+boundaryField
+{
+    inlet { type zeroGradient; }
+    outlet { type fixedValue; value uniform 0; }
+    farfield { type freestreamPressure; freestreamValue uniform 0; }
+    body { type zeroGradient; }
+}
+""",
+        encoding="utf-8",
+    )
+    (case_dir / "constant" / "transportProperties").write_text(
+        f"""FoamFile
+{{
+    version 2.0;
+    format ascii;
+    class dictionary;
+    object transportProperties;
+}}
+transportModel Newtonian;
+nu [0 2 -1 0 0 0 0] {nu:.8g};
+""",
+        encoding="utf-8",
+    )
+    (case_dir / "system" / "controlDict").write_text(
+        """FoamFile
+{
+    version 2.0;
+    format ascii;
+    class dictionary;
+    object controlDict;
+}
+application simpleFoam;
+startFrom startTime;
+startTime 0;
+stopAt endTime;
+endTime 500;
+deltaT 1;
+writeControl timeStep;
+writeInterval 100;
+purgeWrite 0;
+functions {}
+""",
+        encoding="utf-8",
+    )
+    (case_dir / "system" / "fvSchemes").write_text(
+        """FoamFile
+{
+    version 2.0;
+    format ascii;
+    class dictionary;
+    object fvSchemes;
+}
+ddtSchemes { default steadyState; }
+gradSchemes { default Gauss linear; }
+divSchemes
+{
+    default none;
+    div(phi,U) bounded Gauss linearUpwind grad(U);
+    div((nuEff*dev2(T(grad(U))))) Gauss linear;
+}
+laplacianSchemes { default Gauss linear corrected; }
+interpolationSchemes { default linear; }
+snGradSchemes { default corrected; }
+wallDist { method meshWave; }
+""",
+        encoding="utf-8",
+    )
+    (case_dir / "system" / "fvSolution").write_text(
+        """FoamFile
+{
+    version 2.0;
+    format ascii;
+    class dictionary;
+    object fvSolution;
+}
+solvers
+{
+    p { solver GAMG; tolerance 1e-7; relTol 0.1; smoother GaussSeidel; }
+    U { solver smoothSolver; smoother symGaussSeidel; tolerance 1e-8; relTol 0.1; }
+}
+SIMPLE
+{
+    nNonOrthogonalCorrectors 0;
+    residualControl { p 1e-4; U 1e-5; }
+}
+relaxationFactors
+{
+    fields { p 0.3; }
+    equations { U 0.7; }
+}
+""",
+        encoding="utf-8",
+    )
+    plan = aero_domain_plan(analysis, params)
+    (case_dir / "README.md").write_text(
+        "\n".join(
+            [
+                "# OpenFOAM External-Flow Case Scaffold",
+                "",
+                "This folder is an aerodynamic-analysis scaffold, not a completed CFD solution.",
+                "",
+                "The geometry is copied to `constant/triSurface/source.stl`. The next step is domain creation, patch naming, meshing, `checkMesh`, then `simpleFoam`.",
+                "",
+                "## Flow Assumptions",
+                f"- Freestream speed: {params.get('speedMs', 20.0):.3f} m/s along +X.",
+                f"- Angle of attack noted from prompt: {params.get('angleOfAttackDeg', 0.0):.2f} degrees.",
+                f"- Kinematic viscosity: {nu:.8g} m2/s.",
+                "",
+                "## Recommended Domain",
+                f"- Characteristic length: {plan['characteristicLengthMm']:.3f} mm.",
+                f"- Upstream: {plan['recommendedUpstreamMm']:.3f} mm.",
+                f"- Downstream: {plan['recommendedDownstreamMm']:.3f} mm.",
+                f"- Side/top/bottom clearance: {plan['recommendedSideClearanceMm']:.3f} mm.",
+                f"- Estimated Reynolds number: {plan['estimatedReynolds']:.0f}.",
+                "",
+                "## Toolchain",
+                f"- OpenFOAM Docker: {toolchain.get('openfoamDocker')}",
+                f"- OpenFOAM images: {', '.join(toolchain.get('docker', {}).get('images') or []) or 'none'}",
+                f"- Gmsh: {toolchain.get('commands', {}).get('gmsh') or 'missing'}",
+                f"- ParaView/PyVista visualization: {toolchain.get('visualizationAvailable')}",
+                f"- AeroSandbox/NeuralFoil modeling: {toolchain.get('aeroModelingAvailable')}",
+                f"- OpenMDAO optimization: {toolchain.get('optimizationAvailable')}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return case_dir
+
+
+def aero_cfd_precheck_text(result):
+    toolchain = result.get("toolchain") or {}
+    commands = toolchain.get("commands") or {}
+    modules = toolchain.get("pythonModules") or {}
+    analysis = result.get("geometry") or {}
+    params = result.get("params") or {}
+    plan = result.get("domainPlan") or {}
+    conversion = result.get("conversion") or {}
+    surface = result.get("surfaceCheck") or {}
+    lines = [
+        "# Aero/CFD Preflight",
+        "",
+        "This is an engineering preflight for aerodynamic analysis. It does not claim a solved CFD result until mesh generation and the solver actually run.",
+        "",
+        "## Request",
+        "",
+        result.get("promptExcerpt") or params.get("promptExcerpt") or "",
+        "",
+        "## Geometry",
+        "",
+        f"- Source geometry: `{result.get('geometryPath') or 'not found'}`",
+        f"- Solver STL: `{result.get('solverStlPath') or 'not generated'}`",
+        f"- Conversion: {conversion.get('method', 'none')} / ok={conversion.get('ok', False)}",
+        f"- Faces: {analysis.get('faces', 0)}",
+        f"- Vertices: {analysis.get('vertices', 0)}",
+        f"- Extents: {analysis.get('extents')}",
+        f"- Watertight: {analysis.get('watertight')}",
+        "",
+        "## Flow Assumptions",
+        "",
+        f"- Freestream speed: {params.get('speedMs', 20.0):.3f} m/s.",
+        f"- Angle of attack: {params.get('angleOfAttackDeg', 0.0):.2f} degrees.",
+        f"- Air density: {params.get('airDensityKgM3', 1.225):.4g} kg/m3.",
+        f"- Kinematic viscosity: {params.get('kinematicViscosityM2S', 1.5e-5):.8g} m2/s.",
+        f"- Estimated Reynolds number: {plan.get('estimatedReynolds', 0):.0f}.",
+        "",
+        "## Recommended External Domain",
+        "",
+        f"- Flow direction: {plan.get('flowDirection', '+X')}.",
+        f"- Characteristic length: {plan.get('characteristicLengthMm', 0):.3f} mm.",
+        f"- Upstream: {plan.get('recommendedUpstreamMm', 0):.3f} mm.",
+        f"- Downstream: {plan.get('recommendedDownstreamMm', 0):.3f} mm.",
+        f"- Side clearance: {plan.get('recommendedSideClearanceMm', 0):.3f} mm.",
+        f"- Top/bottom clearance: {plan.get('recommendedTopBottomClearanceMm', 0):.3f} mm.",
+        "",
+        "## Toolchain",
+        "",
+        f"- FreeCAD: {commands.get('freecad') or 'missing'}",
+        f"- Gmsh: {commands.get('gmsh') or 'missing'}",
+        f"- Docker: {commands.get('docker') or 'missing'}",
+        f"- OpenFOAM Docker images: {', '.join(toolchain.get('docker', {}).get('images') or []) or 'none'}",
+        f"- ParaView: {commands.get('paraview') or 'missing'}",
+        f"- PyVista/VTK: pyvista={modules.get('pyvista')} vtk={modules.get('vtk')}",
+        f"- OpenVSP/VSPAERO: vsp={commands.get('vsp') or 'missing'} vspaero={commands.get('vspaero') or 'missing'}",
+        f"- XFOIL/SU2: xfoil={commands.get('xfoil') or 'missing'} SU2_CFD={commands.get('SU2_CFD') or 'missing'}",
+        f"- AeroSandbox/NeuralFoil: aerosandbox={modules.get('aerosandbox')} neuralfoil={modules.get('neuralfoil')}",
+        f"- OpenMDAO optimization: command={commands.get('openmdao') or 'missing'} module={modules.get('openmdao')}",
+        "",
+        "## OpenFOAM Surface Check",
+        "",
+        f"- Ran: {surface.get('ran', False)}",
+        f"- Passed: {surface.get('ok', False)}",
+        f"- Detail: {surface.get('error') or surface.get('summary') or 'none'}",
+        "",
+        "## Next Engineering Steps",
+        "",
+        "1. Confirm units and flow direction against the real component orientation.",
+        "2. Build an external domain around the geometry using the recommended clearance as a starting point.",
+        "3. Name patches: inlet, outlet, farfield, and body.",
+        "4. Generate mesh with refinement near the body and wake, then run `checkMesh`.",
+        "5. Run `simpleFoam` or the appropriate solver, then inspect pressure, velocity, streamlines, and force coefficients in ParaView/PyVista.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def stage_aero_cfd_preflight(messages, cwd="", target_path=None):
+    params = aero_analysis_parameters(messages)
+    slug = slugify(latest_user_text(messages), fallback="aero-cfd")[:48]
+    target = Path(target_path).expanduser() if target_path else LOCAL_AERO_OUTPUT_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}-{slug}"
+    target.mkdir(parents=True, exist_ok=True)
+    resolved = resolve_geometry_file(messages, cwd=cwd)
+    toolchain = cfd_toolchain_status()
+    result = {
+        "ok": False,
+        "targetDir": str(target),
+        "geometryPath": "",
+        "geometrySource": resolved.get("source", ""),
+        "searched": resolved.get("searched", [])[:30],
+        "params": params,
+        "promptExcerpt": compact(latest_user_text(messages), 1000),
+        "toolchain": toolchain,
+    }
+    if not resolved.get("path"):
+        readme = target / "AERO_CFD_PRECHECK.md"
+        result.update(
+            {
+                "error": "No readable geometry file was attached or found from the prompt.",
+                "precheckPath": str(readme),
+            }
+        )
+        readme.write_text(aero_cfd_precheck_text(result), encoding="utf-8")
+        return result
+
+    source = Path(resolved["path"]).expanduser()
+    copied_name = sanitize_filename(source.name, fallback="source-geometry")
+    copied_source = target / copied_name
+    shutil.copy2(source, copied_source)
+    solver_stl = target / f"{slug or 'aero-cfd'}_solver_surface.stl"
+    conversion = convert_geometry_to_stl(copied_source, solver_stl)
+    result["geometryPath"] = str(source)
+    result["copiedGeometryPath"] = str(copied_source)
+    result["solverStlPath"] = str(solver_stl) if solver_stl.exists() else ""
+    result["conversion"] = conversion
+    if not conversion.get("ok"):
+        result["error"] = conversion.get("error") or "Geometry conversion failed."
+        readme = target / "AERO_CFD_PRECHECK.md"
+        result["precheckPath"] = str(readme)
+        readme.write_text(aero_cfd_precheck_text(result), encoding="utf-8")
+        return result
+
+    analysis = analyze_stl_geometry(solver_stl)
+    result["geometry"] = analysis
+    if not analysis.get("ok"):
+        result["error"] = analysis.get("error", "Geometry analysis failed.")
+        readme = target / "AERO_CFD_PRECHECK.md"
+        result["precheckPath"] = str(readme)
+        readme.write_text(aero_cfd_precheck_text(result), encoding="utf-8")
+        return result
+
+    plan = aero_domain_plan(analysis, params)
+    result["domainPlan"] = plan
+    case_dir = write_aero_openfoam_case_skeleton(target, solver_stl.name, params, analysis, toolchain)
+    surface = run_openfoam_surface_check(case_dir, "source.stl", toolchain)
+    (target / "surface_check.json").write_text(json.dumps(surface, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    result.update(
+        {
+            "ok": True,
+            "openfoamCaseDir": str(case_dir),
+            "surfaceCheck": surface,
+            "surfaceCheckPath": str(target / "surface_check.json"),
+            "caseSetupPath": str(target / "case_setup.json"),
+            "precheckPath": str(target / "AERO_CFD_PRECHECK.md"),
+        }
+    )
+    image = (toolchain.get("docker", {}).get("images") or ["opencfd/openfoam-run:2512"])[0]
+    run_path = target / "run_openfoam_surface_check.sh"
+    run_path.write_text(
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+case_dir="$(cd "$(dirname "$0")/openfoam_external_flow_case" && pwd)"
+docker run --rm -v "$case_dir:/case" {image} bash -lc "cd /case && surfaceCheck constant/triSurface/source.stl"
+""",
+        encoding="utf-8",
+    )
+    run_path.chmod(0o755)
+    result["surfaceCheckScriptPath"] = str(run_path)
+    (target / "case_setup.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (target / "AERO_CFD_PRECHECK.md").write_text(aero_cfd_precheck_text(result), encoding="utf-8")
+    return result
+
+
+def aero_cfd_preflight_working_notes(result):
+    notes = ["Classified the request as aerodynamic/CFD analysis rather than plain CAD modeling."]
+    if not result.get("geometryPath"):
+        notes.append("No geometry file was found, so I staged a toolchain/preflight folder and stopped before inventing CFD results.")
+        return notes
+    notes.append(f"Resolved geometry from {result.get('geometrySource')}: {result.get('geometryPath')}.")
+    conversion = result.get("conversion") or {}
+    notes.append(f"Converted geometry for solver preflight using {conversion.get('method', 'unknown')}: ok={conversion.get('ok', False)}.")
+    geometry = result.get("geometry") or {}
+    if geometry.get("ok"):
+        notes.append(f"Read solver surface: {geometry.get('faces', 0)} faces, extents {geometry.get('extents')} mm.")
+    if result.get("openfoamCaseDir"):
+        notes.append(f"Staged OpenFOAM external-flow case scaffold at {result.get('openfoamCaseDir')}.")
+    surface = result.get("surfaceCheck") or {}
+    if surface.get("ran"):
+        notes.append("Ran OpenFOAM surfaceCheck; " + ("surface passed." if surface.get("ok") else "surface needs review."))
+    else:
+        notes.append("OpenFOAM surfaceCheck did not run; solver runtime or image is unavailable.")
+    return notes
+
+
+def format_aero_cfd_preflight_answer(result):
+    if not result.get("geometryPath"):
+        searched = result.get("searched") or []
+        searched_text = "\n".join(f"- `{path}`" for path in searched[:8]) if searched else "- No local path candidates were available."
+        return "\n\n".join(
+            [
+                "I set up the Aero/CFD preflight, but I need a geometry file before I can analyze a real component.",
+                f"Preflight notes: `{result.get('precheckPath')}`",
+                "This is why: aerodynamic analysis needs the actual surface/body geometry so I can check scale, watertightness, mesh readiness, and solver setup instead of guessing.",
+                "You should also consider: attach STL, STEP/STP, OBJ, or 3MF. STEP/STP is better when component names and clean CAD faces matter; STL is fine for mesh/surface preflight.",
+                "Paths checked:\n" + searched_text,
+            ]
+        )
+    geometry = result.get("geometry") or {}
+    plan = result.get("domainPlan") or {}
+    surface = result.get("surfaceCheck") or {}
+    toolchain = result.get("toolchain") or {}
+    return "\n\n".join(
+        [
+            "I staged an Aero/CFD preflight package for that component.",
+            "\n".join(
+                [
+                    f"- Source geometry: `{result.get('geometryPath')}`",
+                    f"- Solver STL: `{result.get('solverStlPath')}`",
+                    f"- Preflight: `{result.get('precheckPath')}`",
+                    f"- Case setup: `{result.get('caseSetupPath')}`",
+                    f"- OpenFOAM case scaffold: `{result.get('openfoamCaseDir')}`",
+                    f"- Surface check: `{result.get('surfaceCheckPath')}`",
+                    f"- Surface-check script: `{result.get('surfaceCheckScriptPath')}`",
+                ]
+            ),
+            (
+                f"Mesh read: {geometry.get('faces', 0)} faces, {geometry.get('vertices', 0)} vertices, "
+                f"extents {geometry.get('extents')} mm, watertight={geometry.get('watertight')}."
+            ),
+            (
+                f"Recommended first CFD domain: flow {plan.get('flowDirection', '+X')}, "
+                f"{plan.get('recommendedUpstreamMm', 0):.0f} mm upstream, "
+                f"{plan.get('recommendedDownstreamMm', 0):.0f} mm downstream, and about "
+                f"{plan.get('recommendedSideClearanceMm', 0):.0f} mm side/top/bottom clearance. "
+                f"Estimated Reynolds number is about {plan.get('estimatedReynolds', 0):.0f} from the current speed assumption."
+            ),
+            (
+                "Surface check: "
+                + ("passed with OpenFOAM `surfaceCheck`." if surface.get("ok") else compact(surface.get("error") or surface.get("summary") or "not run", 220))
+            ),
+            (
+                "This is why: he now has a real aero workflow path: geometry resolve, mesh/surface preflight, OpenFOAM case scaffold, and ParaView/PyVista-ready outputs. "
+                f"OpenFOAM Docker available={toolchain.get('openfoamDocker')}, meshing available={toolchain.get('meshingAvailable')}, visualization available={toolchain.get('visualizationAvailable')}, "
+                f"aero modeling available={toolchain.get('aeroModelingAvailable')}, optimization available={toolchain.get('optimizationAvailable')}."
+            ),
+            "You should also consider: this is not solved CFD yet. The next engineering step is domain meshing, patch naming, `checkMesh`, solver convergence, and force/pressure/velocity review.",
+        ]
+    )
 
 
 def stage_inferred_cpap_duct_design(target, stl_path, constraints, analysis, toolchain, case_dir):
@@ -10320,6 +11098,62 @@ def package_health_report():
         add("tools:stl-cfd-geometry-routing", "fail", str(exc))
 
     try:
+        toolchain = cfd_toolchain_status()
+        ok = (
+            toolchain.get("openfoamAvailable")
+            and toolchain.get("meshingAvailable")
+            and toolchain.get("visualizationAvailable")
+            and toolchain.get("cadKernelAvailable")
+        )
+        add(
+            "tools:aero-cfd-toolchain",
+            "pass" if ok else "fail",
+            f"openfoam={toolchain.get('openfoamAvailable')} mesh={toolchain.get('meshingAvailable')} visualization={toolchain.get('visualizationAvailable')} cad={toolchain.get('cadKernelAvailable')} aero={toolchain.get('aeroModelingAvailable')} optimization={toolchain.get('optimizationAvailable')}",
+        )
+    except Exception as exc:
+        add("tools:aero-cfd-toolchain", "fail", str(exc))
+
+    try:
+        import trimesh
+
+        LOCAL_AERO_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="health-aero-", dir=str(LOCAL_AERO_OUTPUT_DIR)) as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            source_stl = tmp_path / "health aero fairing.stl"
+            trimesh.creation.icosphere(subdivisions=2, radius=12).export(source_stl)
+            aero_messages = [
+                {
+                    "role": "user",
+                    "text": "Analyze the aerodynamic drag of this fairing STL with OpenFOAM at 25 m/s.",
+                    "attachments": [
+                        {
+                            "name": source_stl.name,
+                            "path": str(source_stl),
+                            "size": source_stl.stat().st_size,
+                        }
+                    ],
+                }
+            ]
+            result = stage_aero_cfd_preflight(aero_messages, cwd=tmp_dir, target_path=tmp_path / "case")
+            answer = format_aero_cfd_preflight_answer(result)
+            ok = (
+                is_aero_cfd_analysis_request(aero_messages)
+                and result.get("ok")
+                and Path(result.get("precheckPath", "")).exists()
+                and Path(result.get("caseSetupPath", "")).exists()
+                and Path(result.get("openfoamCaseDir", "")).exists()
+                and "Aero/CFD preflight package" in answer
+                and "not solved CFD yet" in answer
+            )
+        add(
+            "tools:aero-cfd-preflight",
+            "pass" if ok else "fail",
+            "aero requests resolve geometry, stage OpenFOAM scaffold, and state CFD limits",
+        )
+    except Exception as exc:
+        add("tools:aero-cfd-preflight", "fail", str(exc))
+
+    try:
         hose_messages = [
             {
                 "role": "user",
@@ -10520,6 +11354,27 @@ def package_health_report():
         )
     except Exception as exc:
         add("analysis:cad-design-routing", "fail", str(exc))
+
+    try:
+        aero_messages = [
+            {
+                "role": "user",
+                "text": "Analyze the aerodynamic drag of this wing STL with OpenFOAM at 25 m/s.",
+            }
+        ]
+        aero_route = route_manager(aero_messages, requested_profile="manager", web_search="live")
+        ok = (
+            is_aero_cfd_analysis_request(aero_messages)
+            and aero_route.get("projectId") == "cad-modeling-projects"
+            and aero_route.get("engine") == "local"
+        )
+        add(
+            "analysis:aero-cfd-routing",
+            "pass" if ok else "fail",
+            f"{aero_route.get('projectId')} via {aero_route.get('engine')}",
+        )
+    except Exception as exc:
+        add("analysis:aero-cfd-routing", "fail", str(exc))
 
     try:
         cad_prompt = (
@@ -11029,6 +11884,9 @@ def task_contract(messages, route=None):
     elif is_stl_cfd_duct_design_request(messages):
         kind = "STL/CAD deliverable"
         done = "Find or confirm the STL, generate usable design artifacts, list clickable paths, and state validation limits."
+    elif is_aero_cfd_analysis_request(messages):
+        kind = "Aero/CFD preflight"
+        done = "Resolve geometry, inspect mesh readiness, stage OpenFOAM-ready analysis files, and clearly separate preflight from solved CFD."
     elif is_cad_design_request(messages) or is_cad_artifact_tool_request(messages):
         kind = "CAD/design deliverable"
         done = "Create or specify importable CAD artifacts, explain design choices, list assumptions, and state validation status."
@@ -11120,7 +11978,7 @@ def extract_assumption_ledger(messages, route, answer, contract=None):
     if "assume" in lower or "assumes" in lower:
         match = re.search(r"(?is)([^.\n]*assum(?:e|es|ed|ption)[^.\n]*(?:[.\n]|$))", str(answer or ""))
         add("Assumption", match.group(1).strip() if match else "The answer includes an explicit assumption.", "assumed")
-    if "no full cfd" in lower or "not pretending this is validated" in lower or "not validated" in lower:
+    if "no full cfd" in lower or "not pretending this is validated" in lower or "not validated" in lower or "not solved cfd" in lower or "not a completed cfd" in lower:
         add("Validation", "Full validation was not claimed; the answer marks the remaining validation work.", "limited")
     if "offline" in lower or "unreachable" in lower or "blocked" in lower:
         add("Blocker", "The answer identifies a blocker or unreachable dependency.", "blocked")
@@ -11162,11 +12020,11 @@ def response_scorecard(messages, route, answer, contract=None, deliverables=None
         (not direct_needed) or ("this is why:" in lower and "you should also consider:" in lower),
         "Direct answers should include why and what to consider.",
     )
-    if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable", "File/action", "Code/config"}:
+    if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable", "Aero/CFD preflight", "File/action", "Code/config"}:
         add("Deliverables visible", bool(deliverables), "Created or referenced files should be visible and clickable.")
     else:
         add("No wrong artifact route", not (contract.get("kind") == "CAD reference" and answer_has_cad_artifact(text)), "Reference questions should not stage artifacts.")
-    if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable"}:
+    if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable", "Aero/CFD preflight"}:
         add("Assumptions/validation shown", bool(assumptions), "Engineering work should show assumptions or validation limits.")
     score = int(round(100 * sum(1 for check in checks if check["passed"]) / max(1, len(checks))))
     return {"score": score, "status": "pass" if score >= 80 else "review", "checks": checks}
@@ -12079,6 +12937,24 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             self.send_json(result)
             return
 
+        if parsed.path == "/api/tools/aero-cfd-preflight":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self.send_error(400, "Invalid JSON")
+                return
+            try:
+                result = stage_aero_cfd_preflight(
+                    payload.get("messages") if isinstance(payload.get("messages"), list) else [],
+                    cwd=safe_cwd(payload.get("cwd")),
+                    target_path=payload.get("targetPath") or payload.get("targetDir"),
+                )
+            except Exception as exc:
+                result = {"ok": False, "error": str(exc)}
+            self.send_json(result)
+            return
+
         if parsed.path == "/api/files/open":
             length = int(self.headers.get("Content-Length", "0") or "0")
             try:
@@ -12530,6 +13406,77 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 route,
                 admin_topic,
                 format_stl_cfd_case_answer(tool_result),
+                normalize=False,
+            )
+            json_line(self, {"type": "done", "returnCode": 0 if tool_result.get("ok") else 1})
+            return
+
+        if is_aero_cfd_analysis_request(messages):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            json_line(
+                self,
+                {
+                    "type": "status",
+                    "message": "starting",
+                    "cwd": cwd,
+                    "profile": profile,
+                    "effectiveProfile": effective_profile,
+                    "accessLevel": "local-files",
+                    "reasoningLevel": reasoning_level,
+                    "webSearch": web_search,
+                    "managerDepth": manager_depth,
+                    "friendlinessLevel": friendliness_level,
+                    "humorLevel": humor_level,
+                    "mode": "aero-cfd-preflight",
+                    "engine": "local-tool",
+                    "model": "",
+                    "freeOnlyRedirect": free_only_redirect,
+                    "route": route,
+                    "adminTopic": admin_topic,
+                },
+            )
+            json_line(
+                self,
+                {
+                    "type": "thought",
+                    "text": "Recognized this as aerodynamic/CFD analysis, so I am checking geometry and solver readiness first.",
+                },
+            )
+            json_line(
+                self,
+                {
+                    "type": "thought",
+                    "text": "Resolving the attached or named geometry and staging an OpenFOAM-ready external-flow preflight.",
+                },
+            )
+            try:
+                tool_result = stage_aero_cfd_preflight(messages, cwd=cwd)
+                for note in aero_cfd_preflight_working_notes(tool_result):
+                    json_line(self, {"type": "thought", "text": note})
+            except Exception as exc:
+                tool_result = {
+                    "ok": False,
+                    "error": str(exc),
+                    "targetDir": str(LOCAL_AERO_OUTPUT_DIR),
+                    "searched": [],
+                }
+                json_line(
+                    self,
+                    {
+                        "type": "thought",
+                        "text": f"Aero/CFD preflight failed before finalizing: {exc}",
+                    },
+                )
+            emit_assistant_answer(
+                self,
+                messages,
+                route,
+                admin_topic,
+                format_aero_cfd_preflight_answer(tool_result),
                 normalize=False,
             )
             json_line(self, {"type": "done", "returnCode": 0 if tool_result.get("ok") else 1})
