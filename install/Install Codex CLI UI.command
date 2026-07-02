@@ -72,14 +72,158 @@ cat > "$LOCAL_BIN/codex-careful" <<'SCRIPT'
 #!/bin/bash
 exec codex --profile local-oss "$@"
 SCRIPT
+cat > "$LOCAL_BIN/qblade-import" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+
+version="${QBLADE_VERSION:-2.0.9.7}"
+name="QBladeCE_${version}_linux"
+install_root="${QBLADE_LINUX_HOME:-$HOME/.local/aero-tools/qblade-linux}"
+downloads_root="${QBLADE_DOWNLOADS_DIR:-$HOME/Downloads}"
+archive_store="$HOME/Downloads/codex-aero-installs"
+watch=0
+timeout=900
+
+usage() {
+  cat <<EOF
+Usage: qblade-import [--watch] [--timeout seconds] [archive]
+
+Validates and imports the official QBlade CE Linux archive into:
+  $install_root
+
+If no archive is supplied it scans:
+  $downloads_root
+  $archive_store
+
+The official browser download currently comes from:
+  https://qblade.org/downloads/
+
+QBlade CE is licensed for non-commercial/evaluation use under QBlade's
+Academic Public License. Commercial work requires QBlade EE.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --watch)
+      watch=1
+      shift
+      ;;
+    --timeout)
+      timeout="${2:-900}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      archive_arg="$1"
+      shift
+      ;;
+  esac
+done
+
+candidate_files() {
+  if [[ -n "${archive_arg:-}" ]]; then
+    printf '%s\n' "$archive_arg"
+    return
+  fi
+  find "$downloads_root" "$archive_store" -maxdepth 2 -type f \
+    \( -iname "${name}*" -o -iname "Unconfirmed*.crdownload" -o -iname "*QBladeCE*linux*" \) \
+    -print 2>/dev/null | sort -ru
+}
+
+archive_ok() {
+  local file="$1"
+  [[ -f "$file" ]] || return 1
+  file "$file" | grep -Eq 'tar archive|Zip archive|data' || return 1
+  local list_file error_file
+  list_file="$(mktemp /tmp/qblade-import-list.XXXXXX)"
+  error_file="$(mktemp /tmp/qblade-import-error.XXXXXX)"
+  if ! tar -tf "$file" >"$list_file" 2>"$error_file"; then
+    rm -f "$list_file" "$error_file"
+    return 1
+  fi
+  if ! grep -q "QBladeCE_${version}/QBladeCE_${version}$" "$list_file"; then
+    rm -f "$list_file" "$error_file"
+    return 1
+  fi
+  if ! grep -q "QBladeCE_${version}/libQBladeCE_${version}.so.1.0.0$" "$list_file"; then
+    rm -f "$list_file" "$error_file"
+    return 1
+  fi
+  rm -f "$list_file" "$error_file"
+}
+
+import_archive() {
+  local file="$1"
+  mkdir -p "$install_root" "$archive_store"
+  local saved="$archive_store/${name}.tar"
+  cp "$file" "$saved"
+  rm -rf "$install_root/QBladeCE_${version}" "$install_root/current"
+  tar -xf "$saved" -C "$install_root"
+  chmod +x "$install_root/QBladeCE_${version}/QBladeCE_${version}" || true
+  find "$install_root/QBladeCE_${version}/Binaries" -type f -perm -111 -exec chmod +x {} + 2>/dev/null || true
+  {
+    echo "version=$version"
+    echo "archive=$saved"
+    shasum -a 256 "$saved" | awk '{print "sha256="$1}'
+    echo "imported_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } > "$install_root/QBladeCE_${version}/IMPORT_OK"
+  ln -sfn "$install_root/QBladeCE_${version}" "$install_root/current"
+  echo "Imported QBlade CE ${version}: $install_root/QBladeCE_${version}"
+  echo "Archive saved: $saved"
+}
+
+try_once() {
+  local found=0
+  while IFS= read -r file; do
+    [[ -n "$file" ]] || continue
+    found=1
+    if archive_ok "$file"; then
+      import_archive "$file"
+      return 0
+    fi
+    size=$(wc -c < "$file" 2>/dev/null || echo 0)
+    echo "Not ready or incomplete: $file (${size} bytes)"
+  done < <(candidate_files)
+  if [[ "$found" -eq 0 ]]; then
+    echo "No QBlade archive found yet."
+  fi
+  return 1
+}
+
+if [[ "$watch" -eq 0 ]]; then
+  try_once
+  exit $?
+fi
+
+echo "Watching for a complete official QBlade CE Linux download..."
+echo "Open https://qblade.org/downloads/ and download ${name}."
+deadline=$((SECONDS + timeout))
+while (( SECONDS < deadline )); do
+  if try_once; then
+    exit 0
+  fi
+  sleep 5
+done
+
+echo "Timed out waiting for a complete QBlade archive."
+exit 2
+SCRIPT
 cat > "$LOCAL_BIN/qblade-linux" <<'SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
 
+version="${QBLADE_VERSION:-2.0.9.7}"
 base="${QBLADE_LINUX_HOME:-$HOME/.local/aero-tools/qblade-linux}"
+docker_image="${QBLADE_DOCKER_IMAGE:-tinman/qblade-ce-runner:2.0.9.7}"
 candidate=""
 
 for path in \
+  "$base/current/QBladeCE_${version}" \
+  "$base/QBladeCE_${version}/QBladeCE_${version}" \
   "$base/QBladeCE" \
   "$base/QBladeCE/QBladeCE" \
   "$base/QBladeCE_2.0.9.7_linux/QBladeCE" \
@@ -91,6 +235,48 @@ do
   fi
 done
 
+if [[ -n "$candidate" && ! -f "$(dirname "$candidate")/IMPORT_OK" ]]; then
+  candidate=""
+fi
+
+status() {
+  echo "QBlade CE Linux status"
+  echo "  base: $base"
+  echo "  executable: ${candidate:-missing}"
+  if [[ -n "$candidate" ]]; then
+    file "$candidate" | sed 's/^/  file: /'
+  fi
+  if [[ -x "$(command -v docker || true)" ]]; then
+    if docker image inspect "$docker_image" >/dev/null 2>&1; then
+      echo "  docker runner: $docker_image"
+    else
+      echo "  docker runner: missing ($docker_image)"
+    fi
+  else
+    echo "  docker: missing"
+  fi
+}
+
+case "${1:-}" in
+  --status)
+    status
+    exit 0
+    ;;
+  --install-help)
+    cat <<EOF
+Download the official QBlade CE Linux package in a browser:
+  https://qblade.org/downloads/
+
+Then run:
+  qblade-import --watch
+
+QBlade CE is governed by QBlade's Academic Public License and is limited to
+non-commercial/evaluation use. Commercial work needs QBlade EE.
+EOF
+    exit 0
+    ;;
+esac
+
 if [[ -z "$candidate" ]]; then
   cat <<'EOF'
 QBlade Linux package is not installed yet.
@@ -98,8 +284,11 @@ QBlade Linux package is not installed yet.
 Download the official QBlade Community Edition Linux package in a browser:
   https://qblade.org/downloads/
 
-Then extract it into:
-  ~/.local/aero-tools/qblade-linux/
+Then run:
+  qblade-import
+
+If the browser leaves an Unconfirmed .crdownload file, run:
+  qblade-import --watch
 
 Note: QBlade CE is governed by QBlade's Academic Public License and is limited
 to non-commercial/evaluation use. Commercial work needs QBlade EE.
@@ -107,10 +296,96 @@ EOF
   exit 2
 fi
 
+if ! file "$candidate" | grep -q 'ELF 64-bit.*x86-64'; then
+  echo "QBlade executable is present but is not the expected Linux x86-64 build:"
+  file "$candidate"
+  exit 3
+fi
+
+if [[ "$(uname -s)" != "Linux" ]]; then
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "QBlade CE is a Linux x86-64 binary. Docker is required to run it on this Mac."
+    exit 4
+  fi
+  if ! docker image inspect "$docker_image" >/dev/null 2>&1; then
+    cat <<EOF
+QBlade is installed, but the Linux runner image is missing:
+  $docker_image
+
+Build it with:
+  qblade-runner-build
+EOF
+    exit 5
+  fi
+  rel_dir="$(dirname "${candidate#$base/}")"
+  exec docker run --rm --platform linux/amd64 \
+    -e QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}" \
+    -e LD_LIBRARY_PATH="/qblade/$rel_dir:/qblade/$rel_dir/Libraries:/qblade/$rel_dir/Binaries" \
+    -v "$base:/qblade:ro" \
+    -w "/qblade/$rel_dir" \
+    "$docker_image" \
+    "./$(basename "$candidate")" "$@"
+fi
+
 exec "$candidate" "$@"
 SCRIPT
+cat > "$LOCAL_BIN/qblade-runner-build" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+
+image="${QBLADE_DOCKER_IMAGE:-tinman/qblade-ce-runner:2.0.9.7}"
+context="$(mktemp -d /tmp/qblade-runner-build.XXXXXX)"
+trap 'rm -rf "$context"' EXIT
+
+cat > "$context/Dockerfile" <<'EOF'
+FROM --platform=linux/amd64 ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libasound2 \
+    libdbus-1-3 \
+    libegl1 \
+    libfontconfig1 \
+    libfreetype6 \
+    libgl1 \
+    libglib2.0-0 \
+    libglu1-mesa \
+    libgomp1 \
+    libice6 \
+    libnss3 \
+    libopengl0 \
+    libsm6 \
+    libstdc++6 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcb-glx0 \
+    libxcb-icccm4 \
+    libxcb-image0 \
+    libxcb-keysyms1 \
+    libxcb-randr0 \
+    libxcb-render0 \
+    libxcb-render-util0 \
+    libxcb-shape0 \
+    libxcb-shm0 \
+    libxcb-sync1 \
+    libxcb-xfixes0 \
+    libxcb-xinerama0 \
+    libxcb-xkb1 \
+    libxext6 \
+    libxkbcommon0 \
+    libxkbcommon-x11-0 \
+    libxrender1 \
+    libxt6 \
+    && rm -rf /var/lib/apt/lists/*
+EOF
+
+docker build --platform linux/amd64 -t "$image" "$context"
+echo "Built QBlade runner image: $image"
+SCRIPT
 ln -sf "$LOCAL_BIN/qblade-linux" "$LOCAL_BIN/qblade"
-chmod +x "$LOCAL_BIN/codex-fast" "$LOCAL_BIN/codex-careful" "$LOCAL_BIN/qblade-linux"
+chmod +x "$LOCAL_BIN/codex-fast" "$LOCAL_BIN/codex-careful" "$LOCAL_BIN/qblade-import" "$LOCAL_BIN/qblade-linux" "$LOCAL_BIN/qblade-runner-build"
 
 PROFILE_PATH_VALUE="$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:/Applications/Codex.app/Contents/Resources:/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin"
 
