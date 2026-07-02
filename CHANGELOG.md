@@ -4,6 +4,7 @@
 
 - Adds OpenVSP/VSPAERO, XFOIL, SU2, QBlade Linux launcher, and CalculiX to the free-tool capability catalog.
 - Creates the `qblade-import`, `qblade-linux`, `qblade-runner-build`, and `qblade` helpers so QBlade CE downloads are validated before use and run through a Linux Docker runner on macOS.
+- Accepts official Safari-extracted QBlade folders, rejects incomplete `Unconfirmed*.crdownload` downloads, and runs QBlade through Xvfb with the Qt runtime libraries it needs.
 - Adds mechanical/structural design detection for brackets, mounts, holders, loads, stress, deflection, FEA, FEM, and safety-factor prompts.
 - Adds a structural FEA preflight endpoint that captures load/material/safety-factor assumptions, resolves attached geometry, stages a CalculiX input deck, and runs a solver seed case when `ccx` is available.
 - Routes mechanical and structural design prompts into CAD/Modeling instead of printer status or generic CAD fallbacks.

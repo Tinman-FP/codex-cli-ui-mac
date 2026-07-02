@@ -21,6 +21,7 @@ Open the DMG and double-click `Install Codex CLI UI.command`.
 
 - OpenVSP/VSPAERO, XFOIL, SU2, QBlade Linux launcher, and CalculiX tool visibility in the local capability catalog.
 - Installer-created `qblade-import`, `qblade-linux`, `qblade-runner-build`, and `qblade` helpers for validated QBlade CE Linux imports on macOS.
+- Safari-extracted QBlade folders can be imported directly, incomplete browser downloads are rejected, and the Docker runner includes Qt/Xvfb support for headless Linux execution.
 - Structural FEA preflight endpoint for brackets, mounts, holders, loads, stress, deflection, FEA/FEM, and safety-factor prompts.
 - Load/material/safety-factor assumption capture before claiming strength.
 - CalculiX seed input deck generation and solver smoke run when `ccx` is available.
@@ -56,7 +57,7 @@ ollama pull qwen2.5-coder:7b
 ollama pull deepseek-r1:8b
 ```
 
-Optional engineering tools are detected when present. QBlade CE's Linux package must be downloaded from the official QBlade site, then imported with `qblade-import`; partial browser files such as `Unconfirmed*.crdownload` are rejected until the archive validates.
+Optional engineering tools are detected when present. QBlade CE's Linux package must be downloaded from the official QBlade site, then imported with `qblade-import`; official extracted folders from Safari are accepted, while partial browser files such as `Unconfirmed*.crdownload` are rejected until the download validates.
 
 ## Notes
 

@@ -91,7 +91,7 @@ Usage: qblade-import [--watch] [--timeout seconds] [archive]
 Validates and imports the official QBlade CE Linux archive into:
   $install_root
 
-If no archive is supplied it scans:
+If no archive or extracted folder is supplied it scans:
   $downloads_root
   $archive_store
 
@@ -124,14 +124,22 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-candidate_files() {
+candidate_paths() {
   if [[ -n "${archive_arg:-}" ]]; then
     printf '%s\n' "$archive_arg"
     return
   fi
-  find "$downloads_root" "$archive_store" -maxdepth 2 -type f \
-    \( -iname "${name}*" -o -iname "Unconfirmed*.crdownload" -o -iname "*QBladeCE*linux*" \) \
+  find "$downloads_root" "$archive_store" -maxdepth 2 \
+    \( -type f -o -type d \) \
+    \( -iname "${name}*" -o -iname "QBladeCE_${version}" -o -iname "Unconfirmed*.crdownload" -o -iname "*QBladeCE*linux*" \) \
     -print 2>/dev/null | sort -ru
+}
+
+directory_ok() {
+  local dir="$1"
+  [[ -d "$dir" ]] || return 1
+  [[ -x "$dir/QBladeCE_${version}" ]] || return 1
+  [[ -f "$dir/libQBladeCE_${version}.so.1.0.0" ]] || return 1
 }
 
 archive_ok() {
@@ -156,6 +164,28 @@ archive_ok() {
   rm -f "$list_file" "$error_file"
 }
 
+import_directory() {
+  local dir="$1"
+  mkdir -p "$install_root" "$archive_store"
+  rm -rf "$install_root/QBladeCE_${version}" "$install_root/current"
+  if command -v ditto >/dev/null 2>&1; then
+    ditto "$dir" "$install_root/QBladeCE_${version}"
+  else
+    mkdir -p "$install_root/QBladeCE_${version}"
+    cp -R "$dir"/. "$install_root/QBladeCE_${version}/"
+  fi
+  chmod +x "$install_root/QBladeCE_${version}/QBladeCE_${version}" || true
+  find "$install_root/QBladeCE_${version}/Binaries" -type f -perm -111 -exec chmod +x {} + 2>/dev/null || true
+  {
+    echo "version=$version"
+    echo "source_dir=$dir"
+    echo "imported_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } > "$install_root/QBladeCE_${version}/IMPORT_OK"
+  ln -sfn "$install_root/QBladeCE_${version}" "$install_root/current"
+  echo "Imported QBlade CE ${version}: $install_root/QBladeCE_${version}"
+  echo "Source folder: $dir"
+}
+
 import_archive() {
   local file="$1"
   mkdir -p "$install_root" "$archive_store"
@@ -178,16 +208,24 @@ import_archive() {
 
 try_once() {
   local found=0
-  while IFS= read -r file; do
-    [[ -n "$file" ]] || continue
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
     found=1
-    if archive_ok "$file"; then
-      import_archive "$file"
+    if directory_ok "$path"; then
+      import_directory "$path"
       return 0
     fi
-    size=$(wc -c < "$file" 2>/dev/null || echo 0)
-    echo "Not ready or incomplete: $file (${size} bytes)"
-  done < <(candidate_files)
+    if archive_ok "$path"; then
+      import_archive "$path"
+      return 0
+    fi
+    if [[ -f "$path" ]]; then
+      size=$(wc -c < "$path" 2>/dev/null || echo 0)
+      echo "Not ready or incomplete: $path (${size} bytes)"
+    else
+      echo "Not ready or incomplete: $path"
+    fi
+  done < <(candidate_paths)
   if [[ "$found" -eq 0 ]]; then
     echo "No QBlade archive found yet."
   fi
@@ -317,14 +355,16 @@ Build it with:
 EOF
     exit 5
   fi
-  rel_dir="$(dirname "${candidate#$base/}")"
+  base_real="$(cd "$base" && pwd -P)"
+  candidate_dir="$(cd "$(dirname "$candidate")" && pwd -P)"
+  rel_dir="${candidate_dir#$base_real/}"
   exec docker run --rm --platform linux/amd64 \
-    -e QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}" \
+    -e QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}" \
     -e LD_LIBRARY_PATH="/qblade/$rel_dir:/qblade/$rel_dir/Libraries:/qblade/$rel_dir/Binaries" \
-    -v "$base:/qblade:ro" \
+    -v "$base:/qblade:rw" \
     -w "/qblade/$rel_dir" \
     "$docker_image" \
-    "./$(basename "$candidate")" "$@"
+    xvfb-run -a -s "-screen 0 1280x1024x24" "./$(basename "$candidate")" "$@"
 fi
 
 exec "$candidate" "$@"
@@ -355,6 +395,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libice6 \
     libnss3 \
     libopengl0 \
+    libquadmath0 \
+    libqt5core5a \
+    libqt5gui5 \
+    libqt5network5 \
+    libqt5opengl5 \
+    libqt5widgets5 \
+    libqt5xml5 \
     libsm6 \
     libstdc++6 \
     libx11-6 \
@@ -378,6 +425,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxkbcommon-x11-0 \
     libxrender1 \
     libxt6 \
+    xvfb \
     && rm -rf /var/lib/apt/lists/*
 EOF
 
