@@ -36,6 +36,8 @@ const els = {
   benchmarkSummaryGrid: document.getElementById("benchmarkSummaryGrid"),
   benchmarkList: document.getElementById("benchmarkList"),
   packageHealthList: document.getElementById("packageHealthList"),
+  improvementSummaryGrid: document.getElementById("improvementSummaryGrid"),
+  improvementList: document.getElementById("improvementList"),
   testBenchSubtitle: document.getElementById("testBenchSubtitle"),
   testSummaryGrid: document.getElementById("testSummaryGrid"),
   testList: document.getElementById("testList"),
@@ -341,13 +343,14 @@ function renderAdmin() {
   const projects = admin.projects || [];
   const knowledge = admin.knowledge || [];
   const recent = admin.recentTopics || [];
+  const improvement = admin.improvementLab || {};
 
   if (els.adminCountText) {
-    els.adminCountText.textContent = `${admin.knowledgeCount || knowledge.length}`;
+    els.adminCountText.textContent = `${improvement.openCount || admin.knowledgeCount || knowledge.length}`;
   }
 
   if (els.adminPanelSubtitle) {
-    els.adminPanelSubtitle.textContent = `${projects.length} project folder${projects.length === 1 ? "" : "s"} · ${admin.knowledgeCount || knowledge.length} stable learned note${(admin.knowledgeCount || knowledge.length) === 1 ? "" : "s"} · ${admin.qualityFeedbackCount || 0} quality lesson${(admin.qualityFeedbackCount || 0) === 1 ? "" : "s"}`;
+    els.adminPanelSubtitle.textContent = `${projects.length} project folder${projects.length === 1 ? "" : "s"} · ${admin.knowledgeCount || knowledge.length} stable learned note${(admin.knowledgeCount || knowledge.length) === 1 ? "" : "s"} · ${improvement.openCount || 0} open improvement${(improvement.openCount || 0) === 1 ? "" : "s"}`;
   }
 
   if (els.adminSummaryGrid) {
@@ -356,6 +359,7 @@ function renderAdmin() {
       ["Projects", `${admin.projectCount || projects.length}`],
       ["Stable Notes", `${admin.knowledgeCount || knowledge.length}`],
       ["Quality Lessons", `${admin.qualityFeedbackCount || 0}`],
+      ["Improvements", `${improvement.openCount || 0}`],
       ["Recent Topics", `${recent.length}`],
     ].forEach(([label, value]) => {
       const item = document.createElement("div");
@@ -372,6 +376,7 @@ function renderAdmin() {
   renderAdminNav(projects);
   renderBenchmarkPanel();
   renderPackageHealth();
+  renderImprovementLab(improvement);
   renderAdminProjectTree(projects);
   renderAdminKnowledge(knowledge);
   renderAdminRecent(recent);
@@ -482,6 +487,90 @@ function renderPackageHealth() {
     detail.textContent = check.detail || "";
     row.append(label, status, detail);
     els.packageHealthList.appendChild(row);
+  });
+}
+
+function renderImprovementLab(lab) {
+  const items = lab.items || [];
+  if (els.improvementSummaryGrid) {
+    els.improvementSummaryGrid.textContent = "";
+    [
+      ["Open", `${lab.openCount || 0}`],
+      ["Answer Fixes", `${lab.fixCount || 0}`],
+      ["Tool Gaps", `${lab.toolGapCount || 0}`],
+      ["Test Candidates", `${lab.testCandidateCount || 0}`],
+      ["Reviewed", `${lab.reviewedCount || 0}`],
+    ].forEach(([label, value]) => {
+      const item = document.createElement("div");
+      item.className = "admin-summary-item";
+      const small = document.createElement("span");
+      small.textContent = label;
+      const strong = document.createElement("strong");
+      strong.textContent = value;
+      item.append(small, strong);
+      els.improvementSummaryGrid.appendChild(item);
+    });
+  }
+
+  if (!els.improvementList) return;
+  els.improvementList.textContent = "";
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "admin-empty";
+    empty.textContent = "No improvement items yet. Fix-this feedback and tool gaps will land here.";
+    els.improvementList.appendChild(empty);
+    return;
+  }
+
+  items.slice(0, 18).forEach((item) => {
+    const row = document.createElement("article");
+    row.className = `improvement-row ${item.status || "open"} ${item.severity || "medium"}`;
+
+    const copy = document.createElement("div");
+    copy.className = "improvement-copy";
+    const meta = document.createElement("div");
+    meta.className = "improvement-meta";
+    const severity = document.createElement("span");
+    severity.textContent = item.severity || "medium";
+    const type = document.createElement("span");
+    type.textContent = item.type || "improvement";
+    const project = document.createElement("span");
+    project.textContent = item.project || item.projectId || "General";
+    meta.append(severity, type, project);
+
+    const title = document.createElement("strong");
+    title.textContent = item.title || "Improvement";
+    const recommendation = document.createElement("p");
+    recommendation.textContent = item.recommendation || item.evidence || "";
+    const next = document.createElement("em");
+    next.textContent = item.nextAction || "";
+    copy.append(meta, title, recommendation);
+    if (next.textContent) copy.appendChild(next);
+
+    const actions = document.createElement("div");
+    actions.className = "improvement-actions";
+    const promote = document.createElement("button");
+    promote.className = "tiny-action-button";
+    promote.type = "button";
+    promote.textContent = item.promotedTestAt ? "Promoted" : "Test";
+    promote.disabled = Boolean(activeController) || Boolean(item.promotedTestAt);
+    promote.addEventListener("click", () => updateImprovementItem(item.id, "promote-test"));
+    const review = document.createElement("button");
+    review.className = "tiny-action-button";
+    review.type = "button";
+    review.textContent = item.status === "reviewed" ? "Reviewed" : "Review";
+    review.disabled = Boolean(activeController) || item.status === "reviewed";
+    review.addEventListener("click", () => updateImprovementItem(item.id, "review"));
+    const archive = document.createElement("button");
+    archive.className = "tiny-action-button danger";
+    archive.type = "button";
+    archive.textContent = "Archive";
+    archive.disabled = Boolean(activeController);
+    archive.addEventListener("click", () => updateImprovementItem(item.id, "archive"));
+    actions.append(promote, review, archive);
+
+    row.append(copy, actions);
+    els.improvementList.appendChild(row);
   });
 }
 
@@ -1284,6 +1373,24 @@ async function updateKnowledgeItem(id, action) {
     renderAdmin();
   } catch (error) {
     appendLog("warning", `Stable knowledge update failed: ${error.message}`);
+  }
+}
+
+async function updateImprovementItem(id, action) {
+  if (!id || activeController) return;
+  try {
+    const response = await fetch("/api/admin/improvement-lab", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, action }),
+    });
+    if (!response.ok) throw new Error(`improvement ${response.status}`);
+    const result = await response.json();
+    if (result.admin) config.admin = result.admin;
+    if (!result.ok) appendLog("warning", result.error || "Improvement action failed");
+    renderAdmin();
+  } catch (error) {
+    appendLog("warning", `Improvement update failed: ${error.message}`);
   }
 }
 

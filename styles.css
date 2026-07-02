@@ -721,9 +721,10 @@ h1 {
   gap: 8px;
 }
 
-.admin-summary-grid {
+.admin-summary-grid,
+.improvement-summary-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
   max-width: 1120px;
   margin: 0 auto 14px;
@@ -797,7 +798,8 @@ h1 {
 .admin-knowledge-list,
 .admin-topic-list,
 .benchmark-list,
-.package-health-list {
+.package-health-list,
+.improvement-list {
   display: grid;
   gap: 9px;
 }
@@ -806,7 +808,8 @@ h1 {
 .admin-recent-row,
 .benchmark-row,
 .package-health-row,
-.package-health-summary {
+.package-health-summary,
+.improvement-row {
   border: 1px solid #dbe4ee;
   border-radius: 8px;
   background: #f8fafc;
@@ -1079,6 +1082,84 @@ h1 {
 
 .package-health-row.fail span {
   color: var(--danger);
+}
+
+.improvement-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 10px;
+}
+
+.improvement-row.high,
+.improvement-row.critical {
+  border-color: rgba(189, 44, 44, 0.28);
+}
+
+.improvement-row.medium {
+  border-color: rgba(161, 92, 3, 0.24);
+}
+
+.improvement-row.reviewed {
+  border-color: rgba(24, 134, 91, 0.26);
+  background: rgba(24, 134, 91, 0.06);
+}
+
+.improvement-copy {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.improvement-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.improvement-meta span {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid #cbd8e5;
+  border-radius: 7px;
+  padding: 2px 6px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.improvement-copy strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.improvement-copy p,
+.improvement-copy em {
+  margin: 0;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.improvement-copy em {
+  color: var(--muted);
+  font-style: normal;
+}
+
+.improvement-actions {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 158px;
 }
 
 .admin-recent-row {
@@ -1972,7 +2053,8 @@ input:focus {
 
   .test-summary-grid,
   .admin-summary-grid,
-  .benchmark-summary-grid {
+  .benchmark-summary-grid,
+  .improvement-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1986,6 +2068,15 @@ input:focus {
 
   .benchmark-stats {
     justify-items: start;
+  }
+
+  .improvement-row {
+    grid-template-columns: 1fr;
+  }
+
+  .improvement-actions {
+    justify-content: flex-start;
+    min-width: 0;
   }
 
   .admin-recent-row {

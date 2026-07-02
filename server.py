@@ -30,6 +30,7 @@ LOCAL_RESEARCH_CACHE_PATH = DATA_DIR / "local_research_cache.sqlite3"
 ADMIN_STATE_PATH = DATA_DIR / "admin_cleanup_state.json"
 ADMIN_KNOWLEDGE_PATH = DATA_DIR / "stable_knowledge.json"
 QUALITY_FEEDBACK_PATH = DATA_DIR / "quality_feedback.jsonl"
+IMPROVEMENT_LAB_PATH = DATA_DIR / "improvement_lab.json"
 MODEL_WARMUP_STATE_PATH = DATA_DIR / "model_warmup_state.json"
 LOCAL_TOOL_OUTPUT_DIR = DATA_DIR / "generated" / "printer-macros"
 CAPABILITY_TOOL_LOG_PATH = DATA_DIR / "capability_tool_log.jsonl"
@@ -1068,6 +1069,303 @@ def quality_feedback_summary(limit=8):
             for item in recent
         ],
     }
+
+
+def default_improvement_lab():
+    now = time.time()
+    return {
+        "version": 1,
+        "createdAt": now,
+        "updatedAt": now,
+        "items": [],
+    }
+
+
+def load_improvement_lab():
+    data = read_json(IMPROVEMENT_LAB_PATH, default_improvement_lab())
+    if not isinstance(data, dict):
+        data = default_improvement_lab()
+    data.setdefault("version", 1)
+    data.setdefault("createdAt", time.time())
+    data.setdefault("updatedAt", time.time())
+    items = data.get("items")
+    data["items"] = items if isinstance(items, list) else []
+    return data
+
+
+def improvement_item_id(*parts):
+    key = "\n".join(str(part or "") for part in parts)
+    return hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
+
+
+def improvement_severity_rank(value):
+    return {"critical": 0, "high": 1, "medium": 2, "low": 3}.get(str(value or "medium"), 2)
+
+
+def improvement_status_rank(value):
+    return {"open": 0, "reviewed": 1, "archived": 2}.get(str(value or "open"), 0)
+
+
+def improvement_lab_item_summary(item):
+    return {
+        "id": item.get("id"),
+        "type": item.get("type", "improvement"),
+        "severity": item.get("severity", "medium"),
+        "status": item.get("status", "open"),
+        "title": item.get("title", "Improvement"),
+        "source": item.get("source", ""),
+        "projectId": item.get("projectId", "general"),
+        "project": item.get("project", "General Helper"),
+        "prompt": item.get("prompt", ""),
+        "recommendation": item.get("recommendation", ""),
+        "nextAction": item.get("nextAction", ""),
+        "evidence": item.get("evidence", ""),
+        "count": int(item.get("count") or 1),
+        "createdAt": item.get("createdAt"),
+        "updatedAt": item.get("updatedAt"),
+        "reviewedAt": item.get("reviewedAt"),
+        "archivedAt": item.get("archivedAt"),
+        "promotedTestAt": item.get("promotedTestAt"),
+    }
+
+
+def store_improvement_item(item):
+    if not isinstance(item, dict):
+        return None
+    now = time.time()
+    data = load_improvement_lab()
+    items = data.get("items", [])
+    item_id = item.get("id") or improvement_item_id(
+        item.get("source", "manual"),
+        item.get("type", "improvement"),
+        item.get("title", ""),
+        item.get("prompt", ""),
+    )
+    existing = next((candidate for candidate in items if candidate.get("id") == item_id), None)
+    fields = {
+        "id": item_id,
+        "type": str(item.get("type") or "improvement"),
+        "severity": safe_choice(item.get("severity"), {"critical", "high", "medium", "low"}, "medium"),
+        "title": compact(redact_quality_text(item.get("title") or "Improvement"), 140),
+        "source": compact(item.get("source") or "", 80),
+        "projectId": str(item.get("projectId") or "general"),
+        "project": compact(item.get("project") or "General Helper", 100),
+        "prompt": compact(redact_quality_text(item.get("prompt") or ""), 700),
+        "recommendation": compact(redact_quality_text(item.get("recommendation") or ""), 900),
+        "nextAction": compact(redact_quality_text(item.get("nextAction") or ""), 500),
+        "evidence": compact(redact_quality_text(item.get("evidence") or ""), 700),
+    }
+    if existing:
+        status = safe_choice(existing.get("status"), {"open", "reviewed", "archived"}, "open")
+        existing.update(fields)
+        existing["status"] = "open" if item.get("reopen") else status
+        existing["count"] = int(existing.get("count") or 1) + 1
+        existing["updatedAt"] = now
+        result = existing
+    else:
+        result = {
+            **fields,
+            "status": safe_choice(item.get("status"), {"open", "reviewed", "archived"}, "open"),
+            "count": int(item.get("count") or 1),
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        items.append(result)
+
+    data["items"] = sorted(
+        items,
+        key=lambda candidate: (
+            improvement_status_rank(candidate.get("status")),
+            improvement_severity_rank(candidate.get("severity")),
+            -float(candidate.get("updatedAt") or candidate.get("createdAt") or 0),
+        ),
+    )
+    data["updatedAt"] = now
+    write_json_atomic(IMPROVEMENT_LAB_PATH, data)
+    return improvement_lab_item_summary(result)
+
+
+def quality_feedback_improvement_item(record):
+    if not isinstance(record, dict) or record.get("rating") != "fix":
+        return None
+    prompt = compact(record.get("prompt") or "", 260)
+    note = compact(record.get("note") or "", 260)
+    project_id = str(record.get("projectId") or "general")
+    return {
+        "id": improvement_item_id("quality-feedback", record.get("id") or prompt or note),
+        "type": "answer-quality",
+        "severity": "high",
+        "source": "Fix this feedback",
+        "projectId": project_id,
+        "project": record.get("project") or project_id.replace("-", " ").title(),
+        "title": f"Improve answer quality: {compact(prompt or project_id, 72)}",
+        "prompt": prompt,
+        "evidence": note or compact(record.get("answer") or "", 420),
+        "recommendation": (
+            note
+            or "Turn this feedback into a reusable answer rule, then rerun the same style of request as a regression check."
+        ),
+        "nextAction": "Create or update a golden prompt test and adjust the project playbook/rubric that produced the weak answer.",
+    }
+
+
+def record_improvement_from_feedback(record):
+    item = quality_feedback_improvement_item(record)
+    if not item:
+        return None
+    return store_improvement_item(item)
+
+
+def capability_result_improvement_item(result):
+    if not isinstance(result, dict):
+        return None
+    installed = bool(result.get("installed"))
+    needs_approval = bool(result.get("needsApproval"))
+    can_install = bool(result.get("canInstall"))
+    ok = bool(result.get("ok"))
+    if installed or (ok and can_install and not needs_approval):
+        return None
+    if ok and not needs_approval and str(result.get("reason") or "").lower().startswith("tool is already available"):
+        return None
+
+    tool = compact(result.get("tool") or result.get("command") or "unknown tool", 80)
+    reason = compact(result.get("reason") or result.get("error") or "Tool capability was not completed.", 260)
+    if not needs_approval and ok:
+        return None
+    severity = "high" if not result.get("canInstall") else "medium"
+    next_action = (
+        result.get("askTinman")
+        or "Add a free allowlisted installer, install the missing free tool, or choose a local fallback, then retry the task."
+    )
+    return {
+        "id": improvement_item_id("capability-gap", tool, reason),
+        "type": "tool-gap",
+        "severity": severity,
+        "source": "Capability manager",
+        "projectId": "codex-cli-ui-local-agent",
+        "project": "Codex CLI UI Local Agent",
+        "title": f"Tool gap: {tool}",
+        "prompt": result.get("requestedReason") or "",
+        "evidence": reason,
+        "recommendation": "Improve the free-tool allowlist or fallback workflow so future requests can complete without manual recovery.",
+        "nextAction": next_action,
+    }
+
+
+def record_improvement_from_capability_result(result):
+    try:
+        item = capability_result_improvement_item(result)
+        if item:
+            return store_improvement_item(item)
+    except Exception:
+        return None
+    return None
+
+
+def improvement_lab_summary(limit=40):
+    data = load_improvement_lab()
+    items = [item for item in data.get("items", []) if isinstance(item, dict)]
+    visible = [item for item in items if item.get("status") != "archived"]
+    visible.sort(
+        key=lambda item: (
+            improvement_status_rank(item.get("status")),
+            improvement_severity_rank(item.get("severity")),
+            -float(item.get("updatedAt") or item.get("createdAt") or 0),
+        )
+    )
+    by_type = {}
+    by_severity = {}
+    for item in visible:
+        by_type[item.get("type", "improvement")] = by_type.get(item.get("type", "improvement"), 0) + 1
+        by_severity[item.get("severity", "medium")] = by_severity.get(item.get("severity", "medium"), 0) + 1
+    open_items = [item for item in visible if item.get("status", "open") == "open"]
+    reviewed_items = [item for item in visible if item.get("status") == "reviewed"]
+    return {
+        "path": str(IMPROVEMENT_LAB_PATH),
+        "count": len(items),
+        "visibleCount": len(visible),
+        "openCount": len(open_items),
+        "reviewedCount": len(reviewed_items),
+        "archivedCount": len(items) - len(visible),
+        "fixCount": by_type.get("answer-quality", 0),
+        "toolGapCount": by_type.get("tool-gap", 0),
+        "testCandidateCount": sum(1 for item in visible if item.get("type") == "answer-quality" and not item.get("promotedTestAt")),
+        "byType": by_type,
+        "bySeverity": by_severity,
+        "items": [improvement_lab_item_summary(item) for item in visible[:limit]],
+    }
+
+
+def update_improvement_lab_item(action, item_id):
+    data = load_improvement_lab()
+    items = data.get("items", [])
+    target = next((item for item in items if item.get("id") == item_id), None)
+    if not target:
+        return {"ok": False, "error": "Improvement item not found."}
+
+    now = time.time()
+    if action in {"review", "reviewed", "mark-reviewed"}:
+        target["status"] = "reviewed"
+        target["reviewedAt"] = now
+        target["updatedAt"] = now
+    elif action == "archive":
+        target["status"] = "archived"
+        target["archivedAt"] = now
+        target["updatedAt"] = now
+    elif action == "reopen":
+        target["status"] = "open"
+        target.pop("archivedAt", None)
+        target["updatedAt"] = now
+    elif action in {"promote-test", "promote"}:
+        target["status"] = "reviewed"
+        target["reviewedAt"] = now
+        target["promotedTestAt"] = now
+        target["updatedAt"] = now
+        target["nextAction"] = "Promoted to a regression-test candidate. Add it to the golden prompts when the expected answer shape is clear."
+    else:
+        return {"ok": False, "error": "Unsupported improvement action."}
+
+    data["updatedAt"] = now
+    data["items"] = sorted(
+        items,
+        key=lambda item: (
+            improvement_status_rank(item.get("status")),
+            improvement_severity_rank(item.get("severity")),
+            -float(item.get("updatedAt") or item.get("createdAt") or 0),
+        ),
+    )
+    write_json_atomic(IMPROVEMENT_LAB_PATH, data)
+    return {"ok": True, "action": action, "id": item_id, "item": improvement_lab_item_summary(target)}
+
+
+def improvement_lab_synthetic_check():
+    feedback_item = quality_feedback_improvement_item(
+        {
+            "id": "synthetic-feedback",
+            "rating": "fix",
+            "prompt": "Why did the local run fail?",
+            "answer": "No final message returned.",
+            "note": "Recover with a concrete fallback and regression test.",
+            "projectId": "codex-cli-ui-local-agent",
+            "project": "Codex CLI UI Local Agent",
+        }
+    )
+    tool_item = capability_result_improvement_item(
+        {
+            "ok": False,
+            "tool": "missing-free-tool",
+            "needsApproval": True,
+            "canInstall": False,
+            "reason": "No free allowlisted installer is configured for that command or capability.",
+            "requestedReason": "Synthetic health check",
+        }
+    )
+    return bool(
+        feedback_item
+        and feedback_item.get("type") == "answer-quality"
+        and tool_item
+        and tool_item.get("type") == "tool-gap"
+    )
 
 
 def score_quality_feedback(item, messages, route):
@@ -2367,6 +2665,7 @@ def admin_summary():
     state = load_admin_state()
     knowledge = load_stable_knowledge()
     quality = quality_feedback_summary()
+    improvement = improvement_lab_summary()
     projects = []
     for project_id, project in state.get("projects", {}).items():
         folders = []
@@ -2403,6 +2702,8 @@ def admin_summary():
         "qualityFeedbackPath": quality["path"],
         "qualityFeedbackCount": quality["count"],
         "recentQualityFeedback": quality["recent"],
+        "improvementLab": improvement,
+        "improvementCount": improvement["openCount"],
         "projectCount": len(projects),
         "knowledgeCount": len(knowledge.get("items", [])),
         "projects": projects,
@@ -3593,6 +3894,7 @@ def install_free_tool(tool_or_command, approved=False, dry_run=False, reason="")
     decision["requestedReason"] = compact(reason or "", 260)
     if dry_run or decision.get("installed") or not decision.get("canInstall"):
         append_capability_log({"action": "install-evaluate", **decision})
+        record_improvement_from_capability_result(decision)
         return decision
     brew = shutil.which("brew", path=PATH_FOR_CODEX)
     manifest = FREE_TOOL_MANIFEST[decision["tool"]]
@@ -3617,6 +3919,7 @@ def install_free_tool(tool_or_command, approved=False, dry_run=False, reason="")
             "durationMs": round((time.time() - started) * 1000),
         }
         append_capability_log({"action": "install-error", **result})
+        record_improvement_from_capability_result(result)
         return result
     installed, paths = tool_installed(manifest)
     result = {
@@ -3632,6 +3935,7 @@ def install_free_tool(tool_or_command, approved=False, dry_run=False, reason="")
         result["ok"] = False
         result["error"] = "Install command failed or installed commands were not found afterward."
     append_capability_log({"action": "install-run", **result})
+    record_improvement_from_capability_result(result)
     return result
 
 
@@ -5206,6 +5510,17 @@ def package_health_report():
     except Exception as exc:
         add("analysis:learning-filter", "fail", str(exc))
 
+    try:
+        lab = improvement_lab_summary(limit=5)
+        ok = improvement_lab_synthetic_check()
+        add(
+            "analysis:improvement-lab",
+            "pass" if ok else "fail",
+            f"{lab.get('openCount', 0)} open, {lab.get('fixCount', 0)} answer fixes, {lab.get('toolGapCount', 0)} tool gaps",
+        )
+    except Exception as exc:
+        add("analysis:improvement-lab", "fail", str(exc))
+
     health = ollama_health()
     add(
         "ollama:service",
@@ -5915,6 +6230,10 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             self.send_json(admin_summary())
             return
 
+        if path == "/api/admin/improvement-lab":
+            self.send_json({"ok": True, **improvement_lab_summary()})
+            return
+
         if path == "/api/warmup":
             params = urllib.parse.parse_qs(parsed.query)
             if params.get("run"):
@@ -5980,10 +6299,26 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 return
             try:
                 record = record_quality_feedback(payload)
+                improvement = record_improvement_from_feedback(record)
             except Exception as exc:
-                self.send_json({"ok": False, "error": str(exc), "qualityFeedback": quality_feedback_summary()})
+                self.send_json(
+                    {
+                        "ok": False,
+                        "error": str(exc),
+                        "qualityFeedback": quality_feedback_summary(),
+                        "improvementLab": improvement_lab_summary(),
+                    }
+                )
                 return
-            self.send_json({"ok": True, "record": record, "qualityFeedback": quality_feedback_summary()})
+            self.send_json(
+                {
+                    "ok": True,
+                    "record": record,
+                    "improvement": improvement,
+                    "qualityFeedback": quality_feedback_summary(),
+                    "improvementLab": improvement_lab_summary(),
+                }
+            )
             return
 
         if parsed.path == "/api/recover":
@@ -6027,6 +6362,20 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 self.send_json({**result, "admin": admin_summary()})
                 return
             self.send_json({**result, "admin": admin_summary()})
+            return
+
+        if parsed.path == "/api/admin/improvement-lab":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            except json.JSONDecodeError:
+                self.send_error(400, "Invalid JSON")
+                return
+            result = update_improvement_lab_item(
+                str(payload.get("action") or "").strip().lower(),
+                str(payload.get("id") or "").strip(),
+            )
+            self.send_json({**result, "admin": admin_summary(), "improvementLab": improvement_lab_summary()})
             return
 
         if parsed.path == "/api/tools/install-free-tool":

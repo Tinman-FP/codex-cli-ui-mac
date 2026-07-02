@@ -15,6 +15,7 @@ Codex CLI UI now has seven practical modes:
 - `Friendly` and `Humor`: per-chat personality controls that tune final-answer warmth and light humor while preserving direct answers and serious-work guardrails.
 - `Quality Coach`: local final-answer gate for Manager Balanced/Full. It checks directness, evidence, caveats, formatting, and project-specific answer shape before Tinman sees the final response.
 - `Good` / `Fix this`: local feedback actions under assistant replies. They write compact lessons to `data/quality_feedback.jsonl` so future similar prompts can improve without re-teaching the same preference.
+- `Improvement Lab`: Admin backlog fed by `Fix this` feedback and capability-manager gaps. Items can be reviewed, archived, or promoted into regression-test candidates.
 - `Failure Recovery`: local load/tool/runtime failures are converted into accountable recovery answers: blocker, unfinished/uncertain work, safe fallback, and next step. Raw `Run failed` text should not be the final user-facing answer.
 - `Analytical Operating System`: every request is classified by domain/platform/tool family before answering. It explicitly catches wrong-ecosystem traps such as Marlin/Prusa vs Klipper, codebase framework mismatch, weak research evidence, and volatile facts that require refresh.
 - `Capability Manager`: local missing-tool recovery. It checks what command/capability is missing, looks for a free allowlisted install path, checks disk space, installs only safe small/free tools automatically, and asks Tinman before paid, unknown, large, or low-storage downloads.
@@ -39,7 +40,7 @@ Use `Cloud Research` when you deliberately want OpenAI's hosted web-search/reaso
 - Local Coder model: `qwen2.5-coder-7b` through Ollama
 - Local Review model: `deepseek-r1-8b` through Ollama
 - Manager polish model: `gpt-oss-20b` through Ollama
-- Admin performance tools: model warmup, performance benchmark, package health check, and stable knowledge Promote/Delete controls.
+- Admin performance tools: model warmup, performance benchmark, package health check, Improvement Lab review controls, and stable knowledge Promote/Delete controls.
 - Local capability tools: `/api/tools/capabilities`, `/api/tools/install-free-tool`, `/api/tools/klipper-configs`, and `/api/tools/klipper-accel-rgb`.
 - Live health graph: `/api/health` feeds Ollama status, model count, loaded models, memory, disk, load, Qidi reachability, route history, and pass timing into the right rail.
 
@@ -101,6 +102,7 @@ The fuller combined platform should be a manager-agent workflow:
 
 - Manager agent owns the final answer and user tone.
 - Quality Coach owns the final answer rubric and Tinman's saved feedback lessons.
+- Improvement Lab owns turning weak-answer feedback and tool gaps into a visible backlog of fixes and regression-test candidates.
 - Analytical Operating System owns domain/platform/tool-family classification before any answer or tool choice.
 - Failure Recovery owns action accountability when a local tool, stream, file load, or runtime step breaks.
 - Capability Manager owns missing-tool detection, free-tool installation decisions, storage checks, and retry guidance.
