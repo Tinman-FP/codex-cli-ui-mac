@@ -9,7 +9,7 @@ This is a community package for Mac users who want a simple local Codex-style ch
 Download the DMG from the `release/` folder or the GitHub Release:
 
 ```text
-Codex_CLI_UI_Mac_v2026.07.06.dmg
+Codex_CLI_UI_Mac_v2026.07.07.dmg
 ```
 
 Open the DMG and double-click:
@@ -55,6 +55,7 @@ codex --profile local-fast --search
 - Tool Recovery Engine for missing commands, Git remote gaps, disabled web paths, and safe retry guidance
 - Autonomy Supervisor that catches missing web evidence, tool gaps, CAD artifact gaps, and weak refusal answers before final delivery
 - CAD design routing that avoids live-printer status traps and can stage Fusion 360/OpenSCAD artifacts
+- Deterministic CAD artifact fallback for Fusion/CPAP duct requests when local model loading fails
 - Local Research, Coder, Review, and Manager modes for a fuller free local workflow
 - Optional local history importer for your own `~/.codex/sessions`
 

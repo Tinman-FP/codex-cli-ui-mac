@@ -1,5 +1,11 @@
 # Changelog
 
+## v2026.07.07
+
+- Makes CAD/Fusion artifact staging deterministic before the local model path for CAD design requests.
+- Fixes CAD load-failure fallbacks so they stage Fusion 360/OpenSCAD/README artifacts instead of generic runtime recovery text.
+- Adds a package-health regression for CAD load failures returning artifact paths without Moonraker/config recovery wording.
+
 ## v2026.07.06
 
 - Adds the Autonomy Supervisor help reflex before final answer delivery.

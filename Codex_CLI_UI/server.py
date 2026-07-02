@@ -5739,6 +5739,100 @@ def stage_cad_artifact(prompt="", target_path=None, artifact_name=""):
     }
 
 
+def is_cad_artifact_tool_request(messages):
+    if not is_cad_design_request(messages):
+        return False
+    query = latest_user_text(messages).lower()
+    artifact_terms = (
+        "cad",
+        "fusion",
+        "fusion 360",
+        "step",
+        "stl",
+        "scad",
+        "import",
+        "imported",
+        "duct",
+        "cpap",
+        "cooling duct",
+        "part cooling",
+        "model",
+        "geometry",
+    )
+    action_terms = (
+        "design",
+        "create",
+        "make",
+        "build",
+        "model",
+        "import",
+        "imported",
+    )
+    return text_has_any(query, artifact_terms) and text_has_any(query, action_terms)
+
+
+def format_cad_artifact_result_answer(result, recovered_from_error=""):
+    if not result.get("ok"):
+        return "\n\n".join(
+            [
+                "I could not stage the CAD artifact package.",
+                f"This is why: {result.get('error', 'the local CAD artifact tool returned an unknown error')}.",
+                "You should also consider: no live printer was touched; this is a local CAD-file staging problem.",
+            ]
+        )
+
+    dim = result.get("dimensions") or {}
+    preface = "I staged a first-pass CPAP cooling duct CAD package."
+    if recovered_from_error:
+        preface = (
+            "The local model failed, so I used the CAD artifact tool instead of stopping at a runtime error. "
+            "I staged a first-pass CPAP cooling duct CAD package."
+        )
+    flow_low = dim.get("flowLowCfm", 12.0)
+    flow_high = dim.get("flowHighCfm", 15.0)
+    tool_x = dim.get("toolheadX", 50.0)
+    tool_y = dim.get("toolheadY", 50.0)
+    tool_z = dim.get("toolheadZ", 150.0)
+    inlet = dim.get("inletDiameter", 18.0)
+    front = dim.get("frontClearance", 8.0)
+    nozzle = dim.get("nozzleBelow", 9.0)
+    return "\n\n".join(
+        [
+            preface,
+            "\n".join(
+                [
+                    f"- Fusion 360 script: `{result.get('fusionScriptPath')}`",
+                    f"- OpenSCAD model: `{result.get('openScadPath')}`",
+                    f"- Design README: `{result.get('readmePath')}`",
+                ]
+            ),
+            (
+                "This is why: the prompt is a CAD/design deliverable, so the useful recovery is an importable artifact. "
+                f"The staged concept uses a {tool_x:.0f} x {tool_y:.0f} x {tool_z:.0f} mm toolhead envelope, "
+                f"{inlet:.0f} mm CPAP inlet, {front:.0f} mm front clearance, and nozzle target about {nozzle:.0f} mm below the toolhead. "
+                f"It assumes roughly {flow_low:.0f}-{flow_high:.0f} CFM free-flow and uses a compact plenum with twin outlet paths aimed near the nozzle zone."
+            ),
+            (
+                "You should also consider: this is not a completed CFD result. No CFD solver was run locally. "
+                "Treat the files as a parametric starting point for Fusion 360 fit checks, outlet aiming, flow visualization, and later CFD validation before final printing."
+            ),
+        ]
+    )
+
+
+def cad_artifact_recovery_answer(messages, error_text=""):
+    if not is_cad_artifact_tool_request(messages):
+        return ""
+    try:
+        artifact = stage_cad_artifact(
+            latest_user_text(messages),
+            artifact_name=slugify(latest_user_text(messages), "cad-design")[:48],
+        )
+        return format_cad_artifact_result_answer(artifact, recovered_from_error=error_text)
+    except Exception as exc:
+        return format_cad_artifact_result_answer({"ok": False, "error": str(exc)})
+
+
 def is_klipper_accel_rgb_tool_request(messages):
     query = latest_user_text(messages).lower()
     if not query:
@@ -6832,6 +6926,34 @@ def package_health_report():
         add("tools:cad-artifact-generator", "pass" if ok else "fail", "Fusion/OpenSCAD/README staged")
     except Exception as exc:
         add("tools:cad-artifact-generator", "fail", str(exc))
+
+    try:
+        cad_messages = [
+            {
+                "role": "user",
+                "text": (
+                    "I have a printer toolhead that measures 50mm in the x direction x 50mm in the y direction "
+                    "and 150mm in the z direction. The CPAP inlet duct is 18mm in diameter. "
+                    "I need a CPAP cooling duct designed in CAD that can be imported into Fusion 360. "
+                    "The nozzle tip is placed 9mm below the bottom of the toolhead."
+                ),
+            }
+        ]
+        recovery = cad_artifact_recovery_answer(cad_messages, error_text="Load failed")
+        ok = (
+            "Fusion 360 script:" in recovery
+            and "OpenSCAD model:" in recovery
+            and "local model failed" in recovery.lower()
+            and "Recovery plan:" not in recovery
+            and "Moonraker" not in recovery
+        )
+        add(
+            "tools:cad-load-failure-recovery",
+            "pass" if ok else "fail",
+            "CAD load failures stage artifacts instead of generic runtime recovery",
+        )
+    except Exception as exc:
+        add("tools:cad-load-failure-recovery", "fail", str(exc))
 
     try:
         analysis = build_analytical_context(
@@ -8175,6 +8297,73 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             json_line(self, {"type": "done", "returnCode": 0 if tool_result.get("ok") else 1})
             return
 
+        if is_cad_artifact_tool_request(messages):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            json_line(
+                self,
+                {
+                    "type": "status",
+                    "message": "starting",
+                    "cwd": cwd,
+                    "profile": profile,
+                    "effectiveProfile": effective_profile,
+                    "accessLevel": "local-files",
+                    "reasoningLevel": reasoning_level,
+                    "webSearch": web_search,
+                    "managerDepth": manager_depth,
+                    "friendlinessLevel": friendliness_level,
+                    "humorLevel": humor_level,
+                    "mode": "cad-artifact-tool",
+                    "engine": "local-tool",
+                    "model": "",
+                    "freeOnlyRedirect": free_only_redirect,
+                    "route": route,
+                    "adminTopic": admin_topic,
+                },
+            )
+            json_line(
+                self,
+                {
+                    "type": "thought",
+                    "text": "Using the local CAD artifact tool to stage Fusion 360/OpenSCAD files before answering.",
+                },
+            )
+            try:
+                tool_result = stage_cad_artifact(
+                    latest_user_text(messages),
+                    artifact_name=slugify(latest_user_text(messages), "cad-design")[:48],
+                )
+                json_line(
+                    self,
+                    {
+                        "type": "thought",
+                        "text": f"Staged CAD artifacts at {tool_result.get('targetDir')}.",
+                    },
+                )
+            except Exception as exc:
+                tool_result = {"ok": False, "error": str(exc)}
+                json_line(
+                    self,
+                    {
+                        "type": "thought",
+                        "text": f"Local CAD artifact tool failed: {exc}",
+                    },
+                )
+            emit_assistant_answer(
+                self,
+                messages,
+                route,
+                admin_topic,
+                format_cad_artifact_result_answer(tool_result),
+                normalize=False,
+            )
+            json_line(self, {"type": "done", "returnCode": 0 if tool_result.get("ok") else 1})
+            return
+
         direct_printer_answer = printer_status_direct_answer(messages, route)
         if direct_printer_answer:
             self.send_response(200)
@@ -8839,6 +9028,14 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                     )
                     emit_assistant_answer(self, messages, route, admin_topic, fallback_text)
                 else:
+                    cad_recovery_text = cad_artifact_recovery_answer(
+                        messages,
+                        error_text=fallback.get("error") or "local Codex returned no final answer",
+                    )
+                    if cad_recovery_text:
+                        emit_assistant_answer(self, messages, route, admin_topic, cad_recovery_text, normalize=False)
+                        json_line(self, {"type": "done", "returnCode": 0})
+                        return
                     tool_recovery = tool_recovery_plan(
                         {
                             "messages": messages,
@@ -8855,6 +9052,20 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                         cwd=cwd,
                         runtime_notes=stderr_tail[-5:],
                         tool_recovery=tool_recovery,
+                    )
+                    def emit_recovery_supervisor(text):
+                        json_line(self, {"type": "thought", "text": text})
+
+                    recovery_text = supervise_answer_before_emit(
+                        messages,
+                        route,
+                        admin_topic,
+                        recovery_text,
+                        cwd=cwd,
+                        web_search=web_search,
+                        emit=emit_recovery_supervisor,
+                        friendliness_level=friendliness_level,
+                        humor_level=humor_level,
                     )
                     emit_assistant_answer(self, messages, route, admin_topic, recovery_text)
 
@@ -8898,6 +9109,11 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                     },
                     record=True,
                 )
+                cad_recovery_text = cad_artifact_recovery_answer(messages, error_text=str(exc))
+                if cad_recovery_text:
+                    emit_assistant_answer(self, messages, route, admin_topic, cad_recovery_text, normalize=False)
+                    json_line(self, {"type": "done", "returnCode": 0})
+                    return
                 recovery_text = build_failure_recovery_answer(
                     messages,
                     route=route,
@@ -8905,6 +9121,20 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                     cwd=cwd,
                     runtime_notes=stderr_tail[-5:] if "stderr_tail" in locals() else [],
                     tool_recovery=tool_recovery,
+                )
+                def emit_exception_recovery_supervisor(text):
+                    json_line(self, {"type": "thought", "text": text})
+
+                recovery_text = supervise_answer_before_emit(
+                    messages,
+                    route,
+                    admin_topic,
+                    recovery_text,
+                    cwd=cwd,
+                    web_search=web_search,
+                    emit=emit_exception_recovery_supervisor,
+                    friendliness_level=friendliness_level,
+                    humor_level=humor_level,
                 )
                 emit_assistant_answer(self, messages, route, admin_topic, recovery_text)
                 json_line(self, {"type": "done", "returnCode": 1})

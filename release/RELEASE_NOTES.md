@@ -1,29 +1,28 @@
-# Codex CLI UI for Mac v2026.07.06
+# Codex CLI UI for Mac v2026.07.07
 
-Capability release for the Autonomy Supervisor help reflex.
+Bugfix release for deterministic CAD artifact fallback on local load failures.
 
 ## Download
 
 Download one file:
 
 ```text
-Codex_CLI_UI_Mac_v2026.07.06.dmg
+Codex_CLI_UI_Mac_v2026.07.07.dmg
 ```
 
 Open the DMG and double-click `Install Codex CLI UI.command`.
 
 ## Fixed
 
-- Draft answers that say web access is unavailable while Web Access is enabled are now flagged before final delivery.
-- CAD design drafts that drift into live-printer/Moonraker status are intercepted and recovered with local CAD artifact staging.
-- Missing-command and no-final-answer patterns are classified as help-needed conditions instead of cold failures.
+- CAD/Fusion design prompts now use the local CAD artifact tool before falling into the local model path.
+- CAD load failures now stage Fusion 360, OpenSCAD, and README artifacts instead of returning generic runtime recovery text.
+- CAD prompt recovery no longer drifts into Moonraker, live-printer status, or config-folder recovery wording.
 
 ## Added
 
-- Autonomy Supervisor prompt context in worker, reviewer, finalizer, and quality-coach paths.
-- Local supervisor endpoint: `POST /api/tools/autonomy-supervisor`.
-- Deterministic post-answer checks for web evidence, source links, CAD artifacts, missing tools, unfinished runtimes, and unsupported refusal answers.
-- Package-health checks for the self-rescue reflex.
+- Direct `cad-artifact-tool` run path for CAD design requests.
+- CAD load-failure package-health regression.
+- CAD recovery answer that reports exact Fusion 360 script, OpenSCAD model, and README paths.
 
 ## Included
 
