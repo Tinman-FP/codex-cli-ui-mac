@@ -1,1 +1,1 @@
-30d0aef1c8c583d04da704603cfd3c2487816ced888f233ec45efa0b74cde923  release/Codex_CLI_UI_Mac_v2026.07.13.dmg
+0947f082e38fc86ae8cbe4b8266f04f094274c85aa62e6d2b77d1465b2283947  release/Codex_CLI_UI_Mac_v2026.07.13.dmg

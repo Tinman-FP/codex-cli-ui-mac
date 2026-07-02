@@ -72,7 +72,45 @@ cat > "$LOCAL_BIN/codex-careful" <<'SCRIPT'
 #!/bin/bash
 exec codex --profile local-oss "$@"
 SCRIPT
-chmod +x "$LOCAL_BIN/codex-fast" "$LOCAL_BIN/codex-careful"
+cat > "$LOCAL_BIN/qblade-linux" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+
+base="${QBLADE_LINUX_HOME:-$HOME/.local/aero-tools/qblade-linux}"
+candidate=""
+
+for path in \
+  "$base/QBladeCE" \
+  "$base/QBladeCE/QBladeCE" \
+  "$base/QBladeCE_2.0.9.7_linux/QBladeCE" \
+  "$base/QBladeCE_2.0.9.7_linux/QBladeCE/QBladeCE"
+do
+  if [[ -x "$path" ]]; then
+    candidate="$path"
+    break
+  fi
+done
+
+if [[ -z "$candidate" ]]; then
+  cat <<'EOF'
+QBlade Linux package is not installed yet.
+
+Download the official QBlade Community Edition Linux package in a browser:
+  https://qblade.org/downloads/
+
+Then extract it into:
+  ~/.local/aero-tools/qblade-linux/
+
+Note: QBlade CE is governed by QBlade's Academic Public License and is limited
+to non-commercial/evaluation use. Commercial work needs QBlade EE.
+EOF
+  exit 2
+fi
+
+exec "$candidate" "$@"
+SCRIPT
+ln -sf "$LOCAL_BIN/qblade-linux" "$LOCAL_BIN/qblade"
+chmod +x "$LOCAL_BIN/codex-fast" "$LOCAL_BIN/codex-careful" "$LOCAL_BIN/qblade-linux"
 
 PROFILE_PATH_VALUE="$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:/Applications/Codex.app/Contents/Resources:/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin"
 
