@@ -9,7 +9,7 @@ This is a community package for Mac users who want a simple local Codex-style ch
 Download the DMG from the `release/` folder or the GitHub Release:
 
 ```text
-Codex_CLI_UI_Mac_v2026.07.08.dmg
+Codex_CLI_UI_Mac_v2026.07.09.dmg
 ```
 
 Open the DMG and double-click:
@@ -57,6 +57,7 @@ codex --profile local-fast --search
 - CAD design routing that avoids live-printer status traps and can stage Fusion 360/OpenSCAD artifacts
 - Deterministic CAD artifact fallback for Fusion/CPAP duct requests when local model loading fails
 - Analytical CAD answers with airflow sizing, material cooling guidance, CFD validation limits, and lightweight web source checks
+- Direct CPAP hose sizing answers so measurement questions do not generate CAD artifacts
 - Local Research, Coder, Review, and Manager modes for a fuller free local workflow
 - Optional local history importer for your own `~/.codex/sessions`
 

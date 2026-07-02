@@ -1,30 +1,28 @@
-# Codex CLI UI for Mac v2026.07.08
+# Codex CLI UI for Mac v2026.07.09
 
-Response-quality release for CAD engineering answers.
+Bugfix release for direct CPAP hose sizing answers.
 
 ## Download
 
 Download one file:
 
 ```text
-Codex_CLI_UI_Mac_v2026.07.08.dmg
+Codex_CLI_UI_Mac_v2026.07.09.dmg
 ```
 
 Open the DMG and double-click `Install Codex CLI UI.command`.
 
 ## Fixed
 
-- CAD/Fusion design prompts no longer return a file-staging receipt as the whole answer.
-- CAD answers now show the engineering decision behind the geometry instead of only listing generated files.
-- CAD web/industry requests no longer silently skip source checking when Web Access is enabled.
+- CPAP hose inner-diameter questions no longer generate Fusion 360/OpenSCAD CAD packages.
+- CPAP hose sizing now routes as a parts/spec question rather than CAD/Modeling.
+- Direct measurement questions now answer first instead of handing the prompt to the local model.
 
 ## Added
 
-- Visible CAD working notes for constraint parsing, airflow sizing, outlet selection, and CFD status.
-- Airflow sizing for CPAP duct requests: CFM to L/s, inlet area, outlet area, ideal inlet velocity, ideal outlet velocity, and area ratio.
-- Material-specific cooling guidance for PLA, PCTG, and ABS/ASA.
-- Lightweight web source checks for CAD duct/part-cooling prompts when Web Access is enabled.
-- Package-health regression for analytical CAD answers.
+- Direct answer for CPAP hose sizing: 19 mm ID standard, 15 mm ID slimline, and 22 mm common cuff/connector.
+- `spec-direct-answer` path for CPAP hose measurement questions.
+- Package-health regression for CPAP hose ID questions.
 
 ## Included
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## v2026.07.09
+
+- Fixes CPAP hose inner-diameter questions being misrouted into CAD artifact generation.
+- Adds a direct CPAP hose sizing answer: standard hose 19 mm ID, slimline 15 mm ID, common cuff/connector 22 mm.
+- Routes CPAP hose sizing to Research, Parts & Cross-Reference instead of CAD/Modeling.
+- Adds a package-health regression so CPAP hose ID questions cannot produce Fusion/OpenSCAD artifacts.
+
 ## v2026.07.08
 
 - Upgrades CAD artifact answers from file receipts into engineering first-pass responses.

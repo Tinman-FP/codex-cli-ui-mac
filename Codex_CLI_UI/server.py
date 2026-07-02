@@ -2181,6 +2181,8 @@ def is_read_only_printer_status_query(messages):
 
 
 def is_cad_design_request(messages):
+    if is_cpap_hose_spec_question(messages):
+        return False
     text = "\n".join(str(message.get("text", "")) for message in messages[-4:]).lower()
     if not text_has_any(text, CAD_DESIGN_TERMS):
         return False
@@ -3485,6 +3487,29 @@ def latest_user_text(messages):
     return ""
 
 
+def is_cpap_hose_spec_question(messages):
+    query = latest_user_text(messages).lower()
+    if not query or "cpap" not in query:
+        return False
+    hose_terms = ("hose", "tube", "tubing", "line")
+    size_terms = (
+        "inner diameter",
+        "inside diameter",
+        "internal diameter",
+        " id",
+        "i.d.",
+        "diameter",
+        "size",
+        "bore",
+    )
+    question_terms = ("what", "which", "how big", "how large", "what size", "?")
+    return (
+        text_has_any(query, hose_terms)
+        and text_has_any(query, size_terms)
+        and text_has_any(query, question_terms)
+    )
+
+
 def route_query_text(messages, cwd=""):
     recent = []
     for message in (messages or [])[-6:]:
@@ -3505,6 +3530,7 @@ def project_from_thread(messages):
 def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_search="live"):
     text = route_query_text(messages, cwd)
     previous_project = project_from_thread(messages)
+    cpap_hose_spec = is_cpap_hose_spec_question(messages)
     cad_design = is_cad_design_request(messages)
     public_printer_research = wants_public_printer_research(messages) and not cad_design
     scores = []
@@ -3540,7 +3566,11 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
     else:
         score, project_id, matched = 0, "general", []
 
-    if cad_design:
+    if cpap_hose_spec:
+        project_id = "research-parts-reference"
+        score = max(score, 30)
+        matched = ["cpap-hose-spec"] + [item for item in matched if item != "cpap-hose-spec"]
+    elif cad_design:
         project_id = "cad-modeling-projects"
         score = max(score, 32)
         matched = ["cad-design"] + [item for item in matched if item != "cad-design"]
@@ -4151,6 +4181,24 @@ def build_direct_answer_context(messages, route):
         )
     lines.append("")
     return "\n".join(lines)
+
+
+def cpap_hose_spec_direct_answer(messages):
+    if not is_cpap_hose_spec_question(messages):
+        return ""
+    return "\n\n".join(
+        [
+            "Use 19 mm ID for a standard CPAP hose.",
+            (
+                "This is why: standard CPAP tubing is commonly 19 mm inside diameter, while slimline CPAP tubing is commonly "
+                "15 mm inside diameter. The end cuff/connector is commonly 22 mm, but that is the connector size, not the hose airflow bore."
+            ),
+            (
+                "You should also consider: if you are modeling an adapter or duct inlet, measure the actual hose/cuff you have. "
+                "For most 3D-printer CPAP cooling setups, start with a 19 mm airflow bore unless you know you are using 15 mm slim tubing."
+            ),
+        ]
+    )
 
 
 def material_selection_direct_answer(messages, route):
@@ -7142,6 +7190,33 @@ def package_health_report():
         add("tools:cad-engineering-brief", "fail", str(exc))
 
     try:
+        hose_messages = [
+            {
+                "role": "user",
+                "text": "what is the inner diameter of a 3d printer cpap hose?",
+            }
+        ]
+        hose_route = route_manager(hose_messages, requested_profile="manager", web_search="live")
+        hose_answer = cpap_hose_spec_direct_answer(hose_messages)
+        ok = (
+            is_cpap_hose_spec_question(hose_messages)
+            and not is_cad_design_request(hose_messages)
+            and not is_cad_artifact_tool_request(hose_messages)
+            and hose_route.get("projectId") == "research-parts-reference"
+            and "19 mm ID" in hose_answer
+            and "15 mm" in hose_answer
+            and "Fusion 360" not in hose_answer
+            and "OpenSCAD" not in hose_answer
+        )
+        add(
+            "tools:cpap-hose-spec-direct",
+            "pass" if ok else "fail",
+            "CPAP hose ID questions answer directly without CAD artifact staging",
+        )
+    except Exception as exc:
+        add("tools:cpap-hose-spec-direct", "fail", str(exc))
+
+    try:
         analysis = build_analytical_context(
             [{"role": "user", "text": "Diagnose my Prusa printer running Marlin. The nozzle temperature is not reading."}],
             route={
@@ -8548,6 +8623,53 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 normalize=False,
             )
             json_line(self, {"type": "done", "returnCode": 0 if tool_result.get("ok") else 1})
+            return
+
+        direct_cpap_hose_answer = cpap_hose_spec_direct_answer(messages)
+        if direct_cpap_hose_answer:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            json_line(
+                self,
+                {
+                    "type": "status",
+                    "message": "starting",
+                    "cwd": cwd,
+                    "profile": profile,
+                    "effectiveProfile": effective_profile,
+                    "accessLevel": "local-files",
+                    "reasoningLevel": reasoning_level,
+                    "webSearch": web_search,
+                    "managerDepth": manager_depth,
+                    "friendlinessLevel": friendliness_level,
+                    "humorLevel": humor_level,
+                    "mode": "spec-direct-answer",
+                    "engine": "local-knowledge",
+                    "model": "",
+                    "freeOnlyRedirect": free_only_redirect,
+                    "route": route,
+                    "adminTopic": admin_topic,
+                },
+            )
+            json_line(
+                self,
+                {
+                    "type": "thought",
+                    "text": "Recognized this as a CPAP hose sizing question, not a CAD artifact request.",
+                },
+            )
+            emit_assistant_answer(
+                self,
+                messages,
+                route,
+                admin_topic,
+                direct_cpap_hose_answer,
+                normalize=False,
+            )
+            json_line(self, {"type": "done", "returnCode": 0})
             return
 
         if is_cad_artifact_tool_request(messages):
