@@ -195,9 +195,9 @@ ADMIN_TAXONOMY = {
         "description": "Printer hardware, firmware/software, filament, and print process knowledge.",
         "triggers": (
             "3d print", "3d printer", "bambu", "centauri", "creality", "extruder",
-            "filament", "gcode", "hotend", "klipper", "mainsail", "moonraker",
+            "filament", "gcode", "hotend", "hotted", "klipper", "mainsail", "moonraker",
             "nozzle", "orca", "orcaslicer", "print bed", "printer", "qidi",
-            "rat rig", "ratrig", "slicer", "snapmaker", "spool",
+            "rat rig", "ratrig", "slicer", "snapmaker", "spool", "toolhead",
         ),
         "routeProjects": ("printer-klipper-ops", "tinmanx-slicer-research", "orcaslicer-codex"),
         "folders": {
@@ -205,7 +205,7 @@ ADMIN_TAXONOMY = {
                 "name": "Hardware",
                 "triggers": (
                     "belt", "bed", "bearing", "board", "extruder", "fan", "heater",
-                    "hotend", "motor", "nozzle", "probe", "sensor", "toolhead",
+                    "hotend", "hotted", "motor", "nozzle", "probe", "sensor", "toolhead",
                 ),
             },
             "software": {
@@ -301,7 +301,13 @@ RESEARCH_CONTEXT_TERMS = {
     "cross reference",
     "ebay",
     "filament",
+    "fiberseek",
+    "fibreseek",
+    "fiberseeker",
+    "fibreseeker",
     "generator",
+    "hotend",
+    "hotted",
     "in stock",
     "kg",
     "pet cf",
@@ -319,6 +325,7 @@ RESEARCH_CONTEXT_TERMS = {
     "spools",
     "spec",
     "stock",
+    "toolhead",
     "vendor",
     "wind turbine",
 }
@@ -373,6 +380,8 @@ PROJECT_QUERY_HINTS = {
         "qde_004_013",
         "nozzle",
         "humidity",
+        "toolhead",
+        "hotend",
     ),
     "orcaslicer-codex": (
         "orcaslicer",
@@ -385,6 +394,8 @@ PROJECT_QUERY_HINTS = {
     "tinmanx-slicer-research": (
         "tinmanx",
         "rocket slicer",
+        "fiberseek",
+        "fibreseek",
         "fiberseeker",
         "fibreseeker",
         "push plastics",
@@ -438,7 +449,7 @@ PROJECT_PLAYBOOKS = {
         "reasoning": "high",
         "triggers": (
             "qidi", "plus 4", "max ez", "moonraker", "klipper", "mainsail",
-            "printer", "nozzle", "humidity", "bed temp", "extruder", "hotend",
+            "printer", "nozzle", "humidity", "bed temp", "extruder", "hotend", "hotted", "toolhead",
             "plr", "resume", "kamp", "bed mesh", "external spool", "qde_004_013",
             "ratrig", "rat rig", "snapmaker", "bambu", "creality", "k2 plus",
         ),
@@ -474,7 +485,7 @@ PROJECT_PLAYBOOKS = {
         "local_profile": "local-oss",
         "reasoning": "medium",
         "triggers": (
-            "tinmanx", "rocket slicer", "fiberseeker", "fibreseeker", "push plastics",
+            "tinmanx", "rocket slicer", "fiberseek", "fibreseek", "fiberseeker", "fibreseeker", "push plastics",
             "filament profile", "pc-pbt", "cnc kitchen", "modbot", "material",
             "filament", "pet-cf", "pet cf", "petg-cf", "petg cf", "fiberon",
             "polymaker", "elegoo", "qidi", "spool", "spools", "research note",
@@ -2876,14 +2887,38 @@ def build_failure_recovery_answer(messages, route=None, error_text="", cwd="", r
     wants_save = any(term in lower for term in ("save", "write", "create", "put", "upload"))
     wants_find = any(term in lower for term in ("find", "locate", "folder", "directory", "path"))
     wants_local = wants_save or wants_find or any(term in lower for term in ("local", "file", "macro", "config"))
+    wants_answer = not wants_local and any(
+        term in lower
+        for term in (
+            "can you",
+            "explain",
+            "give me",
+            "high level",
+            "how does",
+            "overview",
+            "tell me",
+            "what is",
+            "what are",
+        )
+    )
 
-    lines = [
-        f"I hit a local runtime/load failure before I could confirm the requested action was completed.",
-        f"This is why: the local worker returned `{blocker}`, so the safe answer is to treat the run as unfinished instead of claiming the file was found, saved, or uploaded.",
-    ]
+    if wants_answer:
+        lines = [
+            "I hit a local runtime/load failure before I could finish the answer.",
+            f"This is why: the local worker returned `{blocker}`. I should still answer from the best available draft, local knowledge, or web evidence instead of giving you a file-operation recovery note.",
+        ]
+    else:
+        lines = [
+            "I hit a local runtime/load failure before I could confirm the requested action was completed.",
+            f"This is why: the local worker returned `{blocker}`, so the safe answer is to treat the run as unfinished instead of claiming the requested work was completed.",
+        ]
     if wants_local:
         lines.append(
             "You should also consider: I need to recover by rechecking the local paths, saving a fallback artifact in a known local folder if the real target is not found, and clearly saying whether anything touched the live machine."
+        )
+    elif wants_answer:
+        lines.append(
+            "You should also consider: retrying the answer path with a narrower research query or a direct local Ollama fallback, then preserving any primary draft instead of discarding it."
         )
     else:
         lines.append(
@@ -2895,8 +2930,10 @@ def build_failure_recovery_answer(messages, route=None, error_text="", cwd="", r
         recovery.append("Search the likely project/config folders first, then broaden to the home directory only if needed.")
     if wants_save:
         recovery.append("If the real target folder cannot be confirmed, write the candidate file to a safe local `outputs` or project folder and label it as a candidate.")
-    if "printer" in lower or "macro" in lower or "klipper" in lower or "rat" in lower:
+    if wants_local and ("printer" in lower or "macro" in lower or "klipper" in lower or "rat" in lower):
         recovery.append("Do not upload, restart, or change a live printer unless its endpoint and idle/standby state are verified.")
+    if wants_answer:
+        recovery.append("If a primary answer draft exists, return that draft with a short note that review/polish was skipped.")
     if not recovery:
         recovery.append("Retry the failed operation once with a simpler path, then fall back to a direct local answer.")
 
@@ -3393,6 +3430,7 @@ def project_from_thread(messages):
 def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_search="live"):
     text = route_query_text(messages, cwd)
     previous_project = project_from_thread(messages)
+    public_printer_research = wants_public_printer_research(messages)
     scores = []
     for project_id, playbook in PROJECT_PLAYBOOKS.items():
         if project_id == "general":
@@ -3427,13 +3465,13 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
         score, project_id, matched = 0, "general", []
 
     playbook = PROJECT_PLAYBOOKS[project_id]
-    public_research = wants_research_quality_context(messages) or wants_web_context(messages)
+    public_research = wants_research_quality_context(messages) or wants_web_context(messages) or public_printer_research
     local_need_terms = (
         "ssh", "moonraker", "tailscale", "vpn", "local file", "this mac",
-        "repo", "github", "launchctl", "dock", "install", "printer",
+        "repo", "github", "launchctl", "dock", "install",
         "upload", "restart", "deploy", "production", "flightops",
     )
-    needs_local = any(term in text for term in local_need_terms)
+    needs_local = any(term in text for term in local_need_terms) and not public_printer_research
     preferred_engine = playbook.get("preferred_engine", "local")
     engine = preferred_engine
     if public_research and not needs_local and (
@@ -3441,8 +3479,11 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
             "energy-power-research",
             "research-parts-reference",
             "general",
+            "printer-klipper-ops",
+            "tinmanx-slicer-research",
         }
         or (project_id == "tinmanx-slicer-research" and wants_material_shopping_context(messages))
+        or public_printer_research
     ):
         engine = "local-research"
     if web_search == "disabled" and engine in {"cloud", "local-research"}:
@@ -3647,6 +3688,54 @@ def build_web_context(messages):
 def wants_research_quality_context(messages):
     text = "\n".join(str(message.get("text", "")) for message in messages[-4:]).lower()
     return wants_web_context(messages) or any(term in text for term in RESEARCH_CONTEXT_TERMS)
+
+
+def wants_public_printer_research(messages):
+    text = "\n".join(str(message.get("text", "")) for message in messages[-4:]).lower()
+    product_terms = (
+        "fiberseek",
+        "fibreseek",
+        "fiberseeker",
+        "fibreseeker",
+        "continuous fiber",
+        "continuous fibre",
+        "toolhead",
+        "hotend",
+        "hotted",
+    )
+    research_terms = (
+        "architecture",
+        "design",
+        "details",
+        "engineering",
+        "explain",
+        "high level",
+        "how does",
+        "overview",
+        "spec",
+        "technical",
+        "what is",
+    )
+    local_action_terms = (
+        "my printer",
+        "my qidi",
+        "my rat",
+        "nozzle temp",
+        "bed temp",
+        "humidity",
+        "printer.cfg",
+        "macro",
+        "moonraker",
+        "upload",
+        "restart",
+        "save the file",
+        "local folder",
+    )
+    return (
+        any(term in text for term in product_terms)
+        and any(term in text for term in research_terms)
+        and not any(term in text for term in local_action_terms)
+    )
 
 
 def wants_material_shopping_context(messages):
@@ -3874,6 +3963,7 @@ def build_analytical_context(messages, route=None, web_search="live", local_tool
         "- Separate known facts from assumptions. If one missing fact would change the answer, find it with safe tools or ask one tight question.",
         "- Use the evidence ladder: stable local knowledge, local files/config, read-only live device/API state, official/current web sources, then clearly labeled assumptions.",
         "- Choose the tool family after classification. Avoid confident answers from the wrong ecosystem.",
+        "- Tolerate obvious technical typos. If a word looks like a near miss, infer the likely term, say the inference briefly, and continue instead of failing the task.",
         "- If a command/tool/capability is missing, check for a safe free way to add it, check storage first, install only from the allowlist, then retry the task.",
         "- If storage is low, the tool is large, paid, unknown, unsafe, or not allowlisted, ask Tinman before downloading.",
         "- Learn durable lessons: store compact non-volatile conclusions, formulas, stable procedures, local paths, and source pointers. Do not store raw transcript text, secrets, passwords, live one-time status, prices, latest/current facts, or anything that needs frequent refresh.",
@@ -4613,8 +4703,9 @@ def candidate_matches_hint(candidate, hint):
 
 def discover_klipper_config_dirs(hint="", scan=False):
     known = [
-        (str(HOME_DIR / "Downloads" / "ratrig_config"), "current-klipper-config-ratrig"),
-        (str(HOME_DIR / "Documents" / "Codex"), "local-codex-workspace"),
+        (str(HOME_DIR / "Downloads" / "ratrig_config"), "home-downloads-ratrig-config"),
+        (str(HOME_DIR / "Documents" / "Codex" / "ratrig_config"), "home-documents-codex-ratrig-config"),
+        (str(HOME_DIR / "Applications" / "Codex_CLI_UI" / "printer-configs"), "installed-printer-configs"),
     ]
     candidates = []
     seen = set()
@@ -4627,7 +4718,7 @@ def discover_klipper_config_dirs(hint="", scan=False):
     if scan:
         scan_roots = [
             HOME_DIR / "Downloads",
-            HOME_DIR / "Documents" / "Codex",
+            HOME_DIR / "Documents",
             HOME_DIR / "Applications",
         ]
         for root in scan_roots:
@@ -5450,6 +5541,15 @@ def local_research_queries(query, route):
                 "site:ebay.com 300rpm permanent magnet generator 3 phase 96v",
             ]
         )
+    elif wants_public_printer_research([{"role": "user", "text": query}]):
+        queries.extend(
+            [
+                "Fibreseek 3 printer continuous fiber hotend toolhead engineering details",
+                "Fiberseek 3 continuous fiber 3D printer toolhead hotend",
+                "Fibreseek continuous fiber printer toolhead hotend specs",
+                "continuous fiber 3D printer toolhead hotend cutting mechanism impregnation",
+            ]
+        )
     elif wants_material_shopping_context([{"role": "user", "text": query}]) or any(
         term in lower for term in ["pet-cf", "pet cf", "filament", "spool"]
     ):
@@ -5962,6 +6062,29 @@ def package_health_report():
         add("analysis:platform-classifier", "fail", str(exc))
 
     try:
+        research_route = route_manager(
+            [
+                {
+                    "role": "user",
+                    "text": "Can you give me the high level engineering details on the toolhead for the fibreseek 3 printer continuous fiber hotted?",
+                }
+            ],
+            requested_profile="manager",
+            web_search="live",
+        )
+        ok = research_route.get("engine") == "local-research" and research_route.get("projectId") in {
+            "printer-klipper-ops",
+            "tinmanx-slicer-research",
+        }
+        add(
+            "analysis:printer-public-research",
+            "pass" if ok else "fail",
+            f"{research_route.get('projectId')} via {research_route.get('engine')}",
+        )
+    except Exception as exc:
+        add("analysis:printer-public-research", "fail", str(exc))
+
+    try:
         stable = should_store_stable_knowledge(
             [{"role": "user", "text": "How do I diagnose a Marlin thermal runaway failure?"}],
             {"projectId": "printer-klipper-ops"},
@@ -6050,6 +6173,34 @@ def package_health_report():
         add("quality:failure-recovery", "pass" if ok else "fail", "recovery answer shape")
     except Exception as exc:
         add("quality:failure-recovery", "fail", str(exc))
+
+    try:
+        answer_recovery = build_failure_recovery_answer(
+            [
+                {
+                    "role": "user",
+                    "text": "Can you give me the high level engineering details on the toolhead for the fibreseek 3 printer continuous fiber hotted?",
+                }
+            ],
+            route={
+                "projectId": "printer-klipper-ops",
+                "project": "Printer & Klipper Operations",
+                "engine": "local-research",
+            },
+            error_text="Load failed",
+            cwd=DEFAULT_CWD,
+            runtime_notes=["Primary worker drafted an answer; Manager is holding it for review."],
+        ).lower()
+        ok = (
+            "before i could finish the answer" in answer_recovery
+            and "primary answer draft" in answer_recovery
+            and "file was found" not in answer_recovery
+            and "saved, or uploaded" not in answer_recovery
+            and "do not upload, restart" not in answer_recovery
+        )
+        add("quality:answer-recovery", "pass" if ok else "fail", "knowledge question recovery shape")
+    except Exception as exc:
+        add("quality:answer-recovery", "fail", str(exc))
 
     try:
         _ = health_snapshot()
@@ -6467,43 +6618,63 @@ def run_manager_review_and_polish(
     if emit:
         label = "Balanced" if manager_depth == "balanced" else "Full"
         emit(f"Manager speed is {label}; running a local review pass.")
-    review = run_local_review(
-        review_messages,
-        route,
-        emit=emit,
-        num_predict=review_predict,
-        friendliness_level=friendliness_level,
-        humor_level=humor_level,
-    )
+    try:
+        review = run_local_review(
+            review_messages,
+            route,
+            emit=emit,
+            num_predict=review_predict,
+            friendliness_level=friendliness_level,
+            humor_level=humor_level,
+        )
+    except Exception as exc:
+        if emit:
+            emit("Local review failed, so Manager is returning the primary answer instead of dropping the response.")
+        return {"text": primary_answer, "review": f"review failed: {exc}", "polished": False}
     review_text = str(review.get("text") or "").strip()
     if not review_text:
         if emit:
             emit("Local review did not return a usable note, so Manager is keeping the primary answer.")
         return {"text": primary_answer, "review": review.get("error", ""), "polished": False}
 
-    polish = run_manager_polish(
-        messages,
-        route,
-        primary_answer,
-        review_text,
-        emit=emit,
-        num_predict=polish_predict,
-        friendliness_level=friendliness_level,
-        humor_level=humor_level,
-    )
-    polished_text = str(polish.get("text") or "").strip()
-    if polished_text:
-        coach_predict = 1400 if manager_depth == "balanced" else 2100
-        coach = run_quality_coach(
+    try:
+        polish = run_manager_polish(
             messages,
             route,
-            polished_text,
-            review_text=review_text,
+            primary_answer,
+            review_text,
             emit=emit,
-            num_predict=coach_predict,
+            num_predict=polish_predict,
             friendliness_level=friendliness_level,
             humor_level=humor_level,
         )
+    except Exception as exc:
+        if emit:
+            emit("Final polish failed, so Manager is returning the reviewed primary answer.")
+        return {"text": primary_answer, "review": f"{review_text}\npolish failed: {exc}".strip(), "polished": False}
+    polished_text = str(polish.get("text") or "").strip()
+    if polished_text:
+        coach_predict = 1400 if manager_depth == "balanced" else 2100
+        try:
+            coach = run_quality_coach(
+                messages,
+                route,
+                polished_text,
+                review_text=review_text,
+                emit=emit,
+                num_predict=coach_predict,
+                friendliness_level=friendliness_level,
+                humor_level=humor_level,
+            )
+        except Exception as exc:
+            if emit:
+                emit("Quality Coach failed, so Manager is returning the polished answer.")
+            return {
+                "text": polished_text,
+                "review": f"{review_text}\nquality coach failed: {exc}".strip(),
+                "polished": True,
+                "qualityChecked": False,
+            }
         coached_text = str(coach.get("text") or "").strip()
         return {
             "text": coached_text or polished_text,
@@ -6794,6 +6965,7 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                         "error": str(exc),
                         "qualityFeedback": quality_feedback_summary(),
                         "improvementLab": improvement_lab_summary(),
+                        "admin": admin_summary(),
                     }
                 )
                 return
@@ -6804,6 +6976,7 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                     "improvement": improvement,
                     "qualityFeedback": quality_feedback_summary(),
                     "improvementLab": improvement_lab_summary(),
+                    "admin": admin_summary(),
                 }
             )
             return
@@ -7327,16 +7500,25 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                     def emit_manager_local_research(text):
                         json_line(self, {"type": "thought", "text": text})
 
-                    manager_result = run_manager_review_and_polish(
-                        messages,
-                        route,
-                        answer_text,
-                        emit=emit_manager_local_research,
-                        manager_depth=manager_depth,
-                        friendliness_level=friendliness_level,
-                        humor_level=humor_level,
-                    )
-                    answer_text = manager_result.get("text") or answer_text
+                    try:
+                        manager_result = run_manager_review_and_polish(
+                            messages,
+                            route,
+                            answer_text,
+                            emit=emit_manager_local_research,
+                            manager_depth=manager_depth,
+                            friendliness_level=friendliness_level,
+                            humor_level=humor_level,
+                        )
+                        answer_text = manager_result.get("text") or answer_text
+                    except Exception as exc:
+                        json_line(
+                            self,
+                            {
+                                "type": "thought",
+                                "text": f"Manager review failed, so I am returning the research answer directly: {compact(exc, 120)}",
+                            },
+                        )
                 emit_assistant_answer(self, messages, route, admin_topic, answer_text)
                 json_line(self, {"type": "done", "returnCode": 0})
             else:
@@ -7394,16 +7576,25 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                     def emit_manager_cloud(text):
                         json_line(self, {"type": "thought", "text": text})
 
-                    manager_result = run_manager_review_and_polish(
-                        messages,
-                        route,
-                        answer_text,
-                        emit=emit_manager_cloud,
-                        manager_depth=manager_depth,
-                        friendliness_level=friendliness_level,
-                        humor_level=humor_level,
-                    )
-                    answer_text = manager_result.get("text") or answer_text
+                    try:
+                        manager_result = run_manager_review_and_polish(
+                            messages,
+                            route,
+                            answer_text,
+                            emit=emit_manager_cloud,
+                            manager_depth=manager_depth,
+                            friendliness_level=friendliness_level,
+                            humor_level=humor_level,
+                        )
+                        answer_text = manager_result.get("text") or answer_text
+                    except Exception as exc:
+                        json_line(
+                            self,
+                            {
+                                "type": "thought",
+                                "text": f"Manager review failed, so I am returning the cloud answer directly: {compact(exc, 120)}",
+                            },
+                        )
                 emit_assistant_answer(self, messages, route, admin_topic, answer_text)
                 json_line(self, {"type": "done", "returnCode": 0})
             else:
@@ -7599,21 +7790,32 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 def emit_manager_codex(text):
                     json_line(self, {"type": "thought", "text": text})
 
-                manager_result = run_manager_review_and_polish(
-                    messages,
-                    route,
-                    primary_answer,
-                    emit=emit_manager_codex,
-                    manager_depth=manager_depth,
-                    friendliness_level=friendliness_level,
-                    humor_level=humor_level,
-                )
+                try:
+                    manager_result = run_manager_review_and_polish(
+                        messages,
+                        route,
+                        primary_answer,
+                        emit=emit_manager_codex,
+                        manager_depth=manager_depth,
+                        friendliness_level=friendliness_level,
+                        humor_level=humor_level,
+                    )
+                    answer_text = manager_result.get("text") or primary_answer
+                except Exception as exc:
+                    json_line(
+                        self,
+                        {
+                            "type": "thought",
+                            "text": f"Manager review failed, so I am returning the primary worker answer directly: {compact(exc, 120)}",
+                        },
+                    )
+                    answer_text = primary_answer
                 emit_assistant_answer(
                     self,
                     messages,
                     route,
                     admin_topic,
-                    manager_result.get("text") or primary_answer,
+                    answer_text,
                 )
             elif final_text and final_text not in assistant_messages:
                 emit_assistant_answer(self, messages, route, admin_topic, final_text)
@@ -7662,6 +7864,18 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             pass
         except Exception as exc:
             try:
+                primary_answer = str(locals().get("primary_answer") or "").strip()
+                if primary_answer:
+                    json_line(
+                        self,
+                        {
+                            "type": "thought",
+                            "text": f"Final manager step failed, so I am returning the primary worker draft: {compact(exc, 120)}",
+                        },
+                    )
+                    emit_assistant_answer(self, messages, route, admin_topic, primary_answer)
+                    json_line(self, {"type": "done", "returnCode": 0})
+                    return
                 tool_recovery = tool_recovery_plan(
                     {
                         "messages": messages,

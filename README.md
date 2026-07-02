@@ -9,7 +9,7 @@ This is a community package for Mac users who want a simple local Codex-style ch
 Download the DMG from the `release/` folder or the GitHub Release:
 
 ```text
-Codex_CLI_UI_Mac_v2026.07.03.dmg
+Codex_CLI_UI_Mac_v2026.07.04.dmg
 ```
 
 Open the DMG and double-click:
@@ -51,6 +51,7 @@ codex --profile local-fast --search
 - Safe working notes while Codex CLI is running
 - Admin Improvement Lab for weak-answer feedback, tool gaps, and saved golden regression tests
 - Golden Test Generator that turns Improvement Lab items into runnable prompt tests and feeds failures back into the lab
+- One-click `Fix this` capture and safer Manager fallback when review/polish fails
 - Tool Recovery Engine for missing commands, Git remote gaps, disabled web paths, and safe retry guidance
 - Local Research, Coder, Review, and Manager modes for a fuller free local workflow
 - Optional local history importer for your own `~/.codex/sessions`

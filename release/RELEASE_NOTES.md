@@ -1,16 +1,24 @@
-# Codex CLI UI for Mac v2026.07.03
+# Codex CLI UI for Mac v2026.07.04
 
-Feature release focused on making the local agent improve itself through saved regression tests.
+Bugfix release for answer recovery, one-click feedback, and public printer-hardware research routing.
 
 ## Download
 
 Download one file:
 
 ```text
-Codex_CLI_UI_Mac_v2026.07.03.dmg
+Codex_CLI_UI_Mac_v2026.07.04.dmg
 ```
 
 Open the DMG and double-click `Install Codex CLI UI.command`.
+
+## Fixed
+
+- `Fix this` now saves a useful feedback lesson with one click instead of depending on a prompt dialog.
+- Manager review, final polish, and Quality Coach failures no longer discard a valid primary worker answer.
+- Knowledge/research questions no longer receive file/upload/live-printer recovery wording after a local load failure.
+- Public printer hardware/spec questions, including Fibreseek/Fiberseek continuous-fiber toolhead questions, route through Local Research when web is enabled.
+- Obvious technical typos such as `hotted` are treated as likely `hotend` instead of derailing the answer.
 
 ## Included
 
@@ -19,13 +27,9 @@ Open the DMG and double-click `Install Codex CLI UI.command`.
 - User LaunchAgent installer
 - Fast, Careful, Coder, Review, Manager, and Local Research modes
 - Web Access, access level, reasoning, friendliness, and humor controls
-- Admin Improvement Lab for feedback, tool gaps, and regression failures
-- Golden Test Generator that promotes Improvement Lab items into saved runnable prompt tests
-- Test Bench result history with automatic feedback into the Improvement Lab when a test fails
-- Tool Recovery Engine for missing commands, Git remote gaps, disabled web paths, Klipper config discovery, load failures, and permissions
-- Capability manager with free allowlisted tool installs and storage checks
+- Admin Improvement Lab, Golden Test Generator, Test Bench history, and package health checks
+- Tool Recovery Engine and Capability Manager
 - Klipper config discovery and macro-staging helpers
-- Package health checker with a golden-test-generator check
 - Privacy-safe local data/log folders
 
 ## Requirements

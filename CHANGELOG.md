@@ -1,5 +1,13 @@
 # Changelog
 
+## v2026.07.04
+
+- Makes `Fix this` a one-click feedback capture instead of relying on a prompt dialog.
+- Routes public printer hardware/spec questions such as Fibreseek continuous-fiber toolheads through Local Research when web is enabled.
+- Tolerates obvious technical typos such as `hotted` when `hotend` is the likely meaning.
+- Keeps Manager review, polish, and Quality Coach failures from discarding a valid primary worker answer.
+- Adds health checks for public-printer research routing and knowledge-question recovery wording.
+
 ## v2026.07.03
 
 - Adds the Golden Test Generator so Improvement Lab items become saved runnable regression tests.

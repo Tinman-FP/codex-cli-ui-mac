@@ -2532,18 +2532,32 @@ function latestUserPromptForMessage(thread, message) {
   return "";
 }
 
+function defaultFixNoteForMessage(thread, message) {
+  const prompt = latestUserPromptForMessage(thread, message).toLowerCase();
+  const answer = String(message?.text || "").toLowerCase();
+  const notes = [];
+
+  if (/runtime\/load failure|load failed|no final message returned|local worker returned|recovery plan/i.test(answer)) {
+    notes.push("Do not replace a normal answer request with a generic runtime recovery block. If a primary draft exists, return it and briefly say review/polish was skipped.");
+  }
+  if (/file was found|saved, or uploaded|upload, restart, or change a live printer/i.test(answer) && !/save|upload|restart|file|folder|directory|macro|config/.test(prompt)) {
+    notes.push("Do not use file/upload/live-printer recovery language for a knowledge or research question.");
+  }
+  if (/fibreseek|fiberseek|fibreseeker|fiberseeker|hotted|hotend|toolhead|continuous fiber|continuous fibre/.test(prompt)) {
+    notes.push("For public printer hardware questions, infer obvious typos such as hotted->hotend, use public/spec research when web is enabled, and answer the engineering question directly.");
+  }
+  if (!notes.length) {
+    notes.push("Answer the actual question directly, explain why, and include what Tinman should consider or verify next.");
+  }
+  return notes.join(" ");
+}
+
 async function sendMessageFeedback(messageId, rating) {
   const thread = currentThread();
   const message = findMessageById(thread, messageId);
   if (!thread || !message || message.feedback === "saving") return;
 
-  let note = "";
-  if (rating === "fix") {
-    const entered = window.prompt("What should he do better next time?");
-    if (entered === null) return;
-    note = entered.trim();
-    if (!note) return;
-  }
+  const note = rating === "fix" ? defaultFixNoteForMessage(thread, message) : "";
 
   const previousFeedback = message.feedback;
   message.feedback = "saving";
@@ -2567,6 +2581,8 @@ async function sendMessageFeedback(messageId, rating) {
     if (!payload.ok) throw new Error(payload.error || "feedback not saved");
     message.feedback = rating;
     message.feedbackNote = note;
+    if (payload.goldenTests) config.goldenTests = payload.goldenTests;
+    if (payload.admin) config.admin = payload.admin;
     appendLog("event", rating === "fix" ? "quality lesson saved" : "positive answer feedback saved");
     await refreshAdmin();
   } catch (error) {
