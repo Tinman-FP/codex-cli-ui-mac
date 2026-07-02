@@ -5743,7 +5743,7 @@ def self_healing_supervise(payload=None, record=True):
                 "autoInstall": auto_install,
                 "approved": approved,
             },
-            record=True,
+            record=record,
         )
         issue = recovery.get("issue") or {}
         decision = recovery.get("decision") or {}
@@ -5848,7 +5848,7 @@ def self_healing_supervise(payload=None, record=True):
     )
     signature = self_healing_signature(primary_kind, messages, error_text, answer_text)
     repeat_count = self_healing_recent_repeat_count(signature) + 1
-    if repeat_count >= 2 and status in {"needs-action", "failed-validation", "needs-approval"}:
+    if record and repeat_count >= 2 and status in {"needs-action", "failed-validation", "needs-approval"}:
         patch_item = queue_self_patch_candidate(
             signature,
             title=f"Repeated self-healing issue: {primary_kind}",
