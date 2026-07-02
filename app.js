@@ -33,11 +33,15 @@ const els = {
   warmModelButton: document.getElementById("warmModelButton"),
   runBenchmarkButton: document.getElementById("runBenchmarkButton"),
   packageHealthButton: document.getElementById("packageHealthButton"),
+  selfHealButton: document.getElementById("selfHealButton"),
   benchmarkSummaryGrid: document.getElementById("benchmarkSummaryGrid"),
   benchmarkList: document.getElementById("benchmarkList"),
   packageHealthList: document.getElementById("packageHealthList"),
   improvementSummaryGrid: document.getElementById("improvementSummaryGrid"),
   improvementList: document.getElementById("improvementList"),
+  selfHealingSummaryGrid: document.getElementById("selfHealingSummaryGrid"),
+  selfHealingList: document.getElementById("selfHealingList"),
+  selfPatchList: document.getElementById("selfPatchList"),
   testBenchSubtitle: document.getElementById("testBenchSubtitle"),
   testSummaryGrid: document.getElementById("testSummaryGrid"),
   testList: document.getElementById("testList"),
@@ -232,6 +236,7 @@ function setRunning(isRunning) {
   if (els.warmModelButton) els.warmModelButton.disabled = isRunning;
   if (els.runBenchmarkButton) els.runBenchmarkButton.disabled = isRunning;
   if (els.packageHealthButton) els.packageHealthButton.disabled = isRunning;
+  if (els.selfHealButton) els.selfHealButton.disabled = isRunning;
   if (isRunning) {
     els.runState.textContent = "Running";
     els.runState.className = "run-state warning";
@@ -352,13 +357,15 @@ function renderAdmin() {
   const recent = admin.recentTopics || [];
   const improvement = admin.improvementLab || {};
   const golden = admin.goldenTestSummary || {};
+  const selfHealing = admin.selfHealing || {};
+  const selfPatchQueue = selfHealing.queue || {};
 
   if (els.adminCountText) {
-    els.adminCountText.textContent = `${improvement.openCount || admin.knowledgeCount || knowledge.length}`;
+    els.adminCountText.textContent = `${(improvement.openCount || 0) + (selfPatchQueue.openCount || 0) || admin.knowledgeCount || knowledge.length}`;
   }
 
   if (els.adminPanelSubtitle) {
-    els.adminPanelSubtitle.textContent = `${projects.length} project folder${projects.length === 1 ? "" : "s"} · ${admin.knowledgeCount || knowledge.length} stable learned note${(admin.knowledgeCount || knowledge.length) === 1 ? "" : "s"} · ${improvement.openCount || 0} open improvement${(improvement.openCount || 0) === 1 ? "" : "s"}`;
+    els.adminPanelSubtitle.textContent = `${projects.length} project folder${projects.length === 1 ? "" : "s"} · ${admin.knowledgeCount || knowledge.length} stable learned note${(admin.knowledgeCount || knowledge.length) === 1 ? "" : "s"} · ${improvement.openCount || 0} open improvement${(improvement.openCount || 0) === 1 ? "" : "s"} · ${selfPatchQueue.openCount || 0} self-patch queued`;
   }
 
   if (els.adminSummaryGrid) {
@@ -368,6 +375,8 @@ function renderAdmin() {
       ["Stable Notes", `${admin.knowledgeCount || knowledge.length}`],
       ["Quality Lessons", `${admin.qualityFeedbackCount || 0}`],
       ["Improvements", `${improvement.openCount || 0}`],
+      ["Self-Heal", `${selfHealing.count || 0}`],
+      ["Patch Queue", `${selfPatchQueue.openCount || 0}`],
       ["Golden Tests", `${golden.totalCount || admin.goldenTestCount || 0}`],
       ["Recent Topics", `${recent.length}`],
     ].forEach(([label, value]) => {
@@ -386,6 +395,7 @@ function renderAdmin() {
   renderBenchmarkPanel();
   renderPackageHealth();
   renderImprovementLab(improvement);
+  renderSelfHealing(selfHealing);
   renderAdminProjectTree(projects);
   renderAdminKnowledge(knowledge);
   renderAdminRecent(recent);
@@ -582,6 +592,129 @@ function renderImprovementLab(lab) {
     row.append(copy, actions);
     els.improvementList.appendChild(row);
   });
+}
+
+function renderSelfHealing(summary) {
+  const queue = summary.queue || {};
+  const recent = summary.recent || [];
+  const patches = queue.items || [];
+  const byStatus = summary.byStatus || {};
+
+  if (els.selfHealingSummaryGrid) {
+    els.selfHealingSummaryGrid.textContent = "";
+    [
+      ["Events", `${summary.count || 0}`],
+      ["Recovered", `${summary.recoveredCount || 0}`],
+      ["Needs Approval", `${summary.approvalCount || 0}`],
+      ["Queued", `${queue.openCount || 0}`],
+      ["Recipes", `${summary.recipeCount || 0}`],
+      ["Failed", `${byStatus["failed-validation"] || 0}`],
+    ].forEach(([label, value]) => {
+      const item = document.createElement("div");
+      item.className = "admin-summary-item";
+      const small = document.createElement("span");
+      small.textContent = label;
+      const strong = document.createElement("strong");
+      strong.textContent = value;
+      item.append(small, strong);
+      els.selfHealingSummaryGrid.appendChild(item);
+    });
+  }
+
+  if (els.selfHealingList) {
+    els.selfHealingList.textContent = "";
+    if (!recent.length) {
+      const empty = document.createElement("div");
+      empty.className = "admin-empty";
+      empty.textContent = "No self-healing receipts yet. Run Self Check or wait for a recovery event.";
+      els.selfHealingList.appendChild(empty);
+    } else {
+      recent.slice(0, 10).forEach((item) => {
+        const row = document.createElement("article");
+        row.className = `self-healing-row ${item.status || "observed"}`;
+
+        const copy = document.createElement("div");
+        copy.className = "self-healing-copy";
+        const meta = document.createElement("div");
+        meta.className = "improvement-meta";
+        const status = document.createElement("span");
+        status.textContent = item.status || "observed";
+        const project = document.createElement("span");
+        project.textContent = item.projectId || "general";
+        const approval = document.createElement("span");
+        approval.textContent = item.needsApproval ? "approval" : item.recovered ? "recovered" : "checked";
+        meta.append(status, project, approval);
+
+        const title = document.createElement("strong");
+        const firstGap = (item.gaps || [])[0];
+        const firstAction = (item.actions || [])[0];
+        title.textContent = firstGap?.kind || firstAction?.recipe || item.trigger || "Self-healing event";
+        const detail = document.createElement("p");
+        detail.textContent = firstAction?.detail || firstGap?.reason || item.prompt || "Validated local state.";
+        const time = document.createElement("em");
+        time.textContent = item.time ? shortDate(new Date(item.time * 1000).toISOString()) : "";
+        copy.append(meta, title, detail);
+        if (time.textContent) copy.appendChild(time);
+        row.appendChild(copy);
+        els.selfHealingList.appendChild(row);
+      });
+    }
+  }
+
+  if (els.selfPatchList) {
+    els.selfPatchList.textContent = "";
+    if (!patches.length) {
+      const empty = document.createElement("div");
+      empty.className = "admin-empty";
+      empty.textContent = "Repeated failures will queue patch candidates here.";
+      els.selfPatchList.appendChild(empty);
+    } else {
+      patches.slice(0, 10).forEach((item) => {
+        const row = document.createElement("article");
+        row.className = `self-patch-row ${item.status || "queued"} ${item.severity || "medium"}`;
+
+        const copy = document.createElement("div");
+        copy.className = "self-healing-copy";
+        const meta = document.createElement("div");
+        meta.className = "improvement-meta";
+        const severity = document.createElement("span");
+        severity.textContent = item.severity || "medium";
+        const status = document.createElement("span");
+        status.textContent = item.status || "queued";
+        const count = document.createElement("span");
+        count.textContent = `${item.count || 1}x`;
+        meta.append(severity, status, count);
+
+        const title = document.createElement("strong");
+        title.textContent = item.title || "Self-patch candidate";
+        const recommendation = document.createElement("p");
+        recommendation.textContent = item.recommendation || item.evidence || "";
+        const next = document.createElement("em");
+        next.textContent = item.nextAction || "";
+        copy.append(meta, title, recommendation);
+        if (next.textContent) copy.appendChild(next);
+
+        const actions = document.createElement("div");
+        actions.className = "improvement-actions";
+        const review = document.createElement("button");
+        review.className = "tiny-action-button";
+        review.type = "button";
+        review.textContent = item.status === "reviewed" ? "Reviewed" : "Review";
+        review.disabled = Boolean(activeController) || item.status === "reviewed";
+        review.addEventListener("click", () => updateSelfPatchItem(item.id, "review"));
+        const archive = document.createElement("button");
+        archive.className = "tiny-action-button danger";
+        archive.type = "button";
+        archive.textContent = "Archive";
+        archive.disabled = Boolean(activeController);
+        archive.addEventListener("click", () => updateSelfPatchItem(item.id, "archive"));
+        actions.append(review, archive);
+
+        row.append(copy, actions);
+        els.selfPatchList.appendChild(row);
+      });
+    }
+  }
 }
 
 function renderAdminNav(projects) {
@@ -1430,6 +1563,31 @@ async function runPackageHealth() {
   }
 }
 
+async function runSelfHealingCheck() {
+  if (activeController) return;
+  if (els.selfHealButton) els.selfHealButton.disabled = true;
+  try {
+    const response = await fetch("/api/self-healing", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        trigger: "manual-ui-self-check",
+        language: "python",
+        code: "def _self_heal_probe():\n    return True\n",
+      }),
+    });
+    if (!response.ok) throw new Error(`self-healing ${response.status}`);
+    const result = await response.json();
+    if (result.admin) config.admin = result.admin;
+    appendLog("event", `self-healing ${result.event?.status || "checked"}`);
+    renderAdmin();
+  } catch (error) {
+    appendLog("warning", `Self-healing check failed: ${error.message}`);
+  } finally {
+    if (els.selfHealButton) els.selfHealButton.disabled = Boolean(activeController);
+  }
+}
+
 async function updateKnowledgeItem(id, action) {
   if (!id || activeController) return;
   if (action === "delete" && !window.confirm("Delete this stable knowledge note?")) return;
@@ -1466,6 +1624,24 @@ async function updateImprovementItem(id, action) {
     renderAdmin();
   } catch (error) {
     appendLog("warning", `Improvement update failed: ${error.message}`);
+  }
+}
+
+async function updateSelfPatchItem(id, action) {
+  if (!id || activeController) return;
+  try {
+    const response = await fetch("/api/self-healing/queue", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, action }),
+    });
+    if (!response.ok) throw new Error(`self patch ${response.status}`);
+    const result = await response.json();
+    if (result.admin) config.admin = result.admin;
+    if (!result.ok) appendLog("warning", result.error || "Self-patch action failed");
+    renderAdmin();
+  } catch (error) {
+    appendLog("warning", `Self-patch update failed: ${error.message}`);
   }
 }
 
@@ -3049,3 +3225,4 @@ els.refreshAdminButton.addEventListener("click", () => {
 els.warmModelButton.addEventListener("click", startWarmup);
 els.runBenchmarkButton.addEventListener("click", runBenchmarkSuite);
 els.packageHealthButton.addEventListener("click", runPackageHealth);
+els.selfHealButton.addEventListener("click", runSelfHealingCheck);

@@ -169,6 +169,10 @@
                 <span>✓</span>
                 <span>Package Check</span>
               </button>
+              <button class="icon-text-button" id="selfHealButton" type="button">
+                <span>↯</span>
+                <span>Self Check</span>
+              </button>
               <button class="icon-text-button" id="refreshAdminButton" type="button">
                 <span>↻</span>
                 <span>Refresh</span>
@@ -191,6 +195,20 @@
             <h3>Improvement Lab</h3>
             <div class="improvement-summary-grid" id="improvementSummaryGrid" aria-label="Improvement summary"></div>
             <div class="improvement-list" id="improvementList" aria-label="Improvement backlog"></div>
+          </section>
+          <section class="admin-card self-healing-card">
+            <h3>Self-Healing Supervisor</h3>
+            <div class="self-healing-summary-grid" id="selfHealingSummaryGrid" aria-label="Self-healing summary"></div>
+            <div class="self-healing-layout">
+              <div>
+                <h4>Recent Receipts</h4>
+                <div class="self-healing-list" id="selfHealingList" aria-label="Self-healing receipts"></div>
+              </div>
+              <div>
+                <h4>Self-Patch Queue</h4>
+                <div class="self-patch-list" id="selfPatchList" aria-label="Self-patch queue"></div>
+              </div>
+            </div>
           </section>
           <div class="admin-layout">
             <section class="admin-card">
