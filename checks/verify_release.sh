@@ -19,12 +19,12 @@ else
 fi
 
 echo "Checking public-package privacy patterns"
-if find "$ROOT" -path "$ROOT/.git" -prune -o -type f \( -name 'codex_history_index.jsonl' -o -name 'codex_history_summary.json' \) -print | grep -q .; then
+if find "$ROOT" -name .git -prune -o -type f \( -name 'codex_history_index.jsonl' -o -name 'codex_history_summary.json' \) -print | grep -q .; then
   echo "Private history files are present"
   exit 1
 fi
 
-if rg -n --hidden --glob '!.git/**' --glob '!**/checks/verify_release.sh' --glob '!release/*.dmg' --glob '!*.icns' --glob '!*.png' \
+if rg -n --hidden --glob '!.git' --glob '!.git/**' --glob '!**/checks/verify_release.sh' --glob '!release/*.dmg' --glob '!*.icns' --glob '!*.png' \
   'williamtinney|/Users/williamtinney|192\.168\.|makersvpn|gho_|QIDI@|Flightops_Tracker' "$ROOT"; then
   echo "Privacy scan found a blocked pattern"
   exit 1

@@ -26,15 +26,31 @@
             <span class="nav-icon">▦</span>
             <span>Projects</span>
           </button>
+          <button class="sidebar-option" id="adminNavButton" type="button">
+            <span class="nav-icon">⌘</span>
+            <span>Admin</span>
+          </button>
           <button class="sidebar-option active" id="chatsNavButton" type="button">
             <span class="nav-icon">≡</span>
             <span>Chats</span>
+          </button>
+          <button class="sidebar-option" id="testsNavButton" type="button">
+            <span class="nav-icon">✓</span>
+            <span>Tests</span>
           </button>
         </div>
 
         <section class="sidebar-section" id="projectsSection" hidden>
           <div class="section-title">Projects</div>
           <div class="project-list" id="projectList"></div>
+        </section>
+
+        <section class="sidebar-section" id="adminSection" hidden>
+          <div class="section-title-row">
+            <div class="section-title">Admin Cleanup</div>
+            <span class="test-count" id="adminCountText">0</span>
+          </div>
+          <div class="project-list" id="adminNavList"></div>
         </section>
 
         <section class="sidebar-section" id="chatsSection">
@@ -45,6 +61,14 @@
             </button>
           </div>
           <nav class="thread-list" id="threadList" aria-label="Chats"></nav>
+        </section>
+
+        <section class="sidebar-section" id="testsSection" hidden>
+          <div class="section-title-row">
+            <div class="section-title">Golden Tests</div>
+            <span class="test-count" id="testCountText">0</span>
+          </div>
+          <div class="test-nav-list" id="testNavList"></div>
         </section>
 
         <div class="sidebar-footer">
@@ -69,7 +93,120 @@
           </div>
         </header>
 
+        <section class="monitor-strip" aria-label="Model health quick view">
+          <div class="monitor-strip-copy">
+            <div class="monitor-strip-title">Model Health</div>
+            <div class="monitor-strip-subtitle" id="stripStatusText">Collecting telemetry</div>
+          </div>
+          <canvas id="stripMonitorCanvas" width="520" height="104" aria-label="Live health sparkline"></canvas>
+          <div class="monitor-strip-metrics" aria-label="Quick telemetry summary">
+            <div class="strip-metric">
+              <span>OLL</span>
+              <strong id="stripOllamaText">Checking</strong>
+            </div>
+            <div class="strip-metric">
+              <span>RTE</span>
+              <strong id="stripRouteText">Idle</strong>
+            </div>
+            <div class="strip-metric">
+              <span>PASS</span>
+              <strong id="stripPassText">0.0s</strong>
+            </div>
+            <div class="strip-metric">
+              <span>PRN</span>
+              <strong id="stripPrinterText">--</strong>
+            </div>
+            <div class="strip-metric">
+              <span>MGR</span>
+              <strong id="stripManagerText">Balanced</strong>
+            </div>
+          </div>
+        </section>
+
         <section class="conversation" id="conversation" aria-live="polite"></section>
+
+        <section class="test-bench" id="testBench" hidden aria-label="Codex CLI UI test bench">
+          <div class="test-bench-header">
+            <div>
+              <h2>Golden Prompt Tests</h2>
+              <p id="testBenchSubtitle">Ready to measure routing, directness, grounding, and final-answer reliability.</p>
+            </div>
+            <div class="test-actions">
+              <button class="icon-text-button primary" id="runQuickTestsButton" type="button">
+                <span>▶</span>
+                <span>Run Quick</span>
+              </button>
+              <button class="icon-text-button" id="runAllTestsButton" type="button">
+                <span>✓</span>
+                <span>Run All</span>
+              </button>
+              <button class="icon-text-button" id="resetTestsButton" type="button">
+                <span>×</span>
+                <span>Reset</span>
+              </button>
+            </div>
+          </div>
+          <div class="test-summary-grid" id="testSummaryGrid" aria-label="Test summary"></div>
+          <div class="test-list" id="testList" aria-label="Golden prompt test list"></div>
+        </section>
+
+        <section class="admin-panel" id="adminPanel" hidden aria-label="Admin cleanup and memory">
+          <div class="admin-panel-header">
+            <div>
+              <h2>Admin Cleanup</h2>
+              <p id="adminPanelSubtitle">Organizing topics into local project folders and stable learned notes.</p>
+            </div>
+            <div class="admin-actions">
+              <button class="icon-text-button primary" id="runBenchmarkButton" type="button">
+                <span>▶</span>
+                <span>Benchmark</span>
+              </button>
+              <button class="icon-text-button" id="warmModelButton" type="button">
+                <span>◐</span>
+                <span>Warm Model</span>
+              </button>
+              <button class="icon-text-button" id="packageHealthButton" type="button">
+                <span>✓</span>
+                <span>Package Check</span>
+              </button>
+              <button class="icon-text-button" id="refreshAdminButton" type="button">
+                <span>↻</span>
+                <span>Refresh</span>
+              </button>
+            </div>
+          </div>
+          <div class="admin-summary-grid" id="adminSummaryGrid" aria-label="Admin summary"></div>
+          <div class="admin-layout">
+            <section class="admin-card">
+              <h3>Performance Benchmark</h3>
+              <div class="benchmark-summary-grid" id="benchmarkSummaryGrid" aria-label="Benchmark summary"></div>
+              <div class="benchmark-list" id="benchmarkList" aria-label="Benchmark results"></div>
+            </section>
+            <section class="admin-card">
+              <h3>Package Health</h3>
+              <div class="package-health-list" id="packageHealthList" aria-label="Package health checks"></div>
+            </section>
+          </div>
+          <section class="admin-card improvement-lab-card">
+            <h3>Improvement Lab</h3>
+            <div class="improvement-summary-grid" id="improvementSummaryGrid" aria-label="Improvement summary"></div>
+            <div class="improvement-list" id="improvementList" aria-label="Improvement backlog"></div>
+          </section>
+          <div class="admin-layout">
+            <section class="admin-card">
+              <h3>Project Folders</h3>
+              <div class="admin-project-tree" id="adminProjectTree"></div>
+            </section>
+            <section class="admin-card">
+              <h3>Stable Knowledge</h3>
+              <div class="admin-knowledge-list" id="adminKnowledgeList"></div>
+            </section>
+          </div>
+          <section class="admin-card">
+            <h3>Recent Topic Sorting</h3>
+            <div class="admin-topic-list" id="adminRecentList"></div>
+          </section>
+        </section>
 
         <section class="composer-wrap">
           <div class="composer">
@@ -82,8 +219,21 @@
             <label class="control-chip" for="modeSelect">
               <span>Mode</span>
               <select id="modeSelect" aria-label="Codex mode">
+                <option value="manager" data-reasoning="medium">Manager</option>
                 <option value="local-fast" data-reasoning="low">Fast</option>
                 <option value="local-oss" data-reasoning="medium">Careful</option>
+                <option value="local-coder" data-reasoning="medium">Coder</option>
+                <option value="local-review" data-reasoning="high">Review</option>
+                <option value="local-research" data-reasoning="high">Local Research</option>
+                <option value="cloud-research" data-reasoning="high">Cloud Research</option>
+              </select>
+            </label>
+            <label class="control-chip" for="managerDepthSelect">
+              <span>Mgr</span>
+              <select id="managerDepthSelect" aria-label="Manager speed">
+                <option value="fast">Fast</option>
+                <option value="balanced">Balanced</option>
+                <option value="full">Full</option>
               </select>
             </label>
             <label class="control-chip" for="accessSelect">
@@ -95,11 +245,27 @@
               </select>
             </label>
             <label class="control-chip" for="reasoningSelect">
-              <span>Reasoning</span>
+              <span>Reason</span>
               <select id="reasoningSelect" aria-label="Reasoning level">
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
                 <option value="high">High</option>
+              </select>
+            </label>
+            <label class="control-chip" for="friendlinessSelect">
+              <span>Friendly</span>
+              <select id="friendlinessSelect" aria-label="Friendliness level">
+                <option value="focused">Focused</option>
+                <option value="warm">Warm</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label class="control-chip" for="humorSelect">
+              <span>Humor</span>
+              <select id="humorSelect" aria-label="Humor level">
+                <option value="off">Off</option>
+                <option value="light">Light</option>
+                <option value="playful">Playful</option>
               </select>
             </label>
             <div class="control-chip web-chip">
@@ -117,6 +283,43 @@
       </main>
 
       <aside class="log-panel" id="logPanel" aria-label="Execution log">
+        <section class="monitor-panel" aria-label="Model health monitor">
+          <div class="monitor-header">
+            <div>
+              <div class="monitor-title">Model Health</div>
+              <div class="monitor-subtitle" id="monitorStatusText">Collecting telemetry</div>
+            </div>
+            <span class="monitor-pill" id="monitorManagerPill">Balanced</span>
+          </div>
+          <canvas id="monitorCanvas" width="640" height="420" aria-label="Live model health graph"></canvas>
+          <div class="monitor-metrics" aria-label="Telemetry summary">
+            <div class="monitor-metric">
+              <span>Ollama</span>
+              <strong id="monitorOllamaText">Checking</strong>
+            </div>
+            <div class="monitor-metric">
+              <span>Route</span>
+              <strong id="monitorRouteText">Idle</strong>
+            </div>
+            <div class="monitor-metric">
+              <span>Passes</span>
+              <strong id="monitorPassText">0.0s</strong>
+            </div>
+            <div class="monitor-metric">
+              <span>Memory</span>
+              <strong id="monitorMemoryText">--</strong>
+            </div>
+            <div class="monitor-metric">
+              <span>Disk Free</span>
+              <strong id="monitorDiskText">--</strong>
+            </div>
+            <div class="monitor-metric">
+              <span>Printers</span>
+              <strong id="monitorPrinterText">--</strong>
+            </div>
+          </div>
+          <div class="printer-list" id="printerList" aria-label="Printer link status"></div>
+        </section>
         <div class="log-header">
           <div>
             <div class="log-title">Run Log</div>
