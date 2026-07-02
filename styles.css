@@ -1549,6 +1549,30 @@ h1 {
   text-decoration: underline;
 }
 
+.answer-text .local-file-link {
+  display: inline;
+  border-bottom: 1px dotted rgba(24, 134, 91, 0.55);
+  color: #126b4f;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.answer-text .local-file-link:hover {
+  border-bottom-style: solid;
+  color: #0d513d;
+  text-decoration: none;
+}
+
+.answer-text .local-file-link.code-link {
+  border-bottom: 0;
+}
+
+.answer-text .local-file-link code {
+  border-color: rgba(24, 134, 91, 0.28);
+  background: rgba(24, 134, 91, 0.08);
+  color: #0d513d;
+}
+
 .answer-text code {
   border: 1px solid #d9e0e7;
   border-radius: 5px;
