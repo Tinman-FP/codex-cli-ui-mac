@@ -195,6 +195,17 @@
             <h3>Engineering Analysis Packs</h3>
             <div class="engineering-admin-grid" id="engineeringAdminGrid" aria-label="Engineering analysis pack status"></div>
           </section>
+          <section class="admin-card printing-expert-card">
+            <div class="admin-card-heading-row">
+              <h3>3D Printing Expert Pack</h3>
+              <button class="icon-text-button" id="refreshPrintingPackButton" type="button">
+                <span>↻</span>
+                <span>Refresh Sources</span>
+              </button>
+            </div>
+            <div class="printing-pack-summary-grid" id="printingPackSummaryGrid" aria-label="3D printing expert pack summary"></div>
+            <div class="printing-pack-list" id="printingPackList" aria-label="3D printing expert pack details"></div>
+          </section>
           <section class="admin-card improvement-lab-card">
             <h3>Improvement Lab</h3>
             <div class="improvement-summary-grid" id="improvementSummaryGrid" aria-label="Improvement summary"></div>
@@ -262,11 +273,11 @@
                 <span>↯</span>
                 <span>Run Deeper</span>
               </button>
-              <button class="analysis-button" id="runAeroButton" type="button" title="Run the Aero/CFD analysis path">
+              <button class="analysis-button" id="runAeroButton" type="button" title="Run Aero/CFD preflight on the current prompt or attachment">
                 <span>⇥</span>
                 <span>Aero</span>
               </button>
-              <button class="analysis-button" id="runStructuralButton" type="button" title="Run the Structural FEA analysis path">
+              <button class="analysis-button" id="runStructuralButton" type="button" title="Run Structural FEA on the current prompt or attachment">
                 <span>⌁</span>
                 <span>FEA</span>
               </button>

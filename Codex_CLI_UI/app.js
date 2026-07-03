@@ -38,6 +38,9 @@ const els = {
   benchmarkList: document.getElementById("benchmarkList"),
   packageHealthList: document.getElementById("packageHealthList"),
   engineeringAdminGrid: document.getElementById("engineeringAdminGrid"),
+  refreshPrintingPackButton: document.getElementById("refreshPrintingPackButton"),
+  printingPackSummaryGrid: document.getElementById("printingPackSummaryGrid"),
+  printingPackList: document.getElementById("printingPackList"),
   improvementSummaryGrid: document.getElementById("improvementSummaryGrid"),
   improvementList: document.getElementById("improvementList"),
   selfHealingSummaryGrid: document.getElementById("selfHealingSummaryGrid"),
@@ -230,6 +233,9 @@ function setRunning(isRunning) {
   els.sendButton.disabled = isRunning;
   els.attachButton.disabled = isRunning;
   els.fileInput.disabled = isRunning;
+  if (els.runDeeperButton) els.runDeeperButton.disabled = isRunning;
+  if (els.runAeroButton) els.runAeroButton.disabled = isRunning;
+  if (els.runStructuralButton) els.runStructuralButton.disabled = isRunning;
   els.promptInput.disabled = isRunning;
   els.newThreadButton.disabled = isRunning;
   els.adminNavButton.disabled = isRunning;
@@ -240,9 +246,6 @@ function setRunning(isRunning) {
   els.friendlinessSelect.disabled = isRunning;
   els.humorSelect.disabled = isRunning;
   els.webAccessToggle.disabled = isRunning;
-  if (els.runDeeperButton) els.runDeeperButton.disabled = isRunning;
-  if (els.runAeroButton) els.runAeroButton.disabled = isRunning;
-  if (els.runStructuralButton) els.runStructuralButton.disabled = isRunning;
   if (els.runQuickTestsButton) els.runQuickTestsButton.disabled = isRunning;
   if (els.runAllTestsButton) els.runAllTestsButton.disabled = isRunning;
   if (els.resetTestsButton) els.resetTestsButton.disabled = isRunning;
@@ -251,6 +254,7 @@ function setRunning(isRunning) {
   if (els.runBenchmarkButton) els.runBenchmarkButton.disabled = isRunning;
   if (els.packageHealthButton) els.packageHealthButton.disabled = isRunning;
   if (els.selfHealButton) els.selfHealButton.disabled = isRunning;
+  if (els.refreshPrintingPackButton) els.refreshPrintingPackButton.disabled = isRunning;
   if (isRunning) {
     els.runState.textContent = "Running";
     els.runState.className = "run-state warning";
@@ -282,8 +286,8 @@ function render() {
   renderSidebarMode();
   renderMessages();
   renderAttachmentTray();
-  renderRunControls();
   renderEngineeringStatus();
+  renderRunControls();
   renderLogs();
   renderMonitorSummary();
   saveState();
@@ -411,6 +415,7 @@ function renderAdmin() {
   renderBenchmarkPanel();
   renderPackageHealth();
   renderEngineeringAdmin();
+  renderPrintingExpertPack(admin.printingExpertPack || {});
   renderImprovementLab(improvement);
   renderSelfHealing(selfHealing);
   renderAdminProjectTree(projects);
@@ -624,6 +629,86 @@ function renderEngineeringAdmin() {
 
     card.append(header, toolList, action);
     els.engineeringAdminGrid.appendChild(card);
+  });
+}
+
+function renderPrintingExpertPack(pack) {
+  if (els.printingPackSummaryGrid) {
+    els.printingPackSummaryGrid.textContent = "";
+    [
+      ["Printers", `${pack.printerProfileCount || 0}`],
+      ["Materials", `${pack.materialCount || 0}`],
+      ["Tuning Steps", `${pack.tuningStepCount || 0}`],
+      ["Source Seeds", `${pack.sourceSeedCount || 0}`],
+      ["Cached", `${pack.cachedSourceCount || 0}`],
+      ["Components", `${pack.componentCount || 0}`],
+    ].forEach(([label, value]) => {
+      const item = document.createElement("div");
+      item.className = "admin-summary-item";
+      const small = document.createElement("span");
+      small.textContent = label;
+      const strong = document.createElement("strong");
+      strong.textContent = value;
+      item.append(small, strong);
+      els.printingPackSummaryGrid.appendChild(item);
+    });
+  }
+
+  if (!els.printingPackList) return;
+  els.printingPackList.textContent = "";
+  if (!pack.printers && !pack.materials && !pack.components) {
+    const empty = document.createElement("div");
+    empty.className = "admin-empty";
+    empty.textContent = "3D printing expert pack status is loading.";
+    els.printingPackList.appendChild(empty);
+    return;
+  }
+
+  const sections = [
+    {
+      title: "Printer Knowledge",
+      meta: `${pack.printerProfileCount || 0} machines`,
+      detail: "Architecture, limitations, and source-backed spec references for the shop printer fleet.",
+      chips: (pack.printers || []).map((item) => item.name || item.id).slice(0, 10),
+    },
+    {
+      title: "Filament & Orca Tuning",
+      meta: `${pack.materialCount || 0} materials · ${pack.tuningStepCount || 0} Orca steps`,
+      detail: "Temperature, flow, pressure advance, retraction, max volumetric speed, drying, and use-case notes.",
+      chips: (pack.materials || []).map((item) => item.label || item.id).slice(0, 12),
+    },
+    {
+      title: "Manual Source Vault",
+      meta: `${pack.cachedSourceCount || 0}/${pack.sourceSeedCount || 0} cached`,
+      detail: pack.vaultPath || "Local manuals and source extracts are stored under the app data vault.",
+      chips: (pack.components || []).map((item) => item.label || item.id).concat(["Orca guide", "Printer specs", "Material guides"]).slice(0, 10),
+    },
+  ];
+
+  sections.forEach((section) => {
+    const row = document.createElement("article");
+    row.className = "printing-pack-row";
+
+    const copy = document.createElement("div");
+    copy.className = "printing-pack-copy";
+    const title = document.createElement("strong");
+    title.textContent = section.title;
+    const meta = document.createElement("span");
+    meta.textContent = section.meta;
+    const detail = document.createElement("p");
+    detail.textContent = section.detail;
+    copy.append(title, meta, detail);
+
+    const chips = document.createElement("div");
+    chips.className = "printing-pack-tags";
+    section.chips.forEach((label) => {
+      const chip = document.createElement("span");
+      chip.textContent = label;
+      chips.appendChild(chip);
+    });
+
+    row.append(copy, chips);
+    els.printingPackList.appendChild(row);
   });
 }
 
@@ -1874,6 +1959,39 @@ async function runPackageHealth() {
     appendLog("warning", `Package health check failed: ${error.message}`);
   } finally {
     if (els.packageHealthButton) els.packageHealthButton.disabled = Boolean(activeController);
+  }
+}
+
+async function refreshPrintingPackSources() {
+  if (activeController) return;
+  if (els.refreshPrintingPackButton) els.refreshPrintingPackButton.disabled = true;
+  els.runState.textContent = "Refreshing 3D sources";
+  els.runState.className = "run-state warning";
+  try {
+    const response = await fetch("/api/3d-printing/refresh-sources", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 10 }),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) {
+      throw new Error(result.error || `source refresh ${response.status}`);
+    }
+    config.admin = config.admin || {};
+    if (result.expertPack) {
+      config.admin.printingExpertPack = result.expertPack;
+    }
+    appendLog("event", `3D source vault ${result.okCount || 0}/${result.refreshed || 0} refreshed`);
+    await refreshAdmin();
+    renderAdmin();
+    els.runState.textContent = "3D sources refreshed";
+    els.runState.className = "run-state ok";
+  } catch (error) {
+    appendLog("warning", `3D source refresh failed: ${error.message}`);
+    els.runState.textContent = "3D source refresh failed";
+    els.runState.className = "run-state error";
+  } finally {
+    if (els.refreshPrintingPackButton) els.refreshPrintingPackButton.disabled = Boolean(activeController);
   }
 }
 
@@ -3689,3 +3807,4 @@ els.warmModelButton.addEventListener("click", startWarmup);
 els.runBenchmarkButton.addEventListener("click", runBenchmarkSuite);
 els.packageHealthButton.addEventListener("click", runPackageHealth);
 els.selfHealButton.addEventListener("click", runSelfHealingCheck);
+if (els.refreshPrintingPackButton) els.refreshPrintingPackButton.addEventListener("click", refreshPrintingPackSources);

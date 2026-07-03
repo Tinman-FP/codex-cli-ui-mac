@@ -9,7 +9,7 @@ This is a community package for Mac users who want a simple local Codex-style ch
 Download the DMG from the `release/` folder or the GitHub Release:
 
 ```text
-Codex_CLI_UI_Mac_v2026.07.12.dmg
+Codex_CLI_UI_Mac_v2026.07.14.dmg
 ```
 
 Open the DMG and double-click:
@@ -62,6 +62,8 @@ codex --profile local-fast --search
 - Cooling-duct research mode that learns from CFD papers, Printables, GitHub, and material-cooling guidance before CAD generation
 - STL-aware CFD/duct preflight that finds attached or named STL files, inspects mesh geometry, captures clearance/wall constraints, and detects OpenFOAM/Docker capability before answering
 - Inferred STL duct design worker that generates editable SCAD, duct STL, airway STL, port-inference JSON, preview images, and OpenFOAM surface checks
+- 3D Printing Expert Pack with printer profiles, filament/material guidance, OrcaSlicer calibration order, BTT EBB42 docs retention, and a local manual/spec source vault
+- Admin 3D Printing Expert Pack card with source-vault counts and one-click source refresh
 - Local Research, Coder, Review, and Manager modes for a fuller free local workflow
 - Optional local history importer for your own `~/.codex/sessions`
 

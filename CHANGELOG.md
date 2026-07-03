@@ -1,5 +1,16 @@
 # Changelog
 
+## v2026.07.14
+
+- Adds the 3D Printing Expert Pack with printer profiles for Bambu H2D/X1C, Creality K2 Plus, Qidi Plus 4, Snapmaker U1, Rat Rig V-Core 4.1 IDEX Klipper, Sovol SV08 Max, and ELEGOO Centauri Carbon.
+- Adds a filament/material library for PLA, PETG, PCTG, ABS, ASA, PA, PA-CF, PET-CF, PC, and TPU with drying, use-case, strength, and caution notes.
+- Adds an OrcaSlicer filament-tuning coach that answers in calibration order: temperature, flow pass 1, flow pass 2, pressure advance, max volumetric speed, retraction, then VFA/speed.
+- Adds a local 3D-printing source vault that can cache official specs, manuals, GitHub docs, and component references under each user's local `data/source-vault/3d-printing` folder.
+- Adds BTT EBB42 source retention from GitHub/wiki/PDF references so future toolboard questions can use local cached docs.
+- Adds `GET /api/3d-printing/expert-pack` and `POST /api/3d-printing/refresh-sources` for UI/admin source-vault visibility and refresh.
+- Adds an Admin 3D Printing Expert Pack card with printer/material/source-vault counts and a Refresh Sources button.
+- Adds package-health regressions for the expert pack, Orca filament tuning answers, and direct printer-profile architecture/limit answers.
+
 ## v2026.07.13
 
 - Adds OpenVSP/VSPAERO, XFOIL, SU2, QBlade Linux launcher, and CalculiX to the free-tool capability catalog.

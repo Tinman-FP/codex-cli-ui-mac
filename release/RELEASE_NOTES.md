@@ -1,24 +1,32 @@
-# Codex CLI UI for Mac v2026.07.13
+# Codex CLI UI for Mac v2026.07.14
 
-Aero and mechanical/structural design-pack release.
+3D printing expert-pack release.
 
 ## Download
 
 Download one file:
 
 ```text
-Codex_CLI_UI_Mac_v2026.07.13.dmg
+Codex_CLI_UI_Mac_v2026.07.14.dmg
 ```
 
 Open the DMG and double-click `Install Codex CLI UI.command`.
 
 ## Fixed
 
-- Mechanical and structural design prompts now route to CAD/Modeling instead of printer status or generic fallbacks.
-- Package health now catches structural-routing regressions before release.
+- Printer/material/component knowledge questions now answer directly instead of falling into generic CAD, Moonraker, or printer-status fallbacks.
+- Package health now catches 3D-printing expert-pack, Orca tuning, and printer-profile regressions before release.
 
 ## Added
 
+- 3D Printing Expert Pack with printer profiles for Bambu H2D/X1C, Creality K2 Plus, Qidi Plus 4, Snapmaker U1, Rat Rig V-Core 4.1 IDEX Klipper, Sovol SV08 Max, and ELEGOO Centauri Carbon.
+- Filament/material library for PLA, PETG, PCTG, ABS, ASA, PA, PA-CF, PET-CF, PC, and TPU with drying, use-case, strength, and caution notes.
+- OrcaSlicer tuning coach using the practical calibration order: temperature tower, flow pass 1, flow pass 2, pressure advance, max volumetric speed, retraction/stringing, then VFA/speed.
+- Local 3D-printing source vault at `data/source-vault/3d-printing` for official specs, manuals, GitHub docs, wiki pages, and extracted text.
+- BTT EBB42 source retention from GitHub/wiki/PDF references so future toolboard questions can use local cached docs.
+- `GET /api/3d-printing/expert-pack` and `POST /api/3d-printing/refresh-sources` for source-vault visibility and refresh.
+- Admin 3D Printing Expert Pack card with printer/material/source-vault counts and a Refresh Sources button.
+- Package-health checks for the expert pack, Orca filament tuning answers, and direct printer-profile architecture/limit answers.
 - OpenVSP/VSPAERO, XFOIL, SU2, QBlade Linux launcher, and CalculiX tool visibility in the local capability catalog.
 - Installer-created `qblade-import`, `qblade-linux`, `qblade-runner-build`, and `qblade` helpers for validated QBlade CE Linux imports on macOS.
 - Safari-extracted QBlade folders can be imported directly, incomplete browser downloads are rejected, and the Docker runner includes Qt/Xvfb support for headless Linux execution.
@@ -46,6 +54,7 @@ Open the DMG and double-click `Install Codex CLI UI.command`.
 - Aero/CFD preflight helpers for OpenFOAM/OpenVSP/XFOIL/SU2 workflows
 - Mechanical/structural real-geometry FEA helper for Gmsh/CalculiX-backed workflows
 - Visible Engineering Analysis Pack status and one-click deeper-analysis controls
+- 3D Printing Expert Pack with Orca tuning, printer profiles, filament guidance, and local source-vault refresh
 - Privacy-safe local data/log folders
 
 ## Requirements

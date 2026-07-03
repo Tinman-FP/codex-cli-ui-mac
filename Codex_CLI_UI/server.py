@@ -45,6 +45,9 @@ LOCAL_CAD_OUTPUT_DIR = DATA_DIR / "generated" / "cad"
 LOCAL_AERO_OUTPUT_DIR = DATA_DIR / "generated" / "aero-cfd"
 LOCAL_STRUCTURAL_OUTPUT_DIR = DATA_DIR / "generated" / "structural-fea"
 LOCAL_QUALITY_OUTPUT_DIR = DATA_DIR / "generated" / "quality-gates"
+SOURCE_VAULT_DIR = DATA_DIR / "source-vault"
+PRINTING_SOURCE_VAULT_DIR = SOURCE_VAULT_DIR / "3d-printing"
+PRINTING_SOURCE_INDEX_PATH = PRINTING_SOURCE_VAULT_DIR / "source_index.json"
 UPLOAD_DIR = DATA_DIR / "uploads"
 CAPABILITY_TOOL_LOG_PATH = DATA_DIR / "capability_tool_log.jsonl"
 AUTONOMY_SUPERVISOR_LOG_PATH = DATA_DIR / "autonomy_supervisor.jsonl"
@@ -59,6 +62,7 @@ MAX_AUTO_INSTALL_BYTES = int(
     os.environ.get("CODEX_MAX_AUTO_INSTALL_BYTES", str(2 * 1024 * 1024 * 1024))
 )
 MAX_UPLOAD_BYTES = int(os.environ.get("CODEX_MAX_UPLOAD_BYTES", str(250 * 1024 * 1024)))
+MAX_SOURCE_CACHE_BYTES = int(os.environ.get("CODEX_MAX_SOURCE_CACHE_BYTES", str(50 * 1024 * 1024)))
 CODEX_BIN = os.environ.get(
     "CODEX_BIN", "/Applications/Codex.app/Contents/Resources/codex"
 )
@@ -217,10 +221,10 @@ ADMIN_TAXONOMY = {
         "name": "3D Printers",
         "description": "Printer hardware, firmware/software, filament, and print process knowledge.",
         "triggers": (
-            "3d print", "3d printer", "bambu", "centauri", "creality", "extruder",
-            "filament", "gcode", "hotend", "hotted", "klipper", "mainsail", "moonraker",
+            "3d print", "3d printer", "bambu", "btt", "bigtreetech", "centauri", "creality", "ebb42",
+            "filament", "gcode", "h2d", "hotend", "hotted", "k2 plus", "klipper", "mainsail", "moonraker",
             "nozzle", "orca", "orcaslicer", "print bed", "printer", "qidi",
-            "rat rig", "ratrig", "slicer", "snapmaker", "spool", "toolhead",
+            "rat rig", "ratrig", "slicer", "snapmaker", "sovol", "spool", "sv08", "toolhead", "x1c",
         ),
         "routeProjects": ("printer-klipper-ops", "tinmanx-slicer-research", "orcaslicer-codex"),
         "folders": {
@@ -3347,6 +3351,7 @@ def admin_summary():
     self_healing = self_healing_summary()
     golden = golden_test_summary()
     examples = response_examples_summary()
+    printing_pack = printing_expert_pack_summary(include_details=True)
     projects = []
     for project_id, project in state.get("projects", {}).items():
         folders = []
@@ -3392,6 +3397,7 @@ def admin_summary():
         "goldenTestCount": golden["totalCount"],
         "responseExamples": examples,
         "responseExampleCount": examples["count"],
+        "printingExpertPack": printing_pack,
         "projectCount": len(projects),
         "knowledgeCount": len(knowledge.get("items", [])),
         "projects": projects,
@@ -4708,6 +4714,678 @@ COOLING_DUCT_RESEARCH_SOURCES = (
 )
 
 
+PRINTING_PRINTER_PROFILES = [
+    {
+        "id": "bambu-h2d",
+        "name": "Bambu Lab H2D",
+        "aliases": ["h2d", "bambu h2d"],
+        "architecture": "Bambu closed/appliance ecosystem with Bambu Studio/Orca-derived workflow; not Klipper/Moonraker.",
+        "limits": {
+            "buildVolume": "350 x 320 x 325 mm class, dual-nozzle restrictions apply",
+            "maxToolheadSpeed": "1000 mm/s",
+            "maxAcceleration": "20000 mm/s^2",
+            "maxHotendFlow": "40 mm^3/s standard-flow hotend",
+            "maxNozzleTemp": "350 C on H2D Pro class; verify exact H2D variant",
+        },
+        "notes": "Treat nozzle/material/channel restrictions as variant-specific. Do not assume Klipper macros or direct Moonraker control.",
+        "sources": ["bambu-h2d-tech-specs", "bambu-h2d-pro-tech-specs"],
+    },
+    {
+        "id": "bambu-x1c",
+        "name": "Bambu Lab X1 Carbon",
+        "aliases": ["x1c", "x1 carbon", "bambu x1c", "bambu lab x1 carbon"],
+        "architecture": "Bambu closed firmware and Bambu Studio/Orca profile ecosystem; AMS-aware but not Klipper.",
+        "limits": {
+            "buildVolume": "256 x 256 x 256 mm",
+            "maxAcceleration": "20000 mm/s^2",
+            "maxNozzleTemp": "300 C",
+            "filamentDiameter": "1.75 mm",
+        },
+        "notes": "Use Bambu/Orca filament profiles and AMS constraints. Avoid assuming arbitrary firmware changes.",
+        "sources": ["bambu-x1c-tech-specs", "bambu-x1-series-wiki"],
+    },
+    {
+        "id": "creality-k2-plus",
+        "name": "Creality K2 Plus",
+        "aliases": ["k2 plus", "creality k2", "creality k2 plus"],
+        "architecture": "Creality OS / Creality ecosystem with LAN/cloud interfaces; not a generic Klipper target unless rooted/confirmed.",
+        "limits": {
+            "buildVolume": "350 x 350 x 350 mm",
+            "maxSpeed": "600 mm/s",
+            "maxAcceleration": "30000 mm/s^2",
+            "maxFlow": "40 mm^3/s at ABS class conditions",
+            "maxNozzleTemp": "350 C",
+            "maxBedTemp": "120 C",
+            "maxChamberTemp": "60 C",
+        },
+        "notes": "CFS/material handling and Creality LAN/cloud API behavior should be verified against current firmware.",
+        "sources": ["creality-k2-plus-product", "creality-k2-plus-support"],
+    },
+    {
+        "id": "qidi-plus-4",
+        "name": "Qidi Plus 4",
+        "aliases": ["qidi plus 4", "qidi plus4", "plus 4", "plus4"],
+        "architecture": "Klipper/Moonraker-style Qidi firmware on this Mac's known fleet; live actions require standby/idle verification.",
+        "limits": {
+            "buildVolume": "305 x 305 x 280 mm",
+            "maxSpeed": "600 mm/s",
+            "maxAcceleration": "20000 mm/s^2",
+            "maxNozzleTemp": "370 C",
+            "maxBedTemp": "120 C",
+            "activeChamber": "65 C class active chamber",
+        },
+        "notes": "Good engineering-filament platform. For live reads use configured Moonraker when reachable; for writes, verify print_stats and virtual_sdcard first.",
+        "sources": ["qidi-plus4-techspecs", "qidi-plus4-product"],
+    },
+    {
+        "id": "snapmaker-u1",
+        "name": "Snapmaker U1",
+        "aliases": ["snapmaker u1", "u1"],
+        "architecture": "Snapmaker toolchanger/multitool ecosystem with Orca-derived workflow; not a generic single-tool Klipper assumption.",
+        "limits": {
+            "buildVolume": "270 x 270 x 270 mm",
+            "maxSpeed": "500 mm/s",
+            "maxNozzleTemp": "300 C",
+            "nozzleDiameter": "0.4 mm launch/default",
+            "filamentDiameter": "1.75 mm",
+        },
+        "notes": "Use toolchanger-aware profiles and material-change constraints. Snapmaker FAQ says hotend PID tuning is not supported at the time captured.",
+        "sources": ["snapmaker-u1-specs", "snapmaker-u1-wiki"],
+    },
+    {
+        "id": "rat-rig-vcore-4-1-500-idex-klipper",
+        "name": "Custom Rat Rig V-Core 4.1 500 IDEX Klipper",
+        "aliases": ["rat rig", "ratrig", "vcore", "v-core", "v-core 4.1", "idex"],
+        "architecture": "Custom Klipper IDEX printer; treat local configs/macros as source of truth over generic RatOS assumptions.",
+        "limits": {
+            "buildVolume": "up to 500 x 500 x 500 mm base platform; custom IDEX/toolhead envelope must be checked locally",
+            "maxNozzleTemp": "350 C base V-Core 4.1 spec unless modified hotend says otherwise",
+            "maxBedTemp": "120 C base platform spec",
+            "idex": "independent dual extrusion with copy/mirror/multimaterial potential",
+        },
+        "notes": "Because Tinman's machine is custom Klipper, always inspect local printer.cfg/macros/toolhead hardware before changing motion, offsets, CAN, or heaters.",
+        "sources": ["ratrig-vcore-41-product", "ratrig-vcore-41-idex", "ratrig-wiki"],
+    },
+    {
+        "id": "sovol-sv08-max",
+        "name": "Sovol SV08 Max",
+        "aliases": ["sovol sv08 max", "sv08 max", "sv08"],
+        "architecture": "Large-format open/Klipper-style CoreXY family; verify firmware and config before live control.",
+        "limits": {
+            "buildVolume": "500 x 500 x 500 mm",
+            "maxSpeed": "700 mm/s",
+            "maxAcceleration": "40000 mm/s^2",
+            "maxFlow": "50 mm^3/s",
+            "maxNozzleTemp": "300 C",
+            "maxBedTemp": "100 C",
+        },
+        "notes": "Large bed and high flow make drying, heat soak, gantry tramming, and volumetric-flow calibration important.",
+        "sources": ["sovol-sv08-max-product"],
+    },
+    {
+        "id": "elegoo-centauri-carbon",
+        "name": "ELEGOO Centauri Carbon",
+        "aliases": ["centauri carbon", "elegoo centauri", "centauri"],
+        "architecture": "ELEGOO enclosed CoreXY with ELEGOO/Orca-derived slicer workflow; not a generic Klipper macro target unless confirmed.",
+        "limits": {
+            "buildVolume": "256 x 256 x 256 mm",
+            "maxSpeed": "500 mm/s",
+            "recommendedSpeed": "250 mm/s",
+            "maxAcceleration": "20000 mm/s^2",
+            "defaultAcceleration": "10000 mm/s^2",
+            "maxFlow": "32 mm^3/s",
+            "maxNozzleTemp": "320 C",
+            "maxBedTemp": "110 C",
+        },
+        "notes": "Use manufacturer material/nozzle constraints first. Good compact enclosed printer for ASA/ABS-class work with tuning.",
+        "sources": ["elegoo-centauri-carbon-product", "elegoo-centauri-carbon-manual", "elegoo-centauri-carbon-wiki"],
+    },
+]
+
+PRINTING_MATERIAL_LIBRARY = {
+    "pla": {
+        "name": "PLA",
+        "aliases": ["pla", "pla+", "pro pla"],
+        "use": "cosmetic parts, prototypes, low-heat low-creep parts",
+        "strength": "stiff but can be brittle; poor long-term heat/creep resistance",
+        "drying": "45-50 C for 4-6 h when wet",
+        "printing": "strong part cooling, easy bed adhesion, usually no enclosure",
+        "cautions": "Avoid hot cars, outdoor loaded brackets, and sustained stress.",
+    },
+    "petg": {
+        "name": "PETG",
+        "aliases": ["petg"],
+        "use": "tough utility parts with easier printing than ABS/ASA",
+        "strength": "good ductility and layer adhesion, moderate heat resistance",
+        "drying": "55-65 C for 4-8 h",
+        "printing": "moderate cooling, avoid over-squish, watch stringing",
+        "cautions": "Long UV exposure is not as good as ASA; can creep under load.",
+    },
+    "pctg": {
+        "name": "PCTG",
+        "aliases": ["pctg"],
+        "use": "tough PETG-like parts needing better impact/clarity and ductility",
+        "strength": "good impact toughness and layer adhesion",
+        "drying": "60-65 C for 4-8 h",
+        "printing": "moderate cooling; tune flow and pressure advance carefully",
+        "cautions": "Can string; not the first pick for maximum UV/heat exposure.",
+    },
+    "abs": {
+        "name": "ABS",
+        "aliases": ["abs"],
+        "use": "enclosed mechanical parts, post-processing, heat-tolerant utility parts",
+        "strength": "good toughness and heat resistance",
+        "drying": "70-80 C for 4-6 h if wet",
+        "printing": "enclosure and low fan; manage VOCs/ventilation",
+        "cautions": "Warping and odor; ASA is usually better for outdoor UV.",
+    },
+    "asa": {
+        "name": "ASA",
+        "aliases": ["asa"],
+        "use": "outdoor brackets, sun/weather parts, enclosures, utility parts",
+        "strength": "ABS-like with better UV/weather resistance",
+        "drying": "70-80 C for 4-6 h",
+        "printing": "enclosure, low fan except bridges/details, ventilation",
+        "cautions": "Needs heat management and enough walls around fasteners.",
+    },
+    "pa": {
+        "name": "Nylon / PA",
+        "aliases": ["pa", "nylon", "pa6", "pa12"],
+        "use": "tough, fatigue-resistant functional parts",
+        "strength": "excellent toughness; stiffness varies by grade",
+        "drying": "70-90 C for 8-12 h and print from drybox",
+        "printing": "drybox, enclosure helpful, glue/garolite/PA surface often needed",
+        "cautions": "Moisture changes dimensions, surface, and strength quickly.",
+    },
+    "pa-cf": {
+        "name": "PA-CF",
+        "aliases": ["pa-cf", "nylon cf", "paht-cf"],
+        "use": "stiff engineering parts, brackets, fixtures, heat-resistant components",
+        "strength": "stiff, strong in-plane, lower shrink than plain PA",
+        "drying": "80-100 C for 8-12 h and print from drybox",
+        "printing": "hardened nozzle, drybox, enclosure, slower abrasive profile",
+        "cautions": "Anisotropic; design so load is not peeling Z layers apart.",
+    },
+    "pet-cf": {
+        "name": "PET-CF",
+        "aliases": ["pet-cf", "pet cf"],
+        "use": "dimensionally stable engineering parts with good stiffness and lower moisture sensitivity than PA-CF",
+        "strength": "stiff and stable; product-specific impact/heat performance varies",
+        "drying": "65-75 C for 6-8 h and store dry",
+        "printing": "hardened nozzle, moderate fan, tune flow and max volumetric speed",
+        "cautions": "Do not substitute PETG-CF when the requirement is PET-CF.",
+    },
+    "pc": {
+        "name": "Polycarbonate / PC",
+        "aliases": ["pc", "polycarbonate"],
+        "use": "high-heat, high-impact engineering parts",
+        "strength": "high toughness and heat resistance when printed hot/enclosed",
+        "drying": "80-100 C for 6-10 h",
+        "printing": "hotend/chamber capability matters; low fan; drybox",
+        "cautions": "Warping and bed adhesion can dominate success.",
+    },
+    "tpu": {
+        "name": "TPU",
+        "aliases": ["tpu", "flexible"],
+        "use": "flexible mounts, boots, bumpers, seals",
+        "strength": "flexible and abrasion-resistant; hardness-specific",
+        "drying": "45-55 C for 4-8 h",
+        "printing": "slow, low retraction, direct drive preferred",
+        "cautions": "AMS/CFS/toolchanger compatibility varies by hardness and path friction.",
+    },
+}
+
+ORCA_TUNING_WORKFLOW = [
+    {
+        "id": "temperature-tower",
+        "name": "Temperature tower",
+        "goal": "Find the best nozzle temperature window for strength, sheen, overhangs, and stringing.",
+        "save": "filament temperature range and preferred nozzle temp per printer/nozzle",
+    },
+    {
+        "id": "flow-rate-pass-1",
+        "name": "Flow Rate Pass 1",
+        "goal": "Get the first coarse extrusion multiplier from top-surface quality.",
+        "save": "coarse flow ratio",
+    },
+    {
+        "id": "flow-rate-pass-2",
+        "name": "Flow Rate Pass 2",
+        "goal": "Refine flow after pass 1 so walls/top layers are not under/over-extruded.",
+        "save": "final flow ratio",
+    },
+    {
+        "id": "pressure-advance",
+        "name": "Pressure advance",
+        "goal": "Tune corner/line pressure response after flow is correct.",
+        "save": "PA/K value for printer, nozzle, filament, and speed range",
+    },
+    {
+        "id": "max-volumetric-speed",
+        "name": "Max volumetric speed",
+        "goal": "Find the reliable flow ceiling before under-extrusion or weak layers.",
+        "save": "max volumetric speed with safety margin",
+    },
+    {
+        "id": "retraction",
+        "name": "Retraction/stringing",
+        "goal": "Reduce strings without causing jams, blobs, or toolchange issues.",
+        "save": "retraction length/speed and wipe settings",
+    },
+    {
+        "id": "vfa-speed",
+        "name": "VFA/speed test",
+        "goal": "Find cosmetic speed bands and avoid resonance/vertical-fine-artifact zones.",
+        "save": "preferred outer-wall, inner-wall, and travel speed bands",
+    },
+]
+
+PRINTING_COMPONENT_LIBRARY = {
+    "btt-ebb42": {
+        "name": "BIGTREETECH EBB42",
+        "aliases": ["ebb42", "ebb 42", "btt ebb42", "bigtreetech ebb42"],
+        "architecture": "Klipper USB/CAN toolboard for 42 mm extruder/toolhead wiring.",
+        "notes": "Version matters: EBB42 CAN v1.0/v1.1/v1.2 and Gen2 have different chips, jumpers, and pin details. Confirm board revision before wiring or flashing.",
+        "sourceIds": ["btt-ebb-readme", "btt-ebb42-can-doc", "btt-ebb42-gen2-doc", "btt-ebb-series-wiki", "btt-ebb42-v10-size-pdf"],
+    }
+}
+
+PRINTING_SOURCE_SEEDS = [
+    {
+        "id": "orca-calibration-guide",
+        "label": "OrcaSlicer calibration guide",
+        "url": "https://www.orcaslicer.com/wiki/calibration/calibration_guide.html",
+        "kind": "calibration",
+    },
+    {"id": "orca-wiki", "label": "OrcaSlicer Wiki", "url": "https://github.com/OrcaSlicer/OrcaSlicer/wiki", "kind": "slicer"},
+    {"id": "bambu-h2d-tech-specs", "label": "Bambu Lab H2D tech specs", "url": "https://bambulab.com/en/h2d/tech-specs", "kind": "printer"},
+    {"id": "bambu-h2d-pro-tech-specs", "label": "Bambu Lab H2D Pro tech specs", "url": "https://bambulab.com/en/h2d-pro/tech-specs", "kind": "printer"},
+    {"id": "bambu-x1c-tech-specs", "label": "Bambu Lab X1 Carbon tech specs PDF", "url": "https://public-cdn.bambulab.com/store/bambulab-X1-carbon-tech-specs.pdf", "kind": "printer"},
+    {"id": "bambu-x1-series-wiki", "label": "Bambu Lab X1 Series wiki", "url": "https://wiki.bambulab.com/en/x1", "kind": "printer"},
+    {"id": "creality-k2-plus-product", "label": "Creality K2 Plus product specs", "url": "https://www.creality.com/products/creality-k2-plus-cfs-combo", "kind": "printer"},
+    {"id": "creality-k2-plus-support", "label": "Creality K2 Plus support", "url": "https://www.creality.com/support/creality-k2-plus-cfs-combo", "kind": "printer"},
+    {"id": "qidi-plus4-techspecs", "label": "Qidi Plus 4 tech specs", "url": "https://us.qidi3d.com/pages/qidi-plus-4-techspecs", "kind": "printer"},
+    {"id": "qidi-plus4-product", "label": "Qidi Plus 4 product page", "url": "https://us.qidi3d.com/products/plus4-3d-printer", "kind": "printer"},
+    {"id": "snapmaker-u1-specs", "label": "Snapmaker U1 specs", "url": "https://www.snapmaker.com/snapmaker-u1/specs", "kind": "printer"},
+    {"id": "snapmaker-u1-wiki", "label": "Snapmaker U1 wiki/FAQ", "url": "https://wiki.snapmaker.com/en/FAQ/u1", "kind": "printer"},
+    {"id": "ratrig-vcore-41-product", "label": "Rat Rig V-Core 4.1 specs", "url": "https://ratrig.com/products/rat-rig-v-core-4-1", "kind": "printer"},
+    {"id": "ratrig-vcore-41-idex", "label": "Rat Rig V-Core 4.1 IDEX upgrade", "url": "https://ratrig.com/products/rat-rig-v-core-4-1-idex-upgrade-v1-00", "kind": "printer"},
+    {"id": "ratrig-wiki", "label": "Rat Rig Wiki", "url": "https://wiki.ratrig.com/", "kind": "printer"},
+    {"id": "sovol-sv08-max-product", "label": "Sovol SV08 Max specs", "url": "https://www.sovol3d.com/products/sovol-sv08-max-3d-printer", "kind": "printer"},
+    {"id": "elegoo-centauri-carbon-product", "label": "ELEGOO Centauri Carbon specs", "url": "https://us.elegoo.com/products/centauri-carbon", "kind": "printer"},
+    {"id": "elegoo-centauri-carbon-manual", "label": "ELEGOO Centauri Carbon user manual PDF", "url": "https://elegoo-downloads.oss-us-west-1.aliyuncs.com/tutorials/Centauri%20Carbon/Accompanying/Centauri%20Carbon%20User%20Manual-EN-V1.2.pdf", "kind": "printer"},
+    {"id": "elegoo-centauri-carbon-wiki", "label": "ELEGOO Centauri Carbon wiki", "url": "https://wiki.elegoo.com/en/Centauri-carbon", "kind": "printer"},
+    {"id": "prusa-filament-guide", "label": "Prusa filament material guide", "url": "https://help.prusa3d.com/filament-material-guide", "kind": "material"},
+    {"id": "bambu-filament-guide", "label": "Bambu Lab filament guide", "url": "https://bambulab.com/en-us/filament/guide", "kind": "material"},
+    {"id": "btt-ebb-readme", "label": "BIGTREETECH EBB GitHub README", "url": "https://raw.githubusercontent.com/bigtreetech/EBB/master/README.md", "kind": "component"},
+    {"id": "btt-ebb42-can-doc", "label": "BIGTREETECH EBB42 CAN docs", "url": "https://raw.githubusercontent.com/bigtreetech/docs/master/docs/EBB%2042%20CAN.md", "kind": "component"},
+    {"id": "btt-ebb42-gen2-doc", "label": "BIGTREETECH EBB42 Gen2 docs", "url": "https://raw.githubusercontent.com/bigtreetech/docs/master/docs/EBB42_GEN2.md", "kind": "component"},
+    {"id": "btt-ebb-series-wiki", "label": "BIGTREETECH EBB Series wiki", "url": "https://global.bttwiki.com/EBB%20Series.html", "kind": "component"},
+    {"id": "btt-ebb42-v10-size-pdf", "label": "BIGTREETECH EBB42 CAN V1.0 size PDF", "url": "https://raw.githubusercontent.com/bigtreetech/EBB/master/EBB%20CAN%20V1.0%20%28STM32F072%29/EBB42%20CAN%20V1.0/Hardware/EBB42%20CAN%20V1.0-SIZE.pdf", "kind": "component"},
+]
+
+
+def printing_seed_by_id():
+    return {item["id"]: item for item in PRINTING_SOURCE_SEEDS}
+
+
+def load_printing_source_index():
+    data = read_json(PRINTING_SOURCE_INDEX_PATH, {"version": 1, "sources": {}})
+    if not isinstance(data, dict):
+        data = {"version": 1, "sources": {}}
+    if not isinstance(data.get("sources"), dict):
+        data["sources"] = {}
+    return data
+
+
+def save_printing_source_index(data):
+    data["version"] = 1
+    data["updatedAt"] = time.time()
+    write_json_atomic(PRINTING_SOURCE_INDEX_PATH, data)
+
+
+def source_cache_extension(url, content_type=""):
+    suffix = Path(urllib.parse.urlparse(url).path).suffix.lower()
+    if suffix in {".pdf", ".md", ".txt", ".html", ".htm", ".json"}:
+        return suffix
+    if "pdf" in content_type:
+        return ".pdf"
+    if "markdown" in content_type:
+        return ".md"
+    if "json" in content_type:
+        return ".json"
+    return ".html"
+
+
+def strip_html_to_text(raw_text):
+    text = re.sub(r"(?is)<(script|style).*?</\1>", " ", raw_text)
+    text = re.sub(r"(?is)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?is)</(p|div|li|tr|h[1-6])>", "\n", text)
+    text = re.sub(r"(?is)<[^>]+>", " ", text)
+    text = html.unescape(text)
+    text = re.sub(r"[ \t\r\f\v]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def write_source_text_extract(raw_path, text_path, raw_bytes, content_type):
+    suffix = raw_path.suffix.lower()
+    if suffix == ".pdf":
+        pdftotext = command_path("pdftotext")
+        if pdftotext:
+            proc = subprocess.run(
+                [pdftotext, str(raw_path), str(text_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=60,
+                env={**os.environ, "PATH": PATH_FOR_CODEX},
+            )
+            if proc.returncode == 0 and text_path.exists():
+                return {"ok": True, "method": "pdftotext"}
+        text_path.write_text("", encoding="utf-8")
+        return {"ok": False, "method": "pdftotext", "error": "PDF text extraction tool unavailable or failed."}
+    decoded = raw_bytes.decode("utf-8", errors="replace")
+    if suffix in {".html", ".htm"} or "html" in content_type:
+        text = strip_html_to_text(decoded)
+    else:
+        text = decoded
+    text_path.write_text(text[:1_500_000], encoding="utf-8")
+    return {"ok": True, "method": "text"}
+
+
+def cache_printing_source(source, force=False):
+    source_id = source.get("id") or slugify(source.get("label") or source.get("url"), "source")
+    index = load_printing_source_index()
+    existing = index["sources"].get(source_id) or {}
+    raw_path = Path(existing.get("localPath") or "")
+    if not force and raw_path.exists() and existing.get("sha256"):
+        return {**existing, "ok": True, "cached": True, "skipped": True}
+    PRINTING_SOURCE_VAULT_DIR.mkdir(parents=True, exist_ok=True)
+    request = urllib.request.Request(
+        source["url"],
+        headers={"User-Agent": "Codex-CLI-UI-3D-Printing-SourceVault/1.0"},
+    )
+    started = time.time()
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            content_type = response.headers.get("Content-Type", "")
+            length = response.headers.get("Content-Length")
+            if length and int(length) > MAX_SOURCE_CACHE_BYTES:
+                raise ValueError(f"Source is too large to cache automatically: {length} bytes.")
+            raw = response.read(MAX_SOURCE_CACHE_BYTES + 1)
+    except Exception as exc:
+        result = {
+            **source,
+            "ok": False,
+            "error": str(exc),
+            "cachedAt": time.time(),
+        }
+        index["sources"][source_id] = result
+        save_printing_source_index(index)
+        return result
+    if len(raw) > MAX_SOURCE_CACHE_BYTES:
+        result = {**source, "ok": False, "error": "Source exceeded automatic cache size limit.", "cachedAt": time.time()}
+        index["sources"][source_id] = result
+        save_printing_source_index(index)
+        return result
+    digest = hashlib.sha256(raw).hexdigest()
+    extension = source_cache_extension(source["url"], content_type)
+    raw_path = PRINTING_SOURCE_VAULT_DIR / f"{source_id}{extension}"
+    text_path = PRINTING_SOURCE_VAULT_DIR / f"{source_id}.txt"
+    raw_path.write_bytes(raw)
+    extract = write_source_text_extract(raw_path, text_path, raw, content_type)
+    result = {
+        **source,
+        "ok": True,
+        "cached": True,
+        "localPath": str(raw_path),
+        "textPath": str(text_path),
+        "contentType": content_type,
+        "size": len(raw),
+        "sha256": digest,
+        "cachedAt": time.time(),
+        "durationMs": round((time.time() - started) * 1000),
+        "extract": extract,
+    }
+    index["sources"][source_id] = result
+    save_printing_source_index(index)
+    return result
+
+
+def refresh_printing_source_vault(force=False, component_id="", source_ids=None, limit=None):
+    seed_map = printing_seed_by_id()
+    selected_ids = list(source_ids or [])
+    if component_id:
+        component = PRINTING_COMPONENT_LIBRARY.get(component_id) or {}
+        selected_ids.extend(component.get("sourceIds") or [])
+    if not selected_ids:
+        selected_ids = [source["id"] for source in PRINTING_SOURCE_SEEDS]
+    seen = set()
+    selected = []
+    for source_id in selected_ids:
+        if source_id in seen:
+            continue
+        seen.add(source_id)
+        if source_id in seed_map:
+            selected.append(seed_map[source_id])
+    if limit:
+        selected = selected[: int(limit)]
+    results = []
+    for source in selected:
+        results.append(cache_printing_source(source, force=force))
+    ok_count = sum(1 for item in results if item.get("ok"))
+    return {
+        "ok": ok_count == len(results) if results else True,
+        "refreshed": len(results),
+        "okCount": ok_count,
+        "failed": len(results) - ok_count,
+        "results": results,
+        "vaultPath": str(PRINTING_SOURCE_VAULT_DIR),
+        "indexPath": str(PRINTING_SOURCE_INDEX_PATH),
+    }
+
+
+def printing_expert_pack_summary(include_details=False):
+    index = load_printing_source_index()
+    cached_sources = [item for item in index.get("sources", {}).values() if item.get("ok") and item.get("localPath")]
+    summary = {
+        "ok": True,
+        "printerProfileCount": len(PRINTING_PRINTER_PROFILES),
+        "materialCount": len(PRINTING_MATERIAL_LIBRARY),
+        "tuningStepCount": len(ORCA_TUNING_WORKFLOW),
+        "componentCount": len(PRINTING_COMPONENT_LIBRARY),
+        "sourceSeedCount": len(PRINTING_SOURCE_SEEDS),
+        "cachedSourceCount": len(cached_sources),
+        "vaultPath": str(PRINTING_SOURCE_VAULT_DIR),
+        "indexPath": str(PRINTING_SOURCE_INDEX_PATH),
+        "printers": [
+            {"id": item["id"], "name": item["name"], "architecture": item["architecture"], "limits": item["limits"]}
+            for item in PRINTING_PRINTER_PROFILES
+        ],
+        "materials": [
+            {"id": key, "name": value["name"], "use": value["use"], "drying": value["drying"]}
+            for key, value in PRINTING_MATERIAL_LIBRARY.items()
+        ],
+        "components": [
+            {"id": key, "name": value["name"], "sourceCount": len(value.get("sourceIds") or [])}
+            for key, value in PRINTING_COMPONENT_LIBRARY.items()
+        ],
+    }
+    if include_details:
+        summary["tuningWorkflow"] = ORCA_TUNING_WORKFLOW
+        summary["sourceSeeds"] = PRINTING_SOURCE_SEEDS
+        summary["cachedSources"] = cached_sources[:80]
+    return summary
+
+
+def printing_query_text(messages):
+    return "\n".join(str(message.get("text", "")) for message in messages[-4:]).lower()
+
+
+def matching_printer_profiles(text):
+    matches = []
+    for profile in PRINTING_PRINTER_PROFILES:
+        if any(alias in text for alias in profile.get("aliases", [])):
+            matches.append(profile)
+    return matches
+
+
+def matching_materials(text):
+    matches = []
+    for key, material in PRINTING_MATERIAL_LIBRARY.items():
+        if any(alias in text for alias in material.get("aliases", [])):
+            matches.append((key, material))
+    return matches
+
+
+def matching_components(text):
+    matches = []
+    for key, component in PRINTING_COMPONENT_LIBRARY.items():
+        if any(alias in text for alias in component.get("aliases", [])):
+            matches.append((key, component))
+    return matches
+
+
+def wants_printing_expert_context(messages):
+    text = printing_query_text(messages)
+    terms = (
+        "3d print", "3d printer", "bambu", "x1c", "h2d", "creality", "k2 plus",
+        "qidi", "snapmaker", "rat rig", "ratrig", "sovol", "sv08", "centauri",
+        "filament", "orca", "orcaslicer", "tune", "calibration", "pressure advance",
+        "flow rate", "max volumetric", "btt", "bigtreetech", "ebb42", "klipper",
+    )
+    return any(term in text for term in terms)
+
+
+def build_3d_printing_expert_context(messages):
+    if not wants_printing_expert_context(messages):
+        return ""
+    text = printing_query_text(messages)
+    profiles = matching_printer_profiles(text)
+    materials = matching_materials(text)
+    components = matching_components(text)
+    summary = printing_expert_pack_summary(include_details=False)
+    lines = [
+        "3D Printing Expert Pack:",
+        f"- Local source vault: {summary['cachedSourceCount']}/{summary['sourceSeedCount']} seeded sources cached at `{summary['vaultPath']}`.",
+        "- Use cached manuals/specs first when present. Refresh official/public sources only for current specs, new manuals, prices, availability, firmware changes, or missing cache.",
+        "- For filament tuning in OrcaSlicer, use this order: temperature tower, flow rate pass 1, flow rate pass 2, pressure advance, max volumetric speed, retraction/stringing, VFA/speed.",
+        "- Save tuned results per printer, nozzle, filament brand/material, and drying condition; do not treat one printer/nozzle result as universal.",
+        "- Platform rule: classify the printer architecture before choosing tools. Bambu/Creality/Snapmaker/ELEGOO appliance workflows are not automatically Klipper. Rat Rig custom and Qidi Plus 4 can be Klipper/Moonraker when local evidence confirms it.",
+    ]
+    if profiles:
+        lines.append("Matched printer profiles:")
+        for profile in profiles[:4]:
+            limits = "; ".join(f"{key}={value}" for key, value in profile.get("limits", {}).items())
+            lines.append(f"- {profile['name']}: {profile['architecture']} Limits: {limits}.")
+    if materials:
+        lines.append("Matched material notes:")
+        for key, material in materials[:5]:
+            lines.append(f"- {material['name']}: {material['use']}; drying {material['drying']}; print note {material['printing']}.")
+    if components:
+        lines.append("Matched component/manual notes:")
+        for key, component in components[:3]:
+            source_count = len(component.get("sourceIds") or [])
+            lines.append(f"- {component['name']}: {component['architecture']} {source_count} official/GitHub source seeds are available for local caching.")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def filament_tuning_direct_answer(messages):
+    query = latest_user_text(messages).strip()
+    text = query.lower()
+    if not query or not any(term in text for term in ("tune", "calibrate", "calibration", "flow rate", "pressure advance", "max volumetric", "temperature tower")):
+        return ""
+    if not any(term in text for term in ("filament", "pla", "petg", "pctg", "asa", "abs", "nylon", "pa-cf", "pet-cf", "tpu", "orca", "orcaslicer")):
+        return ""
+    profiles = matching_printer_profiles(text)
+    materials = matching_materials(text)
+    profile_line = ""
+    if profiles:
+        profile = profiles[0]
+        profile_line = f" Target printer profile: {profile['name']} ({profile['architecture']})."
+    material_line = ""
+    if materials:
+        material = materials[0][1]
+        material_line = f" Material baseline: {material['name']} needs {material['drying']}; {material['printing']}."
+    steps = "\n".join(
+        f"{index}. {step['name']}: {step['goal']} Save: {step['save']}."
+        for index, step in enumerate(ORCA_TUNING_WORKFLOW, 1)
+    )
+    return "\n\n".join(
+        [
+            "Tune it in OrcaSlicer in this order: temperature, flow, pressure advance, max volumetric speed, retraction, then VFA/speed.",
+            f"This is why: each later test depends on the earlier one. If flow is wrong, pressure advance lies to you; if max flow is unknown, speed profiles can silently under-extrude.{profile_line}{material_line}",
+            "Orca tuning workflow:\n" + steps,
+            "You should also consider: dry the filament before testing, record printer/nozzle/brand/spool condition, and keep separate profiles for abrasive CF materials, enclosed high-temp materials, and flexible TPU.",
+            "Source: https://www.orcaslicer.com/wiki/calibration/calibration_guide.html",
+        ]
+    )
+
+
+def component_manual_direct_answer(messages):
+    query = latest_user_text(messages).strip()
+    text = query.lower()
+    matches = matching_components(text)
+    if not query or not matches:
+        return ""
+    if not any(term in text for term in ("manual", "docs", "documentation", "github", "pinout", "wiring", "download", "flash", "firmware", "ebb42", "btt")):
+        return ""
+    component_id, component = matches[0]
+    refresh = refresh_printing_source_vault(component_id=component_id)
+    cached = [item for item in refresh.get("results", []) if item.get("ok")]
+    failed = [item for item in refresh.get("results", []) if not item.get("ok")]
+    paths = []
+    for item in cached:
+        local_path = item.get("localPath")
+        text_path = item.get("textPath")
+        label = item.get("label") or item.get("id")
+        if local_path:
+            paths.append(f"- {label}: `{local_path}`")
+        if text_path and Path(text_path).exists() and Path(text_path).stat().st_size:
+            paths.append(f"  Text extract: `{text_path}`")
+    source_urls = "\n".join(f"- {source.get('label')}: {source.get('url')}" for source in (printing_seed_by_id().get(source_id) for source_id in component.get("sourceIds", [])) if source)
+    result_line = f"I cached the {component['name']} manuals/docs locally." if cached else f"I found the {component['name']} source list, but the local cache did not complete."
+    caveat = "Confirm your exact EBB42 board revision before wiring or flashing; v1.0/v1.1/v1.2/Gen2 details can differ."
+    if failed:
+        caveat += " Some sources did not cache this run: " + ", ".join(compact(item.get("label") or item.get("id"), 60) for item in failed[:4]) + "."
+    return "\n\n".join(
+        [
+            result_line,
+            f"This is why: {component['architecture']} The pack keeps official/GitHub source files under the local source vault so future questions can use them without starting from scratch.",
+            "Local cached files:\n" + ("\n".join(paths) if paths else "- No local files were written."),
+            "Source URLs:\n" + source_urls,
+            "You should also consider: " + caveat,
+        ]
+    )
+
+
+def printer_profile_direct_answer(messages):
+    query = latest_user_text(messages).strip()
+    text = query.lower()
+    profiles = matching_printer_profiles(text)
+    if not query or not profiles:
+        return ""
+    if not any(term in text for term in ("spec", "limit", "architecture", "software", "firmware", "capability", "profile", "what does", "what are")):
+        return ""
+    lines = []
+    for profile in profiles[:3]:
+        limits = "\n".join(f"- {key}: {value}" for key, value in profile.get("limits", {}).items())
+        sources = ", ".join(profile.get("sources", []))
+        lines.append(
+            f"{profile['name']}: {profile['architecture']}\nLimits:\n{limits}\nNotes: {profile.get('notes', '')}\nSource IDs: {sources}"
+        )
+    return "\n\n".join(
+        [
+            "Use the printer's actual platform profile before choosing tuning, firmware, or diagnostic tools.",
+            "This is why: the same slicer question has different answers on Bambu closed firmware, Creality/Snapmaker appliance firmware, Qidi/Rat Rig Klipper, and ELEGOO/Orca-derived workflows.",
+            "\n\n".join(lines),
+            f"You should also consider: refresh the local source vault if this is a current-spec or firmware-sensitive question. Vault: `{PRINTING_SOURCE_VAULT_DIR}`",
+        ]
+    )
+
+
 def cooling_duct_research_direct_answer(messages):
     if not is_cooling_duct_research_request(messages):
         return ""
@@ -4752,7 +5430,7 @@ def material_selection_direct_answer(messages, route):
         return ""
     if wants_web_context(messages) or wants_material_shopping_context(messages):
         return ""
-    if route and route.get("projectId") not in {"tinmanx-slicer-research", "general"}:
+    if route and route.get("projectId") not in {"tinmanx-slicer-research", "printer-klipper-ops", "orcaslicer-codex", "general"}:
         return ""
     recommendation_terms = ("best", "recommend", "what should", "which", "all around")
     outdoor_terms = (
@@ -11231,6 +11909,7 @@ def build_prompt(
     local_tools_context = build_local_tools_context()
     autonomy_context = build_autonomy_supervisor_context(messages, route or {}, web_search=web_search)
     cad_design_context = build_cad_design_context(messages, route or {})
+    printing_context = build_3d_printing_expert_context(messages)
     analytical_context = build_analytical_context(
         messages,
         route=route or {},
@@ -11255,6 +11934,7 @@ def build_prompt(
             + local_tools_context
             + autonomy_context
             + cad_design_context
+            + printing_context
             + analytical_context
             + direct_answer_context
             + admin_context
@@ -11295,6 +11975,8 @@ def build_prompt(
         blocks.append(autonomy_context)
     if cad_design_context:
         blocks.append(cad_design_context)
+    if printing_context:
+        blocks.append(printing_context)
     if analytical_context:
         blocks.append(analytical_context)
     if direct_answer_context:
@@ -12252,6 +12934,49 @@ def package_health_report():
         add("tools:klipper-accel-rgb-template", "pass" if ok else "fail", "macro template sanity")
     except Exception as exc:
         add("tools:klipper-accel-rgb-template", "fail", str(exc))
+
+    try:
+        pack = printing_expert_pack_summary(include_details=True)
+        component = PRINTING_COMPONENT_LIBRARY.get("btt-ebb42") or {}
+        ok = (
+            pack.get("printerProfileCount", 0) >= 8
+            and pack.get("materialCount", 0) >= 9
+            and pack.get("tuningStepCount", 0) >= 7
+            and pack.get("sourceSeedCount", 0) >= 20
+            and "btt-ebb42-can-doc" in (component.get("sourceIds") or [])
+        )
+        add(
+            "tools:3d-printing-expert-pack",
+            "pass" if ok else "fail",
+            f"{pack.get('printerProfileCount', 0)} printers, {pack.get('materialCount', 0)} materials, {pack.get('sourceSeedCount', 0)} source seeds",
+        )
+    except Exception as exc:
+        add("tools:3d-printing-expert-pack", "fail", str(exc))
+
+    try:
+        answer = filament_tuning_direct_answer(
+            [{"role": "user", "text": "Tune PET-CF filament in OrcaSlicer for the Qidi Plus 4."}]
+        )
+        ok = (
+            "temperature" in answer.lower()
+            and "flow" in answer.lower()
+            and "pressure advance" in answer.lower()
+            and "max volumetric" in answer.lower()
+            and "Qidi Plus 4" in answer
+            and "PET-CF" in answer
+        )
+        add("tools:orca-filament-tuning-coach", "pass" if ok else "fail", "Orca tuning order and printer/material context")
+    except Exception as exc:
+        add("tools:orca-filament-tuning-coach", "fail", str(exc))
+
+    try:
+        profile_answer = printer_profile_direct_answer(
+            [{"role": "user", "text": "What are the specs limitations and software architecture for the Bambu H2D?"}]
+        )
+        ok = "Bambu Lab H2D" in profile_answer and "not Klipper" in profile_answer and "1000 mm/s" in profile_answer
+        add("tools:printer-profile-direct-answer", "pass" if ok else "fail", "printer profile answers include architecture and limits")
+    except Exception as exc:
+        add("tools:printer-profile-direct-answer", "fail", str(exc))
 
     try:
         LOCAL_CAD_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -14057,6 +14782,12 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             self.send_json({"ok": True, **improvement_lab_summary()})
             return
 
+        if path == "/api/3d-printing/expert-pack":
+            params = urllib.parse.parse_qs(parsed.query)
+            include_details = str((params.get("details") or ["0"])[0]).strip().lower() in {"1", "true", "yes"}
+            self.send_json(printing_expert_pack_summary(include_details=include_details))
+            return
+
         if path == "/api/self-healing":
             self.send_json({"ok": True, **self_healing_summary()})
             return
@@ -14317,6 +15048,25 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             self.send_json(result)
             return
 
+        if parsed.path == "/api/3d-printing/refresh-sources":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self.send_error(400, "Invalid JSON")
+                return
+            try:
+                result = refresh_printing_source_vault(
+                    force=bool(payload.get("force")),
+                    component_id=str(payload.get("componentId") or "").strip(),
+                    source_ids=payload.get("sourceIds") if isinstance(payload.get("sourceIds"), list) else None,
+                    limit=payload.get("limit"),
+                )
+                self.send_json({**result, "expertPack": printing_expert_pack_summary(include_details=True)})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=500)
+            return
+
         if parsed.path == "/api/tools/deeper-analysis":
             length = int(self.headers.get("Content-Length", "0") or "0")
             try:
@@ -14331,7 +15081,7 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                     analysis_kind=payload.get("kind") or payload.get("analysisKind") or "auto",
                 )
             except Exception as exc:
-                result = {"ok": False, "error": str(exc)}
+                result = {"ok": False, "error": str(exc), "text": f"Deeper analysis failed before it could finish: {exc}"}
             self.send_json(result)
             return
 
@@ -15072,6 +15822,52 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 normalize=False,
             )
             json_line(self, {"type": "done", "returnCode": 0 if tool_result.get("ok") else 1})
+            return
+
+        direct_printing_expert_answer = (
+            component_manual_direct_answer(messages)
+            or filament_tuning_direct_answer(messages)
+            or printer_profile_direct_answer(messages)
+        )
+        if direct_printing_expert_answer:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            json_line(
+                self,
+                {
+                    "type": "status",
+                    "message": "starting",
+                    "cwd": cwd,
+                    "profile": profile,
+                    "effectiveProfile": effective_profile,
+                    "accessLevel": "local-source-vault",
+                    "reasoningLevel": reasoning_level,
+                    "webSearch": web_search,
+                    "managerDepth": manager_depth,
+                    "friendlinessLevel": friendliness_level,
+                    "humorLevel": humor_level,
+                    "mode": "3d-printing-expert-pack",
+                    "engine": "local-knowledge",
+                    "model": "",
+                    "freeOnlyRedirect": free_only_redirect,
+                    "route": route,
+                    "adminTopic": admin_topic,
+                },
+            )
+            json_line(
+                self,
+                {
+                    "type": "thought",
+                    "text": "Using the 3D Printing Expert Pack: printer profiles, material notes, Orca tuning order, and cached source/manual vault.",
+                },
+            )
+            emit_assistant_answer(
+                self, messages, route, admin_topic, direct_printing_expert_answer, normalize=False
+            )
+            json_line(self, {"type": "done", "returnCode": 0})
             return
 
         direct_printer_answer = printer_status_direct_answer(messages, route)

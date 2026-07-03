@@ -71,6 +71,8 @@ The server binds to `127.0.0.1` by default and streams `codex exec --json` outpu
 - The right rail includes a live `Model Health` graph for Ollama, model stack, Manager pass timing, memory, disk, load, and Qidi reachability.
 - Active runs show concise `Working notes` in the assistant message while Codex is thinking and using tools.
 - The `Admin` screen includes topic cleanup, stable knowledge Promote/Delete controls, the Improvement Lab, saved golden-test counts, model warmup, performance benchmark runs, and a package health check.
+- The `Admin` screen also includes a 3D Printing Expert Pack card. It shows printer/material/source-vault coverage and can refresh official/manual sources into `data/source-vault/3d-printing`.
+- Printer and filament questions use the built-in printer profiles, material library, OrcaSlicer calibration workflow, and cached component docs before falling back to general research.
 
 Terminal shortcuts:
 
