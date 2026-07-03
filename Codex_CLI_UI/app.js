@@ -551,6 +551,11 @@ const ENGINEERING_PACKS = {
     action: "FEA",
     toolIds: ["calculix", "gmsh", "freecad", "paraview", "openscad"],
   },
+  reasoning: {
+    label: "Reasoning Tools",
+    action: "",
+    toolIds: ["ast-grep", "tree-sitter-cli", "shellcheck", "hyperfine"],
+  },
 };
 
 function capabilityTools() {
@@ -591,11 +596,12 @@ function setPackChip(element, textElement, status) {
 function renderEngineeringStatus() {
   const aero = engineeringPackState(ENGINEERING_PACKS.aero);
   const structural = engineeringPackState(ENGINEERING_PACKS.structural);
+  const reasoning = engineeringPackState(ENGINEERING_PACKS.reasoning);
   const combined = {
-    state: aero.state === "ready" && structural.state === "ready" ? "ready" : aero.installed + structural.installed ? "partial" : "missing",
-    installed: aero.installed + structural.installed,
-    total: aero.total + structural.total,
-    missing: [...aero.missing, ...structural.missing],
+    state: aero.state === "ready" && structural.state === "ready" && reasoning.state === "ready" ? "ready" : aero.installed + structural.installed + reasoning.installed ? "partial" : "missing",
+    installed: aero.installed + structural.installed + reasoning.installed,
+    total: aero.total + structural.total + reasoning.total,
+    missing: [...aero.missing, ...structural.missing, ...reasoning.missing],
   };
   setPackChip(els.aeroPackStatus, els.aeroPackText, aero);
   setPackChip(els.structuralPackStatus, els.structuralPackText, structural);
@@ -632,9 +638,13 @@ function renderEngineeringAdmin() {
     const action = document.createElement("button");
     action.className = "icon-text-button";
     action.type = "button";
-    action.disabled = Boolean(activeController);
-    action.innerHTML = `<span>${kind === "aero" ? "⇥" : "⌁"}</span><span>Run ${pack.action}</span>`;
-    action.addEventListener("click", () => runDeeperAnalysis(kind));
+    action.disabled = !pack.action || Boolean(activeController);
+    action.innerHTML = pack.action
+      ? `<span>${kind === "aero" ? "⇥" : "⌁"}</span><span>Run ${pack.action}</span>`
+      : `<span>✓</span><span>Inventory Only</span>`;
+    if (pack.action) {
+      action.addEventListener("click", () => runDeeperAnalysis(kind));
+    }
 
     card.append(header, toolList, action);
     els.engineeringAdminGrid.appendChild(card);

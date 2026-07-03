@@ -2017,6 +2017,7 @@ QUALITY_RUBRIC_RULES = [
     "Classify the domain, platform, and operating system or firmware before choosing tools when that choice affects the answer.",
     "Use the right diagnostic family for the detected platform; do not use Klipper/Moonraker tools for Marlin/Prusa, RepRapFirmware, Bambu, or other non-Klipper systems unless evidence says they apply.",
     "When information or tooling is missing, state the gap, look for a safe/free way to discover or add the capability, then retry before giving up.",
+    "For codebase, script, installer, or self-repair work, prefer structural search with ast-grep/tree-sitter, shell linting with ShellCheck, and speed checks with hyperfine when those tools fit the problem.",
     "For recommendations, make one clear pick before alternatives unless Tinman asked for a broad comparison.",
     "Include the core reason under `This is why:` and practical caveats under `You should also consider:` when those labels fit the question.",
     "For shopping, current facts, prices, availability, specifications, or latest information, use live/current evidence and cite concise source URLs.",
@@ -2101,6 +2102,100 @@ FREE_TOOL_MANIFEST = {
         "capabilities": ["isolated Python CLI installs"],
         "free": True,
         "autoInstall": True,
+    },
+    "ast-grep": {
+        "label": "ast-grep",
+        "commands": ["sg", "ast-grep"],
+        "brew": ["ast-grep"],
+        "estimatedBytes": 70 * MIB,
+        "capabilities": [
+            "language-aware code search",
+            "structural refactor inspection",
+            "self-repair patch targeting",
+        ],
+        "free": True,
+        "autoInstall": True,
+    },
+    "tree-sitter-cli": {
+        "label": "Tree-sitter CLI",
+        "commands": ["tree-sitter"],
+        "brew": ["tree-sitter-cli"],
+        "estimatedBytes": 20 * MIB,
+        "capabilities": [
+            "syntax tree inspection",
+            "language grammar checks",
+            "code structure diagnostics",
+        ],
+        "free": True,
+        "autoInstall": True,
+    },
+    "shellcheck": {
+        "label": "ShellCheck",
+        "commands": ["shellcheck"],
+        "brew": ["shellcheck"],
+        "estimatedBytes": 90 * MIB,
+        "capabilities": [
+            "shell script linting",
+            "installer safety review",
+            "mac/Linux automation diagnostics",
+        ],
+        "free": True,
+        "autoInstall": True,
+    },
+    "hyperfine": {
+        "label": "hyperfine",
+        "commands": ["hyperfine"],
+        "brew": ["hyperfine"],
+        "estimatedBytes": 15 * MIB,
+        "capabilities": [
+            "command benchmarking",
+            "model/tool latency comparison",
+            "performance regression checks",
+        ],
+        "free": True,
+        "autoInstall": True,
+    },
+    "dspy": {
+        "label": "DSPy",
+        "commands": [],
+        "pythonModules": ["dspy"],
+        "pip": ["dspy"],
+        "estimatedBytes": 650 * MIB,
+        "capabilities": [
+            "structured reasoning programs",
+            "prompt/test optimization",
+            "answer-quality tuning loops",
+        ],
+        "free": True,
+        "autoInstall": False,
+    },
+    "lancedb": {
+        "label": "LanceDB",
+        "commands": [],
+        "pythonModules": ["lancedb"],
+        "pip": ["lancedb"],
+        "estimatedBytes": 550 * MIB,
+        "capabilities": [
+            "local vector memory",
+            "retrieval over cached manuals",
+            "offline knowledge search",
+        ],
+        "free": True,
+        "autoInstall": False,
+    },
+    "mlx-lm": {
+        "label": "MLX LM",
+        "commands": ["mlx_lm.generate"],
+        "pythonModules": ["mlx_lm"],
+        "pip": ["mlx-lm"],
+        "estimatedBytes": 1200 * MIB,
+        "capabilities": [
+            "Apple-silicon local model runtime",
+            "local fine-tuning experiments",
+            "quantized model evaluation",
+        ],
+        "free": True,
+        "autoInstall": False,
     },
     "poppler": {
         "label": "Poppler PDF tools",
@@ -2284,6 +2379,8 @@ COMMAND_TO_FREE_TOOL = {
     for tool_id, manifest in FREE_TOOL_MANIFEST.items()
     for command in manifest.get("commands", [])
 }
+REASONING_TOOL_IDS = ["ast-grep", "tree-sitter-cli", "shellcheck", "hyperfine"]
+OPTIONAL_REASONING_TOOL_IDS = ["dspy", "lancedb", "mlx-lm"]
 
 
 def json_line(handler, payload):
@@ -13073,6 +13170,9 @@ IMPORTANT_PYTHON_MODULES = [
     "matplotlib",
     "rtree",
     "open3d",
+    "dspy",
+    "lancedb",
+    "mlx_lm",
     "pandas",
     "openpyxl",
     "docx",
@@ -18021,6 +18121,26 @@ def package_health_report():
         )
     except Exception as exc:
         add("tools:capability-manager", "fail", str(exc))
+
+    try:
+        catalog = capability_tool_catalog()
+        by_id = {tool.get("id"): tool for tool in catalog.get("tools", [])}
+        installed = [tool_id for tool_id in REASONING_TOOL_IDS if by_id.get(tool_id, {}).get("installed")]
+        missing = [tool_id for tool_id in REASONING_TOOL_IDS if not by_id.get(tool_id, {}).get("installed")]
+        add(
+            "tools:reasoning-pack",
+            "pass" if not missing else "fail",
+            f"{len(installed)}/{len(REASONING_TOOL_IDS)} ready"
+            + (f"; missing {', '.join(missing)}" if missing else ""),
+        )
+        optional = [tool_id for tool_id in OPTIONAL_REASONING_TOOL_IDS if by_id.get(tool_id, {}).get("installed")]
+        add(
+            "tools:optional-reasoning-stack",
+            "pass",
+            f"{len(optional)}/{len(OPTIONAL_REASONING_TOOL_IDS)} optional Python/RAG tools installed",
+        )
+    except Exception as exc:
+        add("tools:reasoning-pack", "fail", str(exc))
 
     try:
         add(
