@@ -3149,6 +3149,7 @@ async function runGoldenTest(test, signal) {
     thoughts: [],
     warnings: [],
     logs: [],
+    analyticalCore: null,
   };
   const response = await fetch("/api/run", {
     method: "POST",
@@ -3176,7 +3177,10 @@ async function runGoldenTest(test, signal) {
       run.statusEvent = event;
       if (event.route) run.route = event.route;
     }
-    if (event.type === "assistant") run.answer = event.text || "";
+    if (event.type === "assistant") {
+      run.answer = event.text || "";
+      run.analyticalCore = event.analyticalCore || null;
+    }
     if (event.type === "thought") run.thoughts.push(event.text || "");
     if (event.type === "warning" || event.type === "error") run.warnings.push(event.text || event.type);
     if (event.type === "log") run.logs.push(event.text || "");
@@ -3280,6 +3284,24 @@ function evaluateGoldenTest(test, run) {
     });
   }
 
+  if (test.minAnalyticalScore) {
+    const score = Number(run.analyticalCore?.score || 0);
+    checks.push({
+      label: "analytical",
+      passed: score >= Number(test.minAnalyticalScore),
+      detail: `Expected analytical score >= ${test.minAnalyticalScore}; got ${score || "none"}.`,
+    });
+  }
+
+  if (test.expectedAnalyticalStatus) {
+    const status = String(run.analyticalCore?.status || "");
+    checks.push({
+      label: "analytical-status",
+      passed: status === String(test.expectedAnalyticalStatus),
+      detail: `Expected ${test.expectedAnalyticalStatus}; got ${status || "none"}.`,
+    });
+  }
+
   const passed = checks.every((check) => check.passed);
   return {
     status: passed ? "pass" : "fail",
@@ -3288,6 +3310,7 @@ function evaluateGoldenTest(test, run) {
     answer,
     route,
     returnCode: run.returnCode,
+    analyticalCore: run.analyticalCore,
     thoughts: run.thoughts,
     warnings: run.warnings,
   };

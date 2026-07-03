@@ -834,7 +834,111 @@ GOLDEN_TESTS = [
         "requiredTerms": ["ELEGOO"],
         "goal": "Prove web requests use Local Research and cite a source.",
     },
+    {
+        "id": "hard-cpap-hose-id",
+        "name": "CPAP Hose ID Direct Answer",
+        "group": "Hard Cases",
+        "prompt": "what is the inner diameter of a 3d printer cpap hose?",
+        "profile": "manager",
+        "managerDepth": "fast",
+        "webSearch": "disabled",
+        "expectedProjectId": "research-parts-reference",
+        "directAnswer": True,
+        "directTerms": ["19 mm", "about 19 mm", "15 mm"],
+        "requiredTerms": ["this is why", "you should also consider"],
+        "forbiddenTerms": ["fusion 360 script", "openscad model", "staged", "cad package"],
+        "minAnalyticalScore": 82,
+        "goal": "Answer the hose-size question directly instead of staging CAD artifacts.",
+    },
+    {
+        "id": "hard-fusion-component-format",
+        "name": "Fusion Component Names",
+        "group": "Hard Cases",
+        "prompt": "what file type from fusion preserves component names?",
+        "profile": "manager",
+        "managerDepth": "fast",
+        "webSearch": "disabled",
+        "expectedProjectId": "cad-modeling-projects",
+        "directAnswer": True,
+        "directTerms": [".f3d", ".f3z", ".step"],
+        "requiredTerms": [".f3d", ".f3z", ".step", "stl"],
+        "forbiddenTerms": ["fusion 360 script:", "openscad model:", "staged a first-pass"],
+        "minAnalyticalScore": 82,
+        "goal": "Answer the CAD reference question without creating unrelated artifacts.",
+    },
+    {
+        "id": "hard-marlin-diagnostic",
+        "name": "Marlin Diagnostic Platform",
+        "group": "Hard Cases",
+        "prompt": "Diagnose my Prusa printer running Marlin. The nozzle temperature is reading zero after I repaired the toolhead wiring.",
+        "profile": "manager",
+        "managerDepth": "fast",
+        "webSearch": "disabled",
+        "expectedProjectId": "printer-klipper-ops",
+        "directAnswer": True,
+        "directTerms": ["first", "check", "thermistor", "m105"],
+        "requiredTerms": ["marlin", "this is why", "you should also consider"],
+        "forbiddenTerms": ["moonraker", "klipper macro", "printer.cfg", "mainsail"],
+        "minAnalyticalScore": 82,
+        "goal": "Classify Marlin/Prusa correctly and give a ranked, safe diagnostic path.",
+    },
+    {
+        "id": "hard-orca-filament-profile",
+        "name": "Orca Filament Parameters",
+        "group": "Hard Cases",
+        "prompt": "Will you tune PET-CF in Orca for my Qidi Plus 4? I need filament profile parameters, not machine specs.",
+        "profile": "manager",
+        "managerDepth": "fast",
+        "webSearch": "disabled",
+        "expectedProjectId": "tinmanx-slicer-research",
+        "directAnswer": True,
+        "directTerms": ["filament profile", "pet-cf", "nozzle temp"],
+        "requiredTerms": ["filament profile", "nozzle temp", "pressure advance"],
+        "forbiddenTerms": ["build volume", "machine specs", "printer model only", "fusion 360"],
+        "minAnalyticalScore": 82,
+        "goal": "Return Orca/TinmanX1 filament parameters instead of machine specifications.",
+    },
+    {
+        "id": "hard-pctg-temp-tower-image",
+        "name": "PCTG Temp Tower Image",
+        "group": "Hard Cases",
+        "prompt": "IMG_4772.jpeg What is the best temp for this PCTG based on the image?",
+        "profile": "manager",
+        "managerDepth": "fast",
+        "webSearch": "disabled",
+        "expectedProjectId": "tinmanx-slicer-research",
+        "directAnswer": True,
+        "directTerms": ["250 c", "245", "250"],
+        "requiredTerms": ["pctg", "this is why", "you should also consider"],
+        "forbiddenTerms": ["fusion 360 script", "openscad model", "cad package", "machine specs"],
+        "minAnalyticalScore": 82,
+        "goal": "Treat temp tower images as filament tuning, not CAD or generic chat.",
+    },
+    {
+        "id": "hard-cpap-duct-design-not-status",
+        "name": "CPAP Duct Design Not Status",
+        "group": "Hard Cases",
+        "prompt": "I have a printer toolhead that measures 50mm in the x direction x 50mm in the y direction and 150mm in the z direction. The cpap inlet duct is 18mm in diameter, located 15mm aft ond 0mm above the toolhead. I need a cpap cooling duct designed in cad that can be imported into fusion 360. I have a cpap fan that creates 12-15 CFM. The physical limitations are 0mm left or right, 0mm back, and 8mm front. The nozzle tip is 9mm below the bottom of the toolhead. Design using CFD thinking and web/industry guidance.",
+        "profile": "manager",
+        "managerDepth": "fast",
+        "webSearch": "disabled",
+        "expectedProjectId": "cad-modeling-projects",
+        "expectedEngine": "local",
+        "requiredTerms": ["fusion 360", "18", "12-15 cfm", "cfd", "validation"],
+        "anyTerms": ["duct", "plenum", "outlet", "airflow", "artifact"],
+        "forbiddenTerms": ["moonraker", "unreachable", "printer status", "qidi plus 4", "nozzle temperature"],
+        "minAnalyticalScore": 82,
+        "goal": "Recognize CAD/CFD design intent even with misspellings and never route it to printer status.",
+    },
 ]
+HARD_CASE_GOLDEN_TEST_IDS = {
+    "hard-cpap-hose-id",
+    "hard-fusion-component-format",
+    "hard-marlin-diagnostic",
+    "hard-orca-filament-profile",
+    "hard-pctg-temp-tower-image",
+    "hard-cpap-duct-design-not-status",
+}
 
 
 def default_generated_golden_tests():
@@ -1073,6 +1177,21 @@ def golden_test_generator_synthetic_check():
         and "this is why" in test.get("requiredTerms", [])
         and "run failed" in test.get("forbiddenTerms", [])
     )
+
+
+def hard_case_golden_tests_synthetic_check():
+    by_id = {test.get("id"): test for test in golden_tests()}
+    if not HARD_CASE_GOLDEN_TEST_IDS.issubset(by_id):
+        return False
+    for test_id in HARD_CASE_GOLDEN_TEST_IDS:
+        test = by_id[test_id]
+        if test.get("group") != "Hard Cases":
+            return False
+        if int(test.get("minAnalyticalScore") or 0) < 82:
+            return False
+        if not test.get("forbiddenTerms"):
+            return False
+    return True
 
 
 BENCHMARK_TESTS = [
@@ -2460,6 +2579,8 @@ def qidi_health_from_printers(printers):
 def is_read_only_printer_status_query(messages):
     query = latest_user_text(messages).lower()
     if not query or not wants_qidi_context(messages):
+        return False
+    if text_has_any(query, ("diagnose", "debug", "troubleshoot", "why", "not reading", "reading zero", "repaired", "after i repaired")):
         return False
     if is_cad_design_request(messages):
         return False
@@ -4137,6 +4258,12 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
     cad_reference = is_cad_reference_question(messages)
     cad_design = is_cad_design_request(messages)
     engineering_diagram = is_engineering_diagram_request(messages)
+    printing_calibration_or_profile = (
+        is_filament_profile_pull_request(messages)
+        or is_temperature_tower_image_question(messages)
+        or is_temperature_tower_pressure_advance_followup(messages)
+        or is_orca_calibration_image_question(messages)
+    )
     public_printer_research = wants_public_printer_research(messages) and not cad_design
     scores = []
     for project_id, playbook in PROJECT_PLAYBOOKS.items():
@@ -4191,6 +4318,10 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
         project_id = "cad-modeling-projects"
         score = max(score, 32)
         matched = ["cad-design"] + [item for item in matched if item != "cad-design"]
+    elif printing_calibration_or_profile:
+        project_id = "tinmanx-slicer-research"
+        score = max(score, 32)
+        matched = ["3d-printing-calibration"] + [item for item in matched if item != "3d-printing-calibration"]
 
     playbook = PROJECT_PLAYBOOKS[project_id]
     public_research = (
@@ -4789,6 +4920,10 @@ def build_analytical_context(messages, route=None, web_search="live", local_tool
 def analytical_core_mode(messages, route=None):
     query = latest_user_text(messages).lower()
     route_id = (route or {}).get("projectId", "")
+    if is_cpap_hose_spec_question(messages) or is_fusion_component_export_question(messages) or is_filament_profile_pull_request(messages):
+        return "direct-answer"
+    if is_temperature_tower_image_question(messages) or is_temperature_tower_pressure_advance_followup(messages) or is_orca_calibration_image_question(messages):
+        return "decision"
     if is_engineering_diagram_request(messages):
         return "systems-design"
     if is_stl_cfd_duct_design_request(messages) or is_cad_design_request(messages) or is_structural_mechanical_design_request(messages):
@@ -6512,6 +6647,53 @@ def temperature_tower_pressure_advance_direct_answer(messages):
     )
 
 
+def is_marlin_temperature_zero_diagnostic(messages):
+    query = latest_user_text(messages).lower()
+    if not query:
+        return False
+    return (
+        text_has_any(
+            query,
+            (
+                "diagnose",
+                "debug",
+                "troubleshoot",
+                "why",
+                "not reading",
+                "reading zero",
+                "reads zero",
+                "zero after",
+            ),
+        )
+        and text_has_any(query, ("marlin", "prusa"))
+        and text_has_any(query, ("nozzle", "hotend", "hot end", "temperature", "thermistor"))
+    )
+
+
+def marlin_temperature_zero_diagnostic_answer(messages):
+    if not is_marlin_temperature_zero_diagnostic(messages):
+        return ""
+    return "\n\n".join(
+        [
+            "First check the hotend thermistor circuit, not firmware.",
+            (
+                "This is why: on a Marlin/Prusa-style printer, a zero or impossible nozzle-temperature reading right after toolhead wiring work "
+                "usually points to an open, shorted, or mis-seated two-wire thermistor path before it points to slicer settings or motion firmware."
+            ),
+            (
+                "Do this in order: power the printer off, reseat the hotend thermistor connector, inspect the toolhead harness for a pin pushed back "
+                "or broken crimp, then check resistance across the thermistor pair. A typical 100 k NTC thermistor is roughly 100 kOhm near 25 C; "
+                "open circuit, near-zero ohms, or jumping readings means fix wiring or replace the sensor. After the wiring passes, power up and send `M105` "
+                "from the Marlin terminal to confirm the reported nozzle temperature."
+            ),
+            (
+                "You should also consider: do not heat the hotend until the reading is sane and stable. If the wiring checks pass but Marlin still reports wrong, "
+                "then verify the board input, sensor type in firmware, and any recent connector or pinout changes."
+            ),
+        ]
+    )
+
+
 ORCA_CALIBRATION_KIND_ALIASES = (
     (
         "temperature",
@@ -6723,7 +6905,6 @@ def is_orca_calibration_image_question(messages):
             "best",
             "pick",
             "choose",
-            "read",
             "analyze",
             "calibration",
             "test",
@@ -10171,6 +10352,8 @@ def resolve_geometry_file(messages, cwd="", extensions=GEOMETRY_FILE_EXTENSIONS)
 def is_aero_cfd_analysis_request(messages):
     query = latest_user_text(messages).lower()
     if not query:
+        return False
+    if is_cad_design_request(messages) and text_has_any(query, ("cpap", "part cooling", "cooling duct", "fusion 360", "cad")):
         return False
     aero_terms = (
         "aero", "aerodynamic", "airfoil", "lift", "drag", "downforce",
@@ -15511,6 +15694,34 @@ def package_health_report():
         add("tools:temp-tower-image-direct-answer", "fail", str(exc))
 
     try:
+        marlin_messages = [
+            {
+                "role": "user",
+                "text": "Diagnose my Prusa printer running Marlin. The nozzle temperature is reading zero after I repaired the toolhead wiring.",
+            }
+        ]
+        answer = marlin_temperature_zero_diagnostic_answer(marlin_messages)
+        route = route_manager(marlin_messages, requested_profile="manager", web_search="disabled")
+        ok = (
+            is_marlin_temperature_zero_diagnostic(marlin_messages)
+            and route.get("projectId") == "printer-klipper-ops"
+            and "Marlin" in answer
+            and "M105" in answer
+            and "This is why:" in answer
+            and "You should also consider:" in answer
+            and "two-wire thermistor" in answer
+            and "Moonraker" not in answer
+            and "Klipper" not in answer
+        )
+        add(
+            "tools:marlin-temp-zero-diagnostic-direct",
+            "pass" if ok else "fail",
+            "Marlin/Prusa zero-temperature diagnostics answer directly without Orca/Klipper detours",
+        )
+    except Exception as exc:
+        add("tools:marlin-temp-zero-diagnostic-direct", "fail", str(exc))
+
+    try:
         tower_followup_messages = [
             {
                 "role": "user",
@@ -16300,6 +16511,15 @@ def package_health_report():
         )
     except Exception as exc:
         add("analysis:golden-test-generator", "fail", str(exc))
+
+    try:
+        add(
+            "analysis:hard-case-golden-tests",
+            "pass" if hard_case_golden_tests_synthetic_check() else "fail",
+            f"{len(HARD_CASE_GOLDEN_TEST_IDS)} hard-case guardrails installed",
+        )
+    except Exception as exc:
+        add("analysis:hard-case-golden-tests", "fail", str(exc))
 
     health = ollama_health()
     add(
@@ -18663,6 +18883,7 @@ class CodexUIHandler(BaseHTTPRequestHandler):
 
         direct_printing_expert_answer = (
             component_manual_direct_answer(messages)
+            or marlin_temperature_zero_diagnostic_answer(messages)
             or temperature_tower_pressure_advance_direct_answer(messages)
             or orca_calibration_visual_direct_answer(messages)
             or temperature_tower_visual_direct_answer(messages)
