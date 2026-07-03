@@ -4990,6 +4990,105 @@ PRINTING_COMPONENT_LIBRARY = {
     }
 }
 
+PRINTING_PROFILE_PARAMETER_STARTS = {
+    "pla": {
+        "nozzleTemp": "200-220 C",
+        "bedTemp": "45-60 C",
+        "fan": "80-100%",
+        "flowRatio": "0.98-1.02 starting point",
+        "pressureAdvance": "0.015-0.040 starting range for direct drive",
+        "maxVolumetric": "12-22 mm3/s depending on hotend",
+        "notes": "Tune temperature first, then flow, then pressure advance.",
+    },
+    "petg": {
+        "nozzleTemp": "230-255 C",
+        "bedTemp": "70-85 C",
+        "fan": "20-60%",
+        "flowRatio": "0.96-1.00 starting point",
+        "pressureAdvance": "0.020-0.060 starting range for direct drive",
+        "maxVolumetric": "8-16 mm3/s until tested",
+        "notes": "Reduce overcooling and avoid over-squish.",
+    },
+    "pctg": {
+        "nozzleTemp": "245-270 C",
+        "bedTemp": "70-90 C",
+        "fan": "20-60%",
+        "flowRatio": "0.96-1.00 starting point",
+        "pressureAdvance": "0.020-0.060 starting range for direct drive",
+        "maxVolumetric": "8-14 mm3/s until tested",
+        "notes": "Treat as a tough PETG-family material and tune stringing carefully.",
+    },
+    "abs": {
+        "nozzleTemp": "245-270 C",
+        "bedTemp": "90-110 C",
+        "chamber": "45-60 C enclosed",
+        "fan": "0-25% except bridges/details",
+        "flowRatio": "0.98-1.02 starting point",
+        "pressureAdvance": "0.020-0.060 starting range",
+        "maxVolumetric": "8-16 mm3/s until tested",
+        "notes": "Heat soak and enclosure stability matter more than fan speed.",
+    },
+    "asa": {
+        "nozzleTemp": "250-275 C",
+        "bedTemp": "90-110 C",
+        "chamber": "45-60 C enclosed",
+        "fan": "0-30% except bridges/details",
+        "flowRatio": "0.98-1.02 starting point",
+        "pressureAdvance": "0.020-0.060 starting range",
+        "maxVolumetric": "8-16 mm3/s until tested",
+        "notes": "Best default choice for outdoor sun/weather parts.",
+    },
+    "pa": {
+        "nozzleTemp": "255-290 C",
+        "bedTemp": "70-100 C",
+        "fan": "0-35%",
+        "flowRatio": "0.96-1.00 starting point",
+        "pressureAdvance": "0.020-0.070 starting range",
+        "maxVolumetric": "6-12 mm3/s until tested",
+        "notes": "Dry hard and print from a drybox.",
+    },
+    "pa-cf": {
+        "nozzleTemp": "275-310 C",
+        "bedTemp": "80-110 C",
+        "fan": "0-35%",
+        "flowRatio": "0.94-0.99 starting point",
+        "pressureAdvance": "0.020-0.070 starting range",
+        "maxVolumetric": "5-11 mm3/s until tested",
+        "notes": "Use hardened nozzle, drybox, and design for anisotropic strength.",
+    },
+    "pet-cf": {
+        "nozzleTemp": "270-300 C",
+        "bedTemp": "80-100 C",
+        "chamber": "40-60 C enclosed if available",
+        "fan": "20-50%, lower for strength and higher for overhangs",
+        "flowRatio": "0.95-1.00 starting point",
+        "pressureAdvance": "0.020-0.060 starting range for direct drive",
+        "maxVolumetric": "6-12 mm3/s until tested",
+        "retraction": "direct drive 0.4-0.8 mm at 20-35 mm/s",
+        "notes": "Use hardened nozzle, dry the spool, and do not substitute PETG-CF values.",
+    },
+    "pc": {
+        "nozzleTemp": "275-310 C",
+        "bedTemp": "100-120 C",
+        "chamber": "50-70 C enclosed",
+        "fan": "0-25%",
+        "flowRatio": "0.96-1.00 starting point",
+        "pressureAdvance": "0.020-0.060 starting range",
+        "maxVolumetric": "5-12 mm3/s until tested",
+        "notes": "Needs enclosure, bed adhesion, and controlled cooling.",
+    },
+    "tpu": {
+        "nozzleTemp": "220-245 C",
+        "bedTemp": "35-60 C",
+        "fan": "30-80%",
+        "flowRatio": "1.00 starting point",
+        "pressureAdvance": "often off or very low until tested",
+        "maxVolumetric": "2-6 mm3/s until tested",
+        "retraction": "minimal; slow direct-drive extrusion",
+        "notes": "Slow down and avoid long Bowden-style paths.",
+    },
+}
+
 PRINTING_SOURCE_SEEDS = [
     {
         "id": "orca-calibration-guide",
@@ -5245,6 +5344,565 @@ def matching_components(text):
         if any(alias in text for alias in component.get("aliases", [])):
             matches.append((key, component))
     return matches
+
+
+PROFILE_PULL_TERMS = (
+    "filament setting",
+    "filament settings",
+    "filament profile",
+    "profile setting",
+    "profile settings",
+    "profile parameter",
+    "profile parameters",
+    "parameter",
+    "parameters",
+    "peramiter",
+    "peramiters",
+    "perameter",
+    "perameters",
+    "pull",
+    "current settings",
+    "current profile",
+    "process profile",
+    "machine profile",
+    "printer profile",
+    "tinmanx1",
+)
+
+
+PROFILE_MATERIAL_ALIASES = {
+    "pet-cf": ("pet-cf", "pet cf", "petcf"),
+    "petg-cf": ("petg-cf", "petg cf", "petgcf"),
+    "pa-cf": ("pa-cf", "pa cf", "pacf", "nylon cf", "nylon-cf", "pa12-cf", "pa6-cf", "paht-cf"),
+    "pla": ("pla",),
+    "petg": ("petg",),
+    "pctg": ("pctg",),
+    "abs": ("abs",),
+    "asa": ("asa",),
+    "pc": ("polycarbonate", " pc "),
+    "tpu": ("tpu",),
+}
+
+
+PROCESS_MATERIAL_MARKERS = (
+    "pla",
+    "petg",
+    "petg-cf",
+    "pctg",
+    "abs",
+    "abs-cf",
+    "asa",
+    "asa-cf",
+    "pa-cf",
+    "pa12-cf",
+    "pa6-cf",
+    "paht-cf",
+    "ppa-cf",
+    "pps-cf",
+    "pc",
+    "tpu",
+)
+
+
+FILAMENT_PROFILE_FIELDS = (
+    ("filament_type", "Material type"),
+    ("filament_vendor", "Vendor"),
+    ("filament_flow_ratio", "Flow ratio"),
+    ("nozzle_temperature", "Nozzle temp"),
+    ("nozzle_temperature_initial_layer", "Initial nozzle temp"),
+    ("textured_plate_temp", "Textured plate temp"),
+    ("hot_plate_temp", "Smooth/hot plate temp"),
+    ("filament_max_volumetric_speed", "Max volumetric speed"),
+    ("enable_pressure_advance", "Pressure advance enabled"),
+    ("pressure_advance", "Pressure advance"),
+    ("fan_min_speed", "Fan min"),
+    ("fan_max_speed", "Fan max"),
+    ("slow_down_layer_time", "Slow-down layer time"),
+    ("close_fan_the_first_x_layers", "Fan off first layers"),
+    ("filament_retraction_length", "Filament retraction length"),
+    ("filament_retraction_speed", "Filament retraction speed"),
+    ("filament_deretraction_speed", "Filament deretraction speed"),
+)
+
+
+MACHINE_PROFILE_FIELDS = (
+    ("printer_model", "Printer model"),
+    ("printer_variant", "Printer variant"),
+    ("nozzle_diameter", "Nozzle diameter"),
+    ("min_layer_height", "Min layer height"),
+    ("max_layer_height", "Max layer height"),
+    ("printable_area", "Printable area"),
+    ("max_print_height", "Max print height"),
+    ("default_print_profile", "Default process profile"),
+    ("default_filament_profile", "Default filament profile"),
+)
+
+
+PROCESS_PROFILE_FIELDS = (
+    ("layer_height", "Layer height"),
+    ("first_layer_height", "First layer height"),
+    ("wall_loops", "Wall loops"),
+    ("top_shell_layers", "Top layers"),
+    ("bottom_shell_layers", "Bottom layers"),
+    ("sparse_infill_density", "Infill density"),
+    ("outer_wall_speed", "Outer wall speed"),
+    ("inner_wall_speed", "Inner wall speed"),
+    ("sparse_infill_speed", "Sparse infill speed"),
+    ("internal_solid_infill_speed", "Internal solid infill speed"),
+    ("top_surface_speed", "Top surface speed"),
+    ("travel_speed", "Travel speed"),
+    ("first_layer_speed", "First layer speed"),
+    ("outer_wall_acceleration", "Outer wall acceleration"),
+    ("inner_wall_acceleration", "Inner wall acceleration"),
+)
+
+
+def is_filament_profile_pull_request(messages):
+    query = latest_user_text(messages).strip()
+    text = query.lower()
+    if not query or not text_has_any(text, PROFILE_PULL_TERMS):
+        return False
+    profile_context = (
+        "orca",
+        "orcaslicer",
+        "tinmanx",
+        "tinmanx1",
+        "filament",
+        "process profile",
+        "machine profile",
+        "printer profile",
+        "qidi",
+        "bambu",
+        "creality",
+        "sovol",
+        "rat rig",
+        "ratrig",
+        "snapmaker",
+        "centauri",
+        "nozzle",
+    )
+    if text_has_any(text, profile_context):
+        return True
+    return bool(matching_printer_profiles(text) or matching_materials(text))
+
+
+def profile_query_material_key(text):
+    padded = f" {text.lower()} "
+    for key, aliases in PROFILE_MATERIAL_ALIASES.items():
+        if any(alias in padded for alias in aliases):
+            return key
+    material_matches = matching_materials(text)
+    return material_matches[0][0] if material_matches else ""
+
+
+def profile_query_nozzle(text):
+    lower = text.lower()
+    match = re.search(r"(\d+(?:\.\d+)?)\s*mm\s*(?:nozzle)?", lower)
+    if not match:
+        match = re.search(r"(\d+\.\d+)\s*(?:nozzle|hotend)", lower)
+    if not match:
+        return ""
+    value = match.group(1)
+    try:
+        return f"{float(value):g}"
+    except Exception:
+        return value
+
+
+def profile_query_printer_aliases(text):
+    lower = text.lower()
+    aliases = []
+    if any(term in lower for term in ("qidi", "x-plus 4", "xplus4", "plus 4", "plus4")):
+        aliases.extend(("qidi", "x-plus 4", "xplus4", "plus 4", "plus4"))
+    if any(term in lower for term in ("bambu", "x1c", "h2d")):
+        aliases.extend(("bambu", "x1c", "h2d"))
+    if any(term in lower for term in ("creality", "k2 plus")):
+        aliases.extend(("creality", "k2 plus"))
+    if any(term in lower for term in ("sovol", "sv08")):
+        aliases.extend(("sovol", "sv08"))
+    if any(term in lower for term in ("rat rig", "ratrig", "vcore", "v-core")):
+        aliases.extend(("rat rig", "ratrig", "vcore", "v-core"))
+    if any(term in lower for term in ("snapmaker", "u1")):
+        aliases.extend(("snapmaker", "u1"))
+    if any(term in lower for term in ("centauri", "elegoo")):
+        aliases.extend(("centauri", "elegoo"))
+    return tuple(dict.fromkeys(aliases))
+
+
+def slicer_profile_roots():
+    home = Path.home()
+    return [
+        ("TinmanX1 OrcaSlicer-Codex", home / "Library/Application Support/OrcaSlicer-Codex/user", 110),
+        ("TinManX1 app profile library", Path("/Applications/TinManX1.app/Contents/Resources/profiles"), 108),
+        ("TinManX1 user app profile library", home / "Applications/TinManX1.app/Contents/Resources/profiles", 106),
+        ("OrcaSlicer", home / "Library/Application Support/OrcaSlicer/user", 95),
+        ("Desktop 3D Printing profiles", home / "Desktop/3D Printing", 85),
+        ("PrusaSlicer", home / "Library/Application Support/PrusaSlicer", 45),
+    ]
+
+
+def profile_path_is_stale(path):
+    stale_markers = ("backup", "quarantine", "archived", ".bak", "trash", "old")
+    for part in Path(path).parts:
+        lower = part.lower()
+        if any(marker in lower for marker in stale_markers):
+            return True
+    return False
+
+
+def infer_slicer_profile_kind(path):
+    parts = [part.lower() for part in Path(path).parts]
+    name = Path(path).name.lower()
+    if "filament" in parts:
+        return "filament"
+    if "machine" in parts or "printer" in parts:
+        return "machine"
+    if "process" in parts or "print" in parts:
+        return "process"
+    if re.search(r"\d+(?:\.\d+)?mm", name) and "@" in name:
+        return "process"
+    if "filament" in name or any(alias in name for aliases in PROFILE_MATERIAL_ALIASES.values() for alias in aliases):
+        return "filament"
+    return "unknown"
+
+
+def collect_slicer_profile_candidates():
+    candidates = []
+    seen = set()
+    for source, root, priority in slicer_profile_roots():
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in {".json", ".ini"}:
+                continue
+            if profile_path_is_stale(path):
+                continue
+            resolved = str(path)
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            candidates.append(
+                {
+                    "path": path,
+                    "source": source,
+                    "priority": priority,
+                    "kind": infer_slicer_profile_kind(path),
+                }
+            )
+    return candidates
+
+
+def load_slicer_profile(path):
+    path = Path(path)
+    try:
+        raw = path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return {}
+    if path.suffix.lower() == ".json":
+        try:
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+    data = {}
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("#", ";", "[")) or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        data[key.strip()] = value.strip()
+    return data
+
+
+def profile_display_value(value):
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        if len(value) == 1:
+            return profile_display_value(value[0])
+        return ", ".join(profile_display_value(item) for item in value if profile_display_value(item) != "")
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    return compact(str(value), 220)
+
+
+def profile_name_from_data(data, path=None):
+    name = profile_display_value(data.get("name") or data.get("inherits"))
+    if name:
+        return name
+    return Path(path).stem if path else ""
+
+
+def score_slicer_profile_candidate(candidate, text, target_kind="", material_key="", nozzle="", printer_aliases=()):
+    path = candidate["path"]
+    hay = f"{path.name} {path.parent} {candidate.get('source', '')}".lower()
+    score = int(candidate.get("priority", 0))
+    kind = candidate.get("kind")
+    if target_kind and kind == target_kind:
+        score += 70
+    elif target_kind and kind != target_kind:
+        score -= 25
+    if material_key:
+        aliases = PROFILE_MATERIAL_ALIASES.get(material_key, (material_key,))
+        if any(alias in hay for alias in aliases):
+            score += 85
+        if candidate.get("kind") == "filament" and not nozzle and " nozzle" not in hay and "@" not in path.stem.lower():
+            score += 22
+        if candidate.get("kind") == "process" and not any(alias in hay for alias in aliases):
+            for other_key, other_aliases in PROFILE_MATERIAL_ALIASES.items():
+                if other_key != material_key and any(alias in hay for alias in other_aliases):
+                    score -= 60
+                    break
+            if any(marker in hay for marker in PROCESS_MATERIAL_MARKERS):
+                score -= 60
+            if re.search(
+                r"(?<![a-z0-9])(pla|petg|pctg|abs|asa|pa|pa12|pa6|paht|ppa|pps|pc|tpu)(?:[- ]?cf)?(?![a-z0-9])",
+                path.name.lower(),
+            ):
+                score -= 80
+            if any(term in hay for term in (" standard ", " codex fine ", " codex draft ", " codex best quality ")):
+                score += 18
+        if material_key == "pet-cf" and "petg-cf" in hay:
+            score -= 180
+        if material_key == "petg-cf" and "pet-cf" in hay and "petg-cf" not in hay:
+            score -= 120
+    if nozzle:
+        if nozzle in hay and "nozzle" in hay:
+            score += 38
+        elif "nozzle" in hay and candidate.get("kind") in {"filament", "machine", "process"}:
+            score -= 55
+    generic_printer_aliases = {"qidi", "bambu", "creality", "sovol", "snapmaker", "centauri", "elegoo"}
+    specific_aliases = [alias for alias in printer_aliases if alias not in generic_printer_aliases]
+    has_specific_printer = any(alias in hay for alias in specific_aliases)
+    has_generic_printer = any(alias in hay for alias in printer_aliases)
+    if has_specific_printer:
+        score += 75
+    elif has_generic_printer:
+        score += 18
+    elif printer_aliases and candidate.get("kind") in {"machine", "process"}:
+        score -= 80
+    if printer_aliases and candidate.get("kind") == "process" and specific_aliases and not has_specific_printer:
+        score -= 80
+    if "copy" in hay:
+        score -= 12
+    if "universal" in hay and printer_aliases:
+        score -= 8
+    if "tinman" in hay or "codex" in hay:
+        score += 8
+    return score
+
+
+def find_profile_by_inherited_name(inherited_name, candidates, exclude_path=None):
+    target = str(inherited_name or "").strip().lower()
+    if not target:
+        return None
+    for candidate in candidates:
+        path = candidate["path"]
+        if exclude_path and Path(path) == Path(exclude_path):
+            continue
+        if profile_path_is_stale(path):
+            continue
+        data = load_slicer_profile(path)
+        names = {
+            profile_display_value(data.get("name")).lower(),
+            path.stem.lower(),
+        }
+        if target in names:
+            return candidate
+    return None
+
+
+def resolve_slicer_profile(candidate, candidates, visited=None):
+    visited = set(visited or set())
+    path = candidate["path"]
+    if path in visited:
+        return {"data": load_slicer_profile(path), "own": load_slicer_profile(path), "parents": []}
+    visited.add(path)
+    own = load_slicer_profile(path)
+    inherited_name = profile_display_value(own.get("inherits"))
+    parent_candidate = find_profile_by_inherited_name(inherited_name, candidates, exclude_path=path)
+    if not parent_candidate:
+        return {"data": dict(own), "own": own, "parents": []}
+    parent = resolve_slicer_profile(parent_candidate, candidates, visited=visited)
+    merged = dict(parent.get("data") or {})
+    merged.update(own)
+    parents = list(parent.get("parents") or []) + [parent_candidate]
+    return {"data": merged, "own": own, "parents": parents}
+
+
+def best_slicer_profiles_for_query(text):
+    material_key = profile_query_material_key(text)
+    nozzle = profile_query_nozzle(text)
+    printer_aliases = profile_query_printer_aliases(text)
+    candidates = collect_slicer_profile_candidates()
+    best = {}
+    for kind in ("filament", "machine", "process"):
+        scored = []
+        for candidate in candidates:
+            if candidate.get("kind") == "unknown":
+                continue
+            score = score_slicer_profile_candidate(candidate, text, kind, material_key, nozzle, printer_aliases)
+            if score > 70:
+                scored.append((score, candidate))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        if scored:
+            best[kind] = scored[0][1] | {"score": scored[0][0]}
+            best[f"{kind}Alternates"] = [item[1] | {"score": item[0]} for item in scored[1:4]]
+        if kind == "filament" and material_key and not nozzle and scored:
+            aliases = PROFILE_MATERIAL_ALIASES.get(material_key, (material_key,))
+            variants = [
+                item[1] | {"score": item[0]}
+                for item in scored
+                if "nozzle" in item[1]["path"].name.lower()
+                and any(alias in f"{item[1]['path'].name} {item[1]['path'].parent}".lower() for alias in aliases)
+            ]
+            base_profiles = [
+                item
+                for item in scored
+                if "nozzle" not in item[1]["path"].name.lower()
+                and any(alias in f"{item[1]['path'].name} {item[1]['path'].parent}".lower() for alias in aliases)
+            ]
+            if len(variants) > 1 and base_profiles:
+                best[kind] = base_profiles[0][1] | {"score": base_profiles[0][0]}
+                best["filamentNozzleVariants"] = variants[:6]
+    return {
+        "materialKey": material_key,
+        "nozzle": nozzle,
+        "printerAliases": printer_aliases,
+        "candidates": candidates,
+        "best": best,
+    }
+
+
+def markdown_profile_path(path):
+    path = Path(path)
+    target = str(path)
+    if " " in target:
+        return f"[{path.name}](<{target}>)"
+    return f"[{path.name}]({target})"
+
+
+def profile_field_lines(title, candidate, candidates, fields):
+    if not candidate:
+        return []
+    resolved = resolve_slicer_profile(candidate, candidates)
+    data = resolved.get("data") or {}
+    own = resolved.get("own") or {}
+    parents = resolved.get("parents") or []
+    lines = [f"{title}: {profile_name_from_data(data, candidate['path'])}"]
+    lines.append(f"Source: {candidate.get('source')} - {markdown_profile_path(candidate['path'])}")
+    if parents:
+        parent_path = parents[-1]["path"]
+        parent_data = load_slicer_profile(parent_path)
+        lines.append(f"Inherits: {profile_name_from_data(parent_data, parent_path)} - {markdown_profile_path(parent_path)}")
+    emitted = 0
+    parent_data = load_slicer_profile(parents[-1]["path"]) if parents else {}
+    for key, label in fields:
+        if key not in data:
+            continue
+        value = profile_display_value(data.get(key))
+        if not value:
+            continue
+        suffix = ""
+        if parents and key not in own and key in parent_data:
+            suffix = " (inherited)"
+        elif parents and key in own and key in parent_data:
+            base_value = profile_display_value(parent_data.get(key))
+            if base_value and base_value != value:
+                suffix = f" (override; base {base_value})"
+        lines.append(f"- {label}: {value}{suffix}")
+        emitted += 1
+    if emitted == 0:
+        lines.append("- No key slicer parameters were present in this profile file; it may be an override shell.")
+    return lines
+
+
+def filament_profile_parameters_direct_answer(messages):
+    query = latest_user_text(messages).strip()
+    text = query.lower()
+    if not is_filament_profile_pull_request(messages):
+        return ""
+    result = best_slicer_profiles_for_query(text)
+    best = result.get("best") or {}
+    candidates = result.get("candidates") or []
+    filament = best.get("filament")
+    machine = best.get("machine")
+    process = best.get("process")
+    if not any((filament, machine, process)):
+        material_key = result.get("materialKey")
+        fallback = PRINTING_PROFILE_PARAMETER_STARTS.get(material_key or "")
+        if not fallback:
+            return ""
+        values = "\n".join(f"- {key}: {value}" for key, value in fallback.items())
+        return "\n\n".join(
+            [
+                f"I did not find an installed Orca/TinmanX1 profile for this request, so here is the {material_key.upper()} starter baseline instead.",
+                values,
+                "You should also consider: this is not a pulled slicer profile. Save or import the real Orca profile before treating these as current machine settings.",
+            ]
+        )
+    intro = "I found the actual local slicer profile data instead of guessing."
+    if result.get("materialKey") or result.get("nozzle") or result.get("printerAliases"):
+        bits = []
+        if result.get("materialKey"):
+            bits.append(result["materialKey"].upper())
+        if result.get("printerAliases"):
+            bits.append("/".join(result["printerAliases"][:3]))
+        if result.get("nozzle"):
+            bits.append(f"{result['nozzle']} mm nozzle")
+        intro = "I found the actual local slicer profile data for " + " - ".join(bits) + "."
+    sections = [intro]
+    if filament:
+        sections.append("\n".join(profile_field_lines("Filament profile", filament, candidates, FILAMENT_PROFILE_FIELDS)))
+    wants_machine_section = text_has_any(
+        text,
+        (
+            "machine profile",
+            "printer profile",
+            "machine setting",
+            "printer setting",
+            "nozzle",
+            "hotend",
+        ),
+    )
+    wants_process_section = text_has_any(
+        text,
+        (
+            "process profile",
+            "print profile",
+            "layer height",
+            "speed",
+            "accel",
+            "acceleration",
+            "wall",
+            "infill",
+            "quality",
+            "draft",
+            "fine",
+        ),
+    )
+    if machine and wants_machine_section:
+        sections.append("\n".join(profile_field_lines("Machine profile", machine, candidates, MACHINE_PROFILE_FIELDS)))
+    if process and wants_process_section:
+        sections.append("\n".join(profile_field_lines("Process profile", process, candidates, PROCESS_PROFILE_FIELDS)))
+    notes = []
+    nozzle_variants = best.get("filamentNozzleVariants") or []
+    if nozzle_variants and not result.get("nozzle"):
+        variant_names = ", ".join(dict.fromkeys(Path(item["path"]).name for item in nozzle_variants[:8]))
+        notes.append(f"No nozzle size was stated, so I reported the base filament profile and found these nozzle-specific variants: {variant_names}.")
+    if filament and result.get("materialKey") == "pet-cf":
+        notes.append("This is PET-CF, not PETG-CF; I kept those separated when scoring the profiles.")
+    if filament and process and wants_process_section:
+        notes.append("Filament profiles hold temperatures, flow, cooling, pressure advance, and max volumetric flow. Process profiles hold layer height, wall count, speeds, acceleration, and quality choices.")
+    elif filament and process and not wants_process_section:
+        notes.append("I did not dump a process profile because this was a filament-parameter request; ask for the process profile when you want layer height, speeds, walls, infill, and acceleration.")
+    alternates = best.get("filamentAlternates") or []
+    if alternates:
+        alt_names = ", ".join(dict.fromkeys(Path(item["path"]).name for item in alternates[:6]))
+        notes.append(f"Closest other filament-profile matches: {alt_names}.")
+    if notes:
+        sections.append("You should also consider: " + " ".join(notes))
+    return "\n\n".join(sections)
 
 
 def wants_printing_expert_context(messages):
@@ -8266,6 +8924,8 @@ def cad_flow_metrics(dim):
 
 
 def is_cad_artifact_tool_request(messages):
+    if is_filament_profile_pull_request(messages):
+        return False
     if not is_cad_design_request(messages):
         return False
     query = latest_user_text(messages).lower()
@@ -12970,6 +13630,48 @@ def package_health_report():
         add("tools:orca-filament-tuning-coach", "fail", str(exc))
 
     try:
+        profile_answer_06 = filament_profile_parameters_direct_answer(
+            [
+                {
+                    "role": "user",
+                    "text": "Will you pull the current filament settings from the filament profile on my qidi plus 4 0.6 nozzle for PET-CF from TinmanX1?",
+                }
+            ]
+        )
+        profile_answer_ambiguous = filament_profile_parameters_direct_answer(
+            [
+                {
+                    "role": "user",
+                    "text": "Will you pull the peramiters from the filament profile on my qidi plus 4 for PET-CF from TinmanX1?",
+                }
+            ]
+        )
+        real_profile_ok = (
+            "Filament profile" in profile_answer_06
+            and "PET-CF" in profile_answer_06
+            and "Nozzle temp" in profile_answer_06
+            and "Fusion 360" not in profile_answer_06
+            and "buildVolume" not in profile_answer_06
+        )
+        fallback_ok = (
+            "PET-CF starter baseline" in profile_answer_06
+            and "Fusion 360" not in profile_answer_06
+            and "buildVolume" not in profile_answer_06
+        )
+        ambiguity_ok = (
+            "No nozzle size was stated" in profile_answer_ambiguous
+            or "PET-CF starter baseline" in profile_answer_ambiguous
+        )
+        ok = (real_profile_ok or fallback_ok) and ambiguity_ok
+        add(
+            "tools:orca-profile-parameter-pull",
+            "pass" if ok else "fail",
+            "filament profile questions pull Orca/TinmanX1 parameters instead of CAD or machine specs",
+        )
+    except Exception as exc:
+        add("tools:orca-profile-parameter-pull", "fail", str(exc))
+
+    try:
         profile_answer = printer_profile_direct_answer(
             [{"role": "user", "text": "What are the specs limitations and software architecture for the Bambu H2D?"}]
         )
@@ -15826,6 +16528,7 @@ class CodexUIHandler(BaseHTTPRequestHandler):
 
         direct_printing_expert_answer = (
             component_manual_direct_answer(messages)
+            or filament_profile_parameters_direct_answer(messages)
             or filament_tuning_direct_answer(messages)
             or printer_profile_direct_answer(messages)
         )
