@@ -4736,6 +4736,8 @@ def build_analytical_context(messages, route=None, web_search="live", local_tool
     if not latest_user_text(messages).strip():
         return ""
     profile = detected_domain_profile(messages, route or {})
+    core = analytical_core_profile(messages, route or {}, web_search=web_search, local_tools=local_tools)
+    decision = core.get("decisionFrame") or {}
     lines = [
         "Analytical operating system:",
         "- Use this as internal working discipline; do not recite it unless Tinman asks how you reasoned.",
@@ -4754,7 +4756,20 @@ def build_analytical_context(messages, route=None, web_search="live", local_tool
         f"- Detected platform/tool family: {profile.get('platform') or 'not yet specific'} ({profile.get('platformConfidence') or 'unknown'} confidence).",
         f"- Volatility: {profile.get('volatility')}.",
         f"- Evidence need: {profile.get('evidenceNeed')}.",
+        f"- Analytical mode: {core.get('mode')} ({core.get('complexity')} complexity, {core.get('riskLevel')} risk).",
+        f"- Actual objective: {core.get('objective')}.",
+        f"- Done means: {core.get('doneMeans')}.",
     ]
+    if core.get("explicitConstraints"):
+        lines.append(f"- Explicit constraints to preserve: {', '.join(core.get('explicitConstraints')[:8])}.")
+    if decision.get("criteria"):
+        lines.append(f"- Decision criteria: {', '.join(decision.get('criteria')[:8])}.")
+    if decision.get("rejectIf"):
+        lines.append(f"- Reject/stop conditions: {', '.join(decision.get('rejectIf')[:6])}.")
+    if core.get("requiredChecks"):
+        lines.append(f"- Required checks before final: {', '.join(core.get('requiredChecks')[:8])}.")
+    if core.get("missingInputs"):
+        lines.append(f"- Missing inputs to resolve or caveat: {', '.join(core.get('missingInputs')[:8])}.")
     if profile.get("toolFamily"):
         lines.append(f"- Right tool family: {profile.get('toolFamily')}.")
     if profile.get("firstChecks"):
@@ -4769,6 +4784,246 @@ def build_analytical_context(messages, route=None, web_search="live", local_tool
         lines.append("- Web is disabled even though current web evidence looks useful; say that plainly.")
     lines.append("")
     return "\n".join(lines)
+
+
+def analytical_core_mode(messages, route=None):
+    query = latest_user_text(messages).lower()
+    route_id = (route or {}).get("projectId", "")
+    if is_engineering_diagram_request(messages):
+        return "systems-design"
+    if is_stl_cfd_duct_design_request(messages) or is_cad_design_request(messages) or is_structural_mechanical_design_request(messages):
+        return "engineering-design"
+    if is_read_only_printer_status_query(messages) or text_has_any(query, ("diagnose", "debug", "troubleshoot", "not working", "failure", "error", "offline", "unreachable")):
+        return "diagnostics"
+    if wants_research_quality_context(messages) or wants_web_context(messages) or route_id in {"energy-power-research", "research-parts-reference", "tinmanx-slicer-research"}:
+        return "evidence-research"
+    if text_has_any(query, ("compare", "best", "choose", "recommend", "which", "should i", "price", "availability")):
+        return "decision"
+    if text_has_any(query, ("write", "code", "script", "macro", "config", "fix", "implement", "build", "app", "github", "repo")):
+        return "implementation"
+    if text_has_any(query, ("calculate", "formula", "size", "dimension", "load", "flow", "current", "voltage", "rpm")):
+        return "calculation"
+    return "direct-answer"
+
+
+def analytical_core_complexity(messages):
+    query = latest_user_text(messages).lower()
+    score = len(re.findall(r"\d+(?:\.\d+)?", query))
+    for term in (
+        "design", "diagnose", "debug", "optimize", "compare", "research", "calculate",
+        "cfd", "fea", "wiring", "schematic", "architecture", "safety", "code",
+        "github", "install", "download", "vpn", "printer", "cnc", "solar", "battery",
+    ):
+        if term in query:
+            score += 2
+    if len(query) > 240:
+        score += 3
+    if len(query) > 600:
+        score += 3
+    if score >= 10:
+        return "high"
+    if score >= 5:
+        return "medium"
+    return "low"
+
+
+def analytical_core_risk(messages, route=None):
+    query = latest_user_text(messages).lower()
+    if text_has_any(query, ("live printer", "restart", "upload", "heater", "nozzle", "bed", "moonraker", "ssh", "password", "credential", "delete", "reset", "sudo")):
+        return "live-system"
+    if text_has_any(query, ("wire", "wiring", "electrical", "solar", "battery", "grid", "vfd", "mains", "240", "120", "vac", "breaker", "fuse", "e-stop", "estop")):
+        return "safety-critical"
+    if text_has_any(query, ("structural", "load", "fea", "stress", "mount", "holder", "bracket", "pressure", "cfd")):
+        return "engineering"
+    if wants_web_context(messages) or is_volatile_query_text(query):
+        return "volatile-information"
+    return "normal"
+
+
+def analytical_extract_constraints(messages):
+    query = latest_user_text(messages)
+    constraints = []
+    for match in re.finditer(r"\b(?:under|less than|below|above|over|at least|between|from|within|max(?:imum)?|min(?:imum)?|around|about|approx(?:imately)?)\s+[^.,;\n]{1,80}", query, re.I):
+        constraints.append(match.group(0).strip())
+    for match in re.finditer(r"\b\d+(?:\.\d+)?\s*(?:mm|cm|m|in|inch|inches|ft|feet|vdc|vac|v|a|amps?|w|kw|rpm|cfm|kg|g|lb|lbs|percent|%)\b", query, re.I):
+        value = match.group(0).strip()
+        if value not in constraints:
+            constraints.append(value)
+    for term in ("free", "local", "public release", "github", "do not", "must", "needs to", "without", "safe", "standalone"):
+        if term in query.lower() and term not in constraints:
+            constraints.append(term)
+    return constraints[:12]
+
+
+def analytical_decision_frame(mode, risk_level, route=None):
+    criteria = ["answer the actual question", "preserve explicit constraints", "use the correct tool family"]
+    checks = ["classify domain/platform first", "separate facts from assumptions"]
+    reject = ["wrong ecosystem/tool path", "generic answer that ignores constraints"]
+    if mode in {"engineering-design", "systems-design", "calculation"}:
+        criteria.extend(["safety margin", "manufacturability/buildability", "validation path"])
+        checks.extend(["units and magnitudes", "missing ratings/loads/materials", "failure modes"])
+        reject.extend(["claims validation without test/solver/evidence", "missing safety caveat"])
+    if mode == "diagnostics":
+        criteria.extend(["reproduce the symptom", "rank likely causes", "least-invasive test first"])
+        checks.extend(["current state", "logs/errors", "recent changes", "known-good baseline"])
+        reject.extend(["changes before read-only diagnostics", "treating symptoms as root cause"])
+    if mode == "evidence-research":
+        criteria.extend(["source quality", "currentness", "exact spec match", "reject weak matches"])
+        checks.extend(["primary/official sources", "date/availability", "operating point", "price/spec caveats"])
+        reject.extend(["marketplace label treated as proof", "stale or uncited current claim"])
+    if mode == "implementation":
+        criteria.extend(["minimal scoped change", "tests/verifications", "no unrelated churn"])
+        checks.extend(["repo patterns", "syntax/test command", "git status", "release/privacy checks when publishing"])
+        reject.extend(["untested code claim", "editing unrelated user changes"])
+    if risk_level in {"safety-critical", "live-system"}:
+        criteria.insert(0, "safety and reversibility")
+        checks.insert(0, "read-only/safe preflight")
+        reject.insert(0, "unsafe live action without verified state/approval")
+    return {"criteria": criteria[:10], "requiredChecks": checks[:10], "rejectIf": reject[:10]}
+
+
+def analytical_missing_inputs(mode, risk_level, messages):
+    query = latest_user_text(messages).lower()
+    missing = []
+    if mode in {"engineering-design", "systems-design"}:
+        if not re.search(r"\d", query):
+            missing.append("key dimensions/ratings")
+        if not text_has_any(query, ("material", "filament", "voltage", "current", "load", "speed", "flow", "pressure")):
+            missing.append("load/material/electrical/flow rating")
+        missing.append("validation acceptance criteria")
+    if mode == "diagnostics":
+        missing.extend(["exact error/symptom", "current state", "recent changes"])
+    if mode == "evidence-research" and not text_has_any(query, ("current", "latest", "today", "price", "availability", "source", "manual", "datasheet")):
+        missing.append("source freshness requirement")
+    if risk_level == "safety-critical":
+        missing.extend(["applicable code/manual", "protective device ratings"])
+    return list(dict.fromkeys(missing))[:8]
+
+
+def analytical_done_means(mode):
+    return {
+        "systems-design": "editable artifact plus rules/validation checks, not only prose",
+        "engineering-design": "artifact or concrete design basis with assumptions, math, and validation limits",
+        "diagnostics": "ranked root-cause hypothesis with safe next test and stop conditions",
+        "evidence-research": "source-backed recommendation with exact-match reasoning and rejects",
+        "decision": "clear pick or ranked options with criteria and tradeoffs",
+        "implementation": "scoped change, verification, and GitHub/package state when applicable",
+        "calculation": "formula, inputs, units, result, and sanity check",
+        "direct-answer": "direct answer first, then why and what to consider",
+    }.get(mode, "answer the actual request with evidence and caveats")
+
+
+def analytical_core_profile(messages, route=None, web_search="live", local_tools=True):
+    route = route or {}
+    mode = analytical_core_mode(messages, route)
+    complexity = analytical_core_complexity(messages)
+    risk_level = analytical_core_risk(messages, route)
+    decision = analytical_decision_frame(mode, risk_level, route)
+    constraints = analytical_extract_constraints(messages)
+    missing = analytical_missing_inputs(mode, risk_level, messages)
+    objective = compact(latest_user_text(messages), 220) or "No user objective detected."
+    required_checks = decision.get("requiredChecks", [])
+    if web_search != "live" and (wants_web_context(messages) or is_volatile_query_text(latest_user_text(messages).lower())):
+        required_checks = ["web disabled caveat"] + required_checks
+    if local_tools:
+        required_checks = required_checks + ["use local tools/files/endpoints when they can resolve uncertainty"]
+    return {
+        "ok": True,
+        "mode": mode,
+        "complexity": complexity,
+        "riskLevel": risk_level,
+        "objective": objective,
+        "doneMeans": analytical_done_means(mode),
+        "explicitConstraints": constraints,
+        "decisionFrame": decision,
+        "requiredChecks": list(dict.fromkeys(required_checks))[:10],
+        "missingInputs": missing,
+        "toolPosture": "local tools available" if local_tools else "no local tools in this mode",
+        "webPosture": web_search,
+    }
+
+
+def analytical_answer_gaps(messages, route=None, answer_text="", web_search="live"):
+    profile = analytical_core_profile(messages, route or {}, web_search=web_search, local_tools=True)
+    answer = str(answer_text or "")
+    lower = answer.lower()
+    gaps = []
+    mode = profile.get("mode")
+    constraints = profile.get("explicitConstraints") or []
+    if not answer.strip():
+        gaps.append({"kind": "no-answer", "severity": "high", "reason": "No final answer was produced."})
+        return gaps
+    word_count = len(re.findall(r"\w+", answer))
+    if (profile.get("complexity") in {"medium", "high"} or mode != "direct-answer" or profile.get("riskLevel") != "normal") and word_count < 18:
+        gaps.append({"kind": "too-thin", "severity": "high", "reason": "The answer is too thin for the task complexity."})
+    if mode in {"decision", "evidence-research"} and not text_has_any(lower, ("recommend", "pick", "best", "choose", "would use", "buy", "skip", "reject")):
+        gaps.append({"kind": "no-decision", "severity": "high", "reason": "The answer does not make a clear recommendation or ranked decision."})
+    if mode == "diagnostics" and not text_has_any(lower, ("first", "check", "test", "likely", "root", "cause", "because")):
+        gaps.append({"kind": "no-diagnostic-path", "severity": "high", "reason": "The answer does not give a ranked diagnostic path."})
+    if mode in {"engineering-design", "systems-design", "calculation"} and not text_has_any(lower, ("assumption", "verify", "validate", "check", "safety", "constraint", "rating")):
+        gaps.append({"kind": "no-validation", "severity": "medium", "reason": "Engineering answer lacks assumptions, validation, or safety checks."})
+    numeric_constraints = [item for item in constraints if re.search(r"\d", item)]
+    if numeric_constraints:
+        matched = 0
+        for item in numeric_constraints[:6]:
+            number = re.findall(r"\d+(?:\.\d+)?", item)
+            if number and re.search(re.escape(number[0]), answer):
+                matched += 1
+        if matched == 0:
+            gaps.append({"kind": "constraints-ignored", "severity": "high", "reason": "The answer appears to ignore the numeric constraints in the prompt."})
+    if wants_web_context(messages) and web_search == "live" and not answer_has_source_url(answer):
+        gaps.append({"kind": "missing-source-evidence", "severity": "medium", "reason": "The request appears to need web/source evidence, but the answer has no source URL."})
+    if text_has_any(lower, ("i can't", "i cannot", "unable to", "not able to")) and not text_has_any(lower, ("checked", "tried", "because", "this is why", "fallback", "next")):
+        gaps.append({"kind": "premature-stop", "severity": "high", "reason": "The answer stops without showing a recovery attempt or useful fallback."})
+    return gaps
+
+
+def analytical_answer_score(messages, route=None, answer_text="", web_search="live"):
+    profile = analytical_core_profile(messages, route or {}, web_search=web_search, local_tools=True)
+    gaps = analytical_answer_gaps(messages, route or {}, answer_text, web_search=web_search)
+    penalties = {"high": 28, "medium": 16, "low": 8}
+    score = 100
+    for gap in gaps:
+        score -= penalties.get(gap.get("severity"), 12)
+    score = max(0, min(100, score))
+    status = "pass" if score >= 82 else "review" if score >= 60 else "fail"
+    return {"score": score, "status": status, "profile": profile, "gaps": gaps}
+
+
+def analytical_core_synthetic_check():
+    design_messages = [
+        {"role": "user", "text": "Design a 48 VDC battery backup wiring diagram for 40 amps over 12 feet with fuse, BMS, and inverter."}
+    ]
+    diagnostic_messages = [
+        {"role": "user", "text": "Diagnose why my Marlin printer nozzle temp is reading zero after a toolhead wire repair."}
+    ]
+    research_messages = [
+        {"role": "user", "text": "Search the web and find a wind generator that makes 60 VDC at 300 RPM under $500."}
+    ]
+    design = analytical_core_profile(design_messages, {"projectId": "engineering-diagrams"}, web_search="disabled")
+    diagnostic = analytical_core_profile(diagnostic_messages, {"projectId": "printer-klipper-ops"}, web_search="live")
+    research = analytical_core_profile(research_messages, {"projectId": "energy-power-research"}, web_search="live")
+    weak_score = analytical_answer_score(
+        research_messages,
+        {"projectId": "energy-power-research"},
+        "There are several options online.",
+        web_search="live",
+    )
+    good_score = analytical_answer_score(
+        diagnostic_messages,
+        {"projectId": "printer-klipper-ops"},
+        "First check the thermistor connector and run a read-only M105 test. This is likely an open thermistor circuit because a zero or impossible reading after toolhead wire repair points to the sensor path. You should also consider checking firmware sensor type only after wiring continuity passes.",
+        web_search="live",
+    )
+    return (
+        design.get("mode") == "systems-design"
+        and design.get("riskLevel") == "safety-critical"
+        and any("48 VDC" in item for item in design.get("explicitConstraints", []))
+        and diagnostic.get("mode") == "diagnostics"
+        and research.get("mode") == "evidence-research"
+        and weak_score.get("status") in {"review", "fail"}
+        and good_score.get("status") == "pass"
+    )
 
 
 def build_direct_answer_context(messages, route):
@@ -8642,6 +8897,7 @@ def build_autonomy_supervisor_context(messages, route=None, web_search="live"):
         "Autonomy Supervisor:",
         "- Before answering, decide whether you need help. Help can mean local files, web sources, capability tools, a local artifact endpoint, or a second-pass reviewer.",
         "- Define done: direct answer, source-backed recommendation, live status, file/artifact, code change, Git push, or safe blocker report.",
+        "- Use Analytical Core on hard tasks to define the real objective, done criteria, constraints, reject conditions, evidence/tool needs, and answer-quality gaps before final delivery.",
         "- If evidence is current, volatile, price/spec/availability-based, or explicitly web-search based, use live web evidence when Web Access is on.",
         "- If a tool is missing, inspect the capability catalog, install only free allowlisted storage-safe tools, then retry. Ask Tinman before paid, unknown, large, low-storage, credential, live-machine write, or destructive steps.",
         "- If confidence is low because the domain/platform is unclear, classify the platform first and ask only one tight question if no safe tool can resolve it.",
@@ -8750,6 +9006,7 @@ def build_local_tools_context():
             "- To install a free allowlisted missing tool, call `POST http://127.0.0.1:8765/api/tools/install-free-tool` with JSON like `{\"tool\":\"jq\",\"reason\":\"parse printer API JSON\"}`.",
             "- To recover from a failure, call `POST http://127.0.0.1:8765/api/tools/recover` with the original messages, cwd, and error text. Use its recovery status before giving up.",
             "- To check whether a draft answer needs help before finalizing, call `POST http://127.0.0.1:8765/api/tools/autonomy-supervisor` with the messages, route, answerText, cwd, and webSearch.",
+            "- To classify a hard task or score a draft answer, call `POST http://127.0.0.1:8765/api/tools/analytical-core` with messages, route, answerText, and webSearch. Use it to fix wrong-objective, missing-constraint, no-decision, no-validation, and weak-evidence failures.",
             "- If the install response says `needsApproval`, ask Tinman before downloading. Do this for storage pressure, large installs, unknown tools, or anything not confirmed free.",
             "- After a successful install, retry the original task instead of stopping at `command not found`.",
             "- For local Klipper config discovery, call `GET http://127.0.0.1:8765/api/tools/klipper-configs?hint=qidi` or use another machine hint. Add `&scan=1` only when known paths are not enough.",
@@ -15093,6 +15350,15 @@ def package_health_report():
 
     try:
         add(
+            "tools:analytical-core",
+            "pass" if analytical_core_synthetic_check() else "fail",
+            "classifies design/diagnostic/research tasks and scores weak answers",
+        )
+    except Exception as exc:
+        add("tools:analytical-core", "fail", str(exc))
+
+    try:
+        add(
             "tools:language-quality-gate",
             "pass" if quality_gate_synthetic_check() else "fail",
             "validates Python, C++, Klipper, G-code, and failing syntax without live machine actions",
@@ -16553,6 +16819,12 @@ def response_scorecard(messages, route, answer, contract=None, deliverables=None
         add("No wrong artifact route", not (contract.get("kind") == "CAD reference" and answer_has_cad_artifact(text)), "Reference questions should not stage artifacts.")
     if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable", "Aero/CFD preflight", "Mechanical/structural preflight", "Engineering diagram"}:
         add("Assumptions/validation shown", bool(assumptions), "Engineering work should show assumptions or validation limits.")
+    analytical = analytical_answer_score(messages, route or {}, text)
+    add(
+        "Analytical fit",
+        analytical.get("score", 0) >= 82,
+        "Answer should solve the actual problem, preserve constraints, use the right evidence/tools, and include a decision path.",
+    )
     score = int(round(100 * sum(1 for check in checks if check["passed"]) / max(1, len(checks))))
     return {"score": score, "status": "pass" if score >= 80 else "review", "checks": checks}
 
@@ -16575,6 +16847,7 @@ def response_package(messages, route, answer):
     deliverables = extract_response_deliverables(coached)
     assumptions = extract_assumption_ledger(messages, route or {}, coached, contract)
     scorecard = response_scorecard(messages, route or {}, coached, contract, deliverables, assumptions)
+    analytical = analytical_answer_score(messages, route or {}, coached)
     return {
         "text": coached,
         "taskContract": contract,
@@ -16582,6 +16855,7 @@ def response_package(messages, route, answer):
         "deliverables": deliverables,
         "assumptions": assumptions,
         "scorecard": scorecard,
+        "analyticalCore": analytical,
     }
 
 
@@ -16602,6 +16876,7 @@ def emit_assistant_answer(handler, messages, route, admin_topic, text, normalize
             "deliverables": package["deliverables"],
             "assumptions": package["assumptions"],
             "scorecard": package["scorecard"],
+            "analyticalCore": package["analyticalCore"],
         },
     )
     return answer
@@ -16634,6 +16909,30 @@ def supervise_answer_before_emit(
     recovered = str(result.get("text") or answer).strip()
     if result.get("recovered") and emit:
         emit("Autonomy Supervisor recovered the answer before final delivery.")
+    analytical = analytical_answer_score(messages, route or {}, recovered or answer, web_search=web_search)
+    if analytical.get("status") != "pass":
+        gap_text = "; ".join(gap.get("kind", "gap") for gap in analytical.get("gaps", [])[:4])
+        if emit:
+            emit(f"Analytical Core caught a weak answer before final delivery: {gap_text}.")
+        try:
+            coached = run_quality_coach(
+                messages,
+                route or {},
+                recovered or answer,
+                review_text="Analytical Core gaps: " + "; ".join(gap.get("reason", gap.get("kind", "gap")) for gap in analytical.get("gaps", [])[:4]),
+                emit=emit,
+                num_predict=1400,
+                friendliness_level=friendliness_level,
+                humor_level=humor_level,
+            )
+            coached_text = str(coached.get("text") or "").strip()
+            if coached_text:
+                recovered = coached_text
+                if emit:
+                    emit("Analytical Core correction pass completed.")
+        except Exception as exc:
+            if emit:
+                emit(f"Analytical Core correction pass failed, keeping the best available answer: {compact(exc, 120)}")
     return recovered or answer
 
 
@@ -16765,6 +17064,11 @@ def quality_coach_prompt(
         if role in {"user", "assistant"} and text:
             clean_messages.append((role, text))
 
+    analytical_review = analytical_answer_score(messages, route or {}, candidate_answer, web_search="live")
+    analytical_gaps = "; ".join(
+        gap.get("reason", gap.get("kind", "gap")) for gap in analytical_review.get("gaps", [])[:5]
+    ) or "none"
+
     blocks = [
         "You are Tinman's final Quality Coach.",
         build_assistant_style_context(friendliness_level, humor_level).strip(),
@@ -16774,6 +17078,8 @@ def quality_coach_prompt(
         "Your job is to return the final answer Tinman should see.",
         "If the candidate already passes the rubric, return it with only minor cleanup.",
         "If it misses the question, skips required domain/platform classification, chooses the wrong tool family, buries the answer, uses noisy formatting, invents evidence, or lacks the why/caveat Tinman expects, rewrite it.",
+        f"Analytical Core score: {analytical_review.get('score')} ({analytical_review.get('status')}). Gaps: {analytical_gaps}.",
+        "When rewriting, preserve verified facts but fix the highest-impact analytical gap first: wrong objective, ignored constraints, no decision, no diagnostic path, no validation, or missing evidence.",
         "Do not add new facts, sources, prices, files, tests, command outputs, or machine access claims.",
         "Preserve verified specifics from the candidate answer.",
         "Return only the final answer. Do not mention the rubric, coach, review, or scoring.",
@@ -17457,6 +17763,30 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 }
             )
             self.send_json(result)
+            return
+
+        if parsed.path == "/api/tools/analytical-core":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self.send_error(400, "Invalid JSON")
+                return
+            messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+            if not messages:
+                prompt = str(payload.get("prompt") or payload.get("text") or "").strip()
+                if prompt:
+                    messages = [{"role": "user", "text": prompt}]
+            web_search = safe_choice(payload.get("webSearch") or "live", WEB_SEARCH_LEVELS, "live")
+            route = payload.get("route") if isinstance(payload.get("route"), dict) else route_manager(
+                messages,
+                requested_profile="manager",
+                web_search=web_search,
+            )
+            answer_text = payload.get("answerText") or payload.get("answer") or ""
+            profile = analytical_core_profile(messages, route, web_search=web_search, local_tools=True)
+            score = analytical_answer_score(messages, route, answer_text, web_search=web_search) if answer_text else None
+            self.send_json({"ok": True, "profile": profile, "score": score, "route": route})
             return
 
         if parsed.path == "/api/tools/quality-gate":
