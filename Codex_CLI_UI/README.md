@@ -54,6 +54,7 @@ The server binds to `127.0.0.1` by default and streams `codex exec --json` outpu
 - `Coder` uses `local-coder` with the free local Ollama `qwen2.5-coder-7b` alias. Use it for implementation-heavy app, script, and repo work.
 - `Review` uses direct local Ollama with the free `deepseek-r1-8b` alias. Use it for second opinions, bug hunts, and response-quality checks.
 - `Local Research` searches free public web pages, caches evidence locally in SQLite, then asks the local Ollama `gpt-oss-20b` model to write the grounded answer. This is the preferred no-pay path for shopping, part matching, current specs, and product research.
+- `Research + Apply` searches free public web pages, turns evidence into project-specific lessons, writes a local research/apply receipt, and stages a Project Apply plan/manifest before claiming profile, preset, workflow, or project files changed.
 - `Cloud Research` uses the OpenAI Responses API for public web/general research when `OPENAI_API_KEY` is configured. It is disabled by default in free-only mode. It does not include the private startup inventory, machine list, SSH aliases, or local project history in the cloud prompt.
 - The UI passes the `Web` setting into each run. Local Codex can use it as a hint; Local Research requires it to be on.
 - The composer keeps the prompt box above a compact one-row options bar for `Mode`, `Access`, `Reasoning`, `Friendly`, `Humor`, and `Web`.
@@ -89,6 +90,36 @@ python3 import_codex_history.py
 ```
 
 This creates a compact local index in `data/` from `~/.codex/sessions`. The UI server injects relevant history snippets into new Codex runs.
+
+## Harvest Private History Tests
+
+```bash
+cd "$HOME/Applications/Codex_CLI_UI"
+python3 harvest_history_golden_tests.py --limit 120
+```
+
+This scans local Codex sessions and archived sessions, sanitizes obvious secrets, deduplicates user prompts, and writes private Slow-group golden tests into `data/golden_tests.json`. The public package includes the harvester only; it does not bundle personal chat history or generated private tests.
+
+Run a safe local batch through the live UI server:
+
+```bash
+python3 run_golden_batch.py --limit 12
+python3 run_golden_batch.py --offset 12 --limit 12
+```
+
+Run the public CAD/CNC manufacturing question bank:
+
+```bash
+python3 run_golden_batch.py --group "Manufacturing Samples" --source manufacturing-sample --limit 100
+```
+
+Run the TinmanX1/Codex UI workflow scenario directly:
+
+```bash
+python3 run_golden_batch.py --ids scenario-tinmanx1-polymaker-steer-self-repair-release
+```
+
+The Manufacturing Samples group covers 50 CAD and 50 CNC machining prompts. The workflow scenario guards the Polymaker/Fiberon preset, Steer/Edit UI, self-healing Fix-this loop, GitHub release, and zip packaging behavior.
 
 ## Hybrid Cloud Research Setup
 
