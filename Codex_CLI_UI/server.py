@@ -10656,6 +10656,65 @@ def format_structural_fea_preflight_answer(result):
     return "\n".join(lines)
 
 
+def run_deeper_analysis_tool(messages, cwd="", analysis_kind="auto"):
+    kind = str(analysis_kind or "auto").strip().lower()
+    if kind not in {"auto", "aero", "structural"}:
+        kind = "auto"
+    route = route_manager(messages, cwd=cwd, requested_profile="manager", web_search="live")
+    admin_topic = route_admin_topic(messages, route)
+    if kind == "auto":
+        if is_structural_mechanical_design_request(messages):
+            kind = "structural"
+        elif is_aero_cfd_analysis_request(messages):
+            kind = "aero"
+        elif resolve_geometry_file(messages, cwd=cwd).get("path"):
+            kind = "structural"
+    if kind == "structural":
+        result = stage_structural_fea_preflight(messages, cwd=cwd)
+        text = format_structural_fea_preflight_answer(result)
+        thoughts = structural_fea_preflight_working_notes(result)
+        analysis_label = "Structural FEA"
+    elif kind == "aero":
+        result = stage_aero_cfd_preflight(messages, cwd=cwd)
+        text = format_aero_cfd_preflight_answer(result)
+        thoughts = aero_cfd_preflight_working_notes(result)
+        analysis_label = "Aero/CFD"
+    else:
+        result = {
+            "ok": False,
+            "error": "No attached or named geometry and no clear aero/structural request was found.",
+            "searched": resolve_geometry_file(messages, cwd=cwd).get("searched", [])[:20],
+        }
+        text = "\n\n".join(
+            [
+                "I need a geometry file or a clearer analysis target before I can run deeper engineering analysis.",
+                "This is why: the deeper-analysis tools need an attached STL/STEP/OBJ/3MF or a prompt that clearly asks for Aero/CFD or Structural FEA.",
+                "You should also consider: attach the part file, then click `FEA` for structural strength or `Aero` for flow/drag work.",
+            ]
+        )
+        thoughts = ["No clear deeper-analysis target was found, so I stopped before inventing a result."]
+        analysis_label = "Auto deeper analysis"
+    package = response_package(messages, route or {}, text)
+    answer = package["text"]
+    if answer and not (admin_topic or {}).get("testRun"):
+        update_admin_activity(messages, route or {}, answer, admin_topic)
+    return {
+        "ok": bool(result.get("ok")),
+        "kind": kind,
+        "label": analysis_label,
+        "text": answer,
+        "route": route,
+        "adminTopic": admin_topic,
+        "thoughts": thoughts,
+        "result": result,
+        "taskContract": package["taskContract"],
+        "roleStyle": package["roleStyle"],
+        "deliverables": package["deliverables"],
+        "assumptions": package["assumptions"],
+        "scorecard": package["scorecard"],
+    }
+
+
 def stage_inferred_cpap_duct_design(target, stl_path, constraints, analysis, toolchain, case_dir):
     layout = infer_cpap_duct_ports(stl_path, constraints)
     if not layout.get("ok"):
@@ -14255,6 +14314,24 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 self.send_error(400, "Invalid JSON")
                 return
             result = quality_gate(payload)
+            self.send_json(result)
+            return
+
+        if parsed.path == "/api/tools/deeper-analysis":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self.send_error(400, "Invalid JSON")
+                return
+            try:
+                result = run_deeper_analysis_tool(
+                    payload.get("messages") if isinstance(payload.get("messages"), list) else [],
+                    cwd=safe_cwd(payload.get("cwd")),
+                    analysis_kind=payload.get("kind") or payload.get("analysisKind") or "auto",
+                )
+            except Exception as exc:
+                result = {"ok": False, "error": str(exc)}
             self.send_json(result)
             return
 

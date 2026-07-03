@@ -9,6 +9,9 @@
 - Upgrades the structural FEA endpoint from seed-case-only to attached STL/STEP geometry meshing with Gmsh, CalculiX solving, result parsing, and a seed fallback when real meshing fails.
 - Adds automatic fixed/load face selection, printed-part material allowables/process notes, stress/deflection/safety-factor summaries, and PNG result previews.
 - Makes generated `.inp`, `.msh`, `.dat`, `.frd`, and `.geo` engineering files clickable in chat responses.
+- Adds a compact Engineering strip below the chat bar with Aero, Structural, and Tools readiness plus one-click Run Deeper, Aero, and FEA actions.
+- Adds an Admin Engineering Analysis Packs card showing exact tool availability and pack-level run buttons.
+- Adds `POST /api/tools/deeper-analysis` so UI buttons can select the best engineering path and return normal chat responses with clickable reports/results.
 - Routes mechanical and structural design prompts into CAD/Modeling instead of printer status or generic CAD fallbacks.
 - Adds package-health regressions for aero toolchain visibility, real structural FEA output, structural reports/previews, and structural routing.
 

@@ -191,6 +191,10 @@
               <div class="package-health-list" id="packageHealthList" aria-label="Package health checks"></div>
             </section>
           </div>
+          <section class="admin-card engineering-admin-card">
+            <h3>Engineering Analysis Packs</h3>
+            <div class="engineering-admin-grid" id="engineeringAdminGrid" aria-label="Engineering analysis pack status"></div>
+          </section>
           <section class="admin-card improvement-lab-card">
             <h3>Improvement Lab</h3>
             <div class="improvement-summary-grid" id="improvementSummaryGrid" aria-label="Improvement summary"></div>
@@ -238,6 +242,36 @@
             </button>
           </div>
           <div class="attachment-tray" id="attachmentTray" aria-label="Attached files" hidden></div>
+          <div class="engineering-strip" id="engineeringStrip" aria-label="Engineering analysis tools">
+            <div class="engineering-pack-status">
+              <div class="engineering-pack" id="aeroPackStatus">
+                <span>Aero</span>
+                <strong id="aeroPackText">Checking</strong>
+              </div>
+              <div class="engineering-pack" id="structuralPackStatus">
+                <span>Structural</span>
+                <strong id="structuralPackText">Checking</strong>
+              </div>
+              <div class="engineering-pack" id="toolPackStatus">
+                <span>Tools</span>
+                <strong id="toolPackText">Checking</strong>
+              </div>
+            </div>
+            <div class="engineering-actions">
+              <button class="analysis-button primary" id="runDeeperButton" type="button" title="Run the best deeper engineering analysis for this prompt">
+                <span>↯</span>
+                <span>Run Deeper</span>
+              </button>
+              <button class="analysis-button" id="runAeroButton" type="button" title="Run the Aero/CFD analysis path">
+                <span>⇥</span>
+                <span>Aero</span>
+              </button>
+              <button class="analysis-button" id="runStructuralButton" type="button" title="Run the Structural FEA analysis path">
+                <span>⌁</span>
+                <span>FEA</span>
+              </button>
+            </div>
+          </div>
           <div class="run-controls" aria-label="Codex run settings">
             <label class="control-chip" for="modeSelect">
               <span>Mode</span>

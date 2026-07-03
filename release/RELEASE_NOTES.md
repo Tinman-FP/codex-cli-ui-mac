@@ -26,6 +26,9 @@ Open the DMG and double-click `Install Codex CLI UI.command`.
 - Attached STL/STEP structural geometry can now be meshed with Gmsh, solved with CalculiX, parsed for stress/deflection/safety factor, and reported with a preview PNG.
 - Automatic fixed/load face selection plus printed-part material allowables and process notes for PLA, PETG, ASA, ABS, PCTG, nylon, PA-CF, PET-CF, aluminum, and steel.
 - Clickable generated engineering files for `.inp`, `.msh`, `.dat`, `.frd`, and `.geo` outputs.
+- Compact Engineering strip below the chat bar showing Aero, Structural, and Tools readiness plus one-click Run Deeper, Aero, and FEA buttons.
+- Admin Engineering Analysis Packs card with exact tool availability and pack-level analysis buttons.
+- Deeper-analysis endpoint that chooses the right Aero/CFD or Structural FEA path and returns normal chat responses with clickable reports/results.
 - Package-health checks for aero toolchain visibility, real structural FEA output, structural reports/previews, and structural routing.
 
 ## Included
@@ -42,6 +45,7 @@ Open the DMG and double-click `Install Codex CLI UI.command`.
 - CAD artifact staging helper for Fusion 360/OpenSCAD workflows
 - Aero/CFD preflight helpers for OpenFOAM/OpenVSP/XFOIL/SU2 workflows
 - Mechanical/structural real-geometry FEA helper for Gmsh/CalculiX-backed workflows
+- Visible Engineering Analysis Pack status and one-click deeper-analysis controls
 - Privacy-safe local data/log folders
 
 ## Requirements

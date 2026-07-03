@@ -37,6 +37,7 @@ const els = {
   benchmarkSummaryGrid: document.getElementById("benchmarkSummaryGrid"),
   benchmarkList: document.getElementById("benchmarkList"),
   packageHealthList: document.getElementById("packageHealthList"),
+  engineeringAdminGrid: document.getElementById("engineeringAdminGrid"),
   improvementSummaryGrid: document.getElementById("improvementSummaryGrid"),
   improvementList: document.getElementById("improvementList"),
   selfHealingSummaryGrid: document.getElementById("selfHealingSummaryGrid"),
@@ -52,6 +53,16 @@ const els = {
   attachButton: document.getElementById("attachButton"),
   fileInput: document.getElementById("fileInput"),
   attachmentTray: document.getElementById("attachmentTray"),
+  engineeringStrip: document.getElementById("engineeringStrip"),
+  aeroPackStatus: document.getElementById("aeroPackStatus"),
+  aeroPackText: document.getElementById("aeroPackText"),
+  structuralPackStatus: document.getElementById("structuralPackStatus"),
+  structuralPackText: document.getElementById("structuralPackText"),
+  toolPackStatus: document.getElementById("toolPackStatus"),
+  toolPackText: document.getElementById("toolPackText"),
+  runDeeperButton: document.getElementById("runDeeperButton"),
+  runAeroButton: document.getElementById("runAeroButton"),
+  runStructuralButton: document.getElementById("runStructuralButton"),
   modeSelect: document.getElementById("modeSelect"),
   managerDepthSelect: document.getElementById("managerDepthSelect"),
   accessSelect: document.getElementById("accessSelect"),
@@ -229,6 +240,9 @@ function setRunning(isRunning) {
   els.friendlinessSelect.disabled = isRunning;
   els.humorSelect.disabled = isRunning;
   els.webAccessToggle.disabled = isRunning;
+  if (els.runDeeperButton) els.runDeeperButton.disabled = isRunning;
+  if (els.runAeroButton) els.runAeroButton.disabled = isRunning;
+  if (els.runStructuralButton) els.runStructuralButton.disabled = isRunning;
   if (els.runQuickTestsButton) els.runQuickTestsButton.disabled = isRunning;
   if (els.runAllTestsButton) els.runAllTestsButton.disabled = isRunning;
   if (els.resetTestsButton) els.resetTestsButton.disabled = isRunning;
@@ -269,6 +283,7 @@ function render() {
   renderMessages();
   renderAttachmentTray();
   renderRunControls();
+  renderEngineeringStatus();
   renderLogs();
   renderMonitorSummary();
   saveState();
@@ -395,6 +410,7 @@ function renderAdmin() {
   renderAdminNav(projects);
   renderBenchmarkPanel();
   renderPackageHealth();
+  renderEngineeringAdmin();
   renderImprovementLab(improvement);
   renderSelfHealing(selfHealing);
   renderAdminProjectTree(projects);
@@ -507,6 +523,107 @@ function renderPackageHealth() {
     detail.textContent = check.detail || "";
     row.append(label, status, detail);
     els.packageHealthList.appendChild(row);
+  });
+}
+
+const ENGINEERING_PACKS = {
+  aero: {
+    label: "Aero Analysis",
+    action: "Aero",
+    toolIds: ["openvsp", "xfoil", "su2", "docker-openfoam", "gmsh", "paraview", "python-aero-stack", "qblade-linux"],
+  },
+  structural: {
+    label: "Structural FEA",
+    action: "FEA",
+    toolIds: ["calculix", "gmsh", "freecad", "paraview", "openscad"],
+  },
+};
+
+function capabilityTools() {
+  return Array.isArray(config.capabilityManager?.tools) ? config.capabilityManager.tools : [];
+}
+
+function capabilityById(id) {
+  return capabilityTools().find((tool) => tool.id === id) || null;
+}
+
+function engineeringPackState(pack) {
+  const tools = (pack.toolIds || []).map((id) => capabilityById(id)).filter(Boolean);
+  const installed = tools.filter((tool) => tool.installed).length;
+  const total = pack.toolIds.length || tools.length || 1;
+  const missing = (pack.toolIds || [])
+    .map((id) => capabilityById(id) || { id, label: id, installed: false })
+    .filter((tool) => !tool.installed);
+  const state = installed === total ? "ready" : installed ? "partial" : "missing";
+  return { state, installed, total, missing, tools };
+}
+
+function shortPackText(status) {
+  if (status.state === "ready") return "Ready";
+  if (status.state === "partial") return `${status.installed}/${status.total}`;
+  return "Missing";
+}
+
+function setPackChip(element, textElement, status) {
+  if (!element || !textElement) return;
+  element.classList.remove("ready", "partial", "missing");
+  element.classList.add(status.state);
+  textElement.textContent = shortPackText(status);
+  element.title = status.missing.length
+    ? `Missing: ${status.missing.map((tool) => tool.label || tool.id).join(", ")}`
+    : "All required tools are visible.";
+}
+
+function renderEngineeringStatus() {
+  const aero = engineeringPackState(ENGINEERING_PACKS.aero);
+  const structural = engineeringPackState(ENGINEERING_PACKS.structural);
+  const combined = {
+    state: aero.state === "ready" && structural.state === "ready" ? "ready" : aero.installed + structural.installed ? "partial" : "missing",
+    installed: aero.installed + structural.installed,
+    total: aero.total + structural.total,
+    missing: [...aero.missing, ...structural.missing],
+  };
+  setPackChip(els.aeroPackStatus, els.aeroPackText, aero);
+  setPackChip(els.structuralPackStatus, els.structuralPackText, structural);
+  setPackChip(els.toolPackStatus, els.toolPackText, combined);
+}
+
+function renderEngineeringAdmin() {
+  if (!els.engineeringAdminGrid) return;
+  els.engineeringAdminGrid.textContent = "";
+  Object.entries(ENGINEERING_PACKS).forEach(([kind, pack]) => {
+    const status = engineeringPackState(pack);
+    const card = document.createElement("article");
+    card.className = `engineering-pack-card ${status.state}`;
+    const header = document.createElement("div");
+    header.className = "engineering-pack-card-header";
+    const title = document.createElement("strong");
+    title.textContent = pack.label;
+    const pill = document.createElement("span");
+    pill.className = `test-status ${status.state === "ready" ? "pass" : status.state === "partial" ? "running" : "fail"}`;
+    pill.textContent = `${status.installed}/${status.total}`;
+    header.append(title, pill);
+
+    const toolList = document.createElement("div");
+    toolList.className = "engineering-tool-list";
+    (pack.toolIds || []).forEach((id) => {
+      const tool = capabilityById(id) || { id, label: id, installed: false };
+      const item = document.createElement("span");
+      item.className = `engineering-tool-chip ${tool.installed ? "ready" : "missing"}`;
+      item.textContent = tool.label || id;
+      item.title = tool.installed ? "Available" : "Missing";
+      toolList.appendChild(item);
+    });
+
+    const action = document.createElement("button");
+    action.className = "icon-text-button";
+    action.type = "button";
+    action.disabled = Boolean(activeController);
+    action.innerHTML = `<span>${kind === "aero" ? "⇥" : "⌁"}</span><span>Run ${pack.action}</span>`;
+    action.addEventListener("click", () => runDeeperAnalysis(kind));
+
+    card.append(header, toolList, action);
+    els.engineeringAdminGrid.appendChild(card);
   });
 }
 
@@ -2698,6 +2815,96 @@ async function sendPrompt() {
   }
 }
 
+function analysisKindLabel(kind) {
+  if (kind === "aero") return "Aero";
+  if (kind === "structural") return "Structural FEA";
+  return "deeper engineering";
+}
+
+async function runDeeperAnalysis(kind = "auto") {
+  const thread = currentThread();
+  if (!thread || activeController) return;
+  thread.cwd = els.cwdInput.value.trim() || config.cwd;
+  const label = analysisKindLabel(kind);
+  let text = els.promptInput.value.trim();
+  const attachments = pendingAttachments.slice();
+  if (!text && attachments.length) {
+    text = `Run ${label} analysis on the attached file${attachments.length === 1 ? "" : "s"}.`;
+  }
+  if (text || attachments.length) {
+    thread.messages.push({ id: crypto.randomUUID(), role: "user", text, attachments });
+    if (isUntitledThread(thread)) {
+      thread.title = (text || attachments[0]?.name || label).split(/\s+/).slice(0, 7).join(" ");
+    }
+    pendingAttachments = [];
+    els.promptInput.value = "";
+    autoSizeTextarea();
+    renderAttachmentTray();
+  }
+  const messages = thread.messages.filter((message) => !message.running);
+  if (!messages.length) {
+    els.runState.textContent = "Attach or ask first";
+    els.runState.className = "run-state warning";
+    return;
+  }
+
+  const pending = {
+    id: crypto.randomUUID(),
+    role: "assistant",
+    text: `I’m on it, Tinman. I’ll run the ${label} path and bring back the report files, result summary, and caveats.`,
+    running: true,
+    thoughts: [`Starting ${label} analysis from the current thread context.`],
+  };
+  thread.messages.push(pending);
+  thread.updatedAt = new Date().toISOString();
+  render();
+  setRunning(true);
+  activeController = new AbortController();
+  appendLog("event", `${label} analysis started`);
+
+  try {
+    const response = await fetch("/api/tools/deeper-analysis", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind,
+        cwd: thread.cwd,
+        messages,
+      }),
+      signal: activeController.signal,
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || `analysis ${response.status}`);
+    pending.text = payload.text || payload.error || "The deeper analysis finished without a final message.";
+    pending.route = payload.route || null;
+    pending.adminTopic = payload.adminTopic || null;
+    pending.taskContract = payload.taskContract || null;
+    pending.roleStyle = payload.roleStyle || null;
+    pending.deliverables = Array.isArray(payload.deliverables) ? payload.deliverables : [];
+    pending.assumptions = Array.isArray(payload.assumptions) ? payload.assumptions : [];
+    pending.scorecard = payload.scorecard || null;
+    pending.thoughts = Array.isArray(payload.thoughts) && payload.thoughts.length
+      ? payload.thoughts
+      : pending.thoughts;
+    pending.running = false;
+    els.runState.textContent = payload.ok ? "Analysis complete" : "Analysis needs review";
+    els.runState.className = payload.ok ? "run-state ok" : "run-state warning";
+    appendLog("event", `${payload.label || label} analysis ${payload.ok ? "complete" : "needs review"}`);
+  } catch (error) {
+    pending.running = false;
+    pending.text = `The ${label} analysis did not finish.\n\nThis is why: ${error.message}\n\nYou should also consider: attach the geometry file and try the dedicated FEA or Aero button.`;
+    els.runState.textContent = "Analysis failed";
+    els.runState.className = "run-state error";
+    appendLog("error", `${label} analysis failed: ${error.message}`);
+  } finally {
+    activeController = null;
+    thread.updatedAt = new Date().toISOString();
+    await refreshAdmin();
+    setRunning(false);
+    render();
+  }
+}
+
 async function runTestBench(tests) {
   if (activeController || testBench.running) return;
   const selectedTests = tests && tests.length ? tests : quickGoldenTests();
@@ -3459,6 +3666,9 @@ els.promptInput.addEventListener("keydown", (event) => {
 });
 
 els.sendButton.addEventListener("click", sendPrompt);
+if (els.runDeeperButton) els.runDeeperButton.addEventListener("click", () => runDeeperAnalysis("auto"));
+if (els.runAeroButton) els.runAeroButton.addEventListener("click", () => runDeeperAnalysis("aero"));
+if (els.runStructuralButton) els.runStructuralButton.addEventListener("click", () => runDeeperAnalysis("structural"));
 
 els.runQuickTestsButton.addEventListener("click", () => runTestBench(quickGoldenTests()));
 els.runAllTestsButton.addEventListener("click", () => runTestBench(allGoldenTests()));
