@@ -18235,6 +18235,15 @@ def package_health_report():
 
     try:
         add(
+            "quality:auto-deep-review-escalation",
+            "pass" if auto_deep_review_synthetic_check() else "fail",
+            "escalates hard/corrected Manager tasks to Deep Review without slowing normal direct questions",
+        )
+    except Exception as exc:
+        add("quality:auto-deep-review-escalation", "fail", str(exc))
+
+    try:
+        add(
             "tools:recovery-engine",
             "pass" if tool_recovery_synthetic_check() else "fail",
             "detects missing commands, git remote gaps, and disabled web path",
@@ -19770,6 +19779,167 @@ def fallback_model_for_profile(profile):
     return LOCAL_RESEARCH_MODEL
 
 
+def deep_review_trigger_terms(messages):
+    query = latest_user_text(messages).lower()
+    terms = []
+    if text_has_any(
+        query,
+        (
+            "go deep",
+            "deep review",
+            "full review",
+            "deep dive",
+            "think deeply",
+            "analyze deeply",
+            "hard question",
+            "challenging",
+            "complex",
+            "don't cut corners",
+            "do not cut corners",
+            "double check",
+            "second opinion",
+            "use the big model",
+            "world class",
+        ),
+    ):
+        terms.append("Tinman explicitly asked for deeper review")
+    if text_has_any(
+        query,
+        (
+            "wrong",
+            "not acceptable",
+            "failed",
+            "failure",
+            "fix this",
+            "still not",
+            "didn't answer",
+            "did not answer",
+            "no response",
+            "try again",
+            "missed the point",
+            "massive disappointment",
+            "was a test",
+        ),
+    ):
+        terms.append("Tinman is correcting a weak or failed answer")
+    return terms
+
+
+def ambiguous_or_complex_task_signal(messages, route, contract):
+    query = latest_user_text(messages)
+    lower = query.lower()
+    reasons = []
+    attachments = message_attachments(messages)
+    numeric_constraints = re.findall(
+        r"\b\d+(?:\.\d+)?\s*(?:mm|cm|m|in|inch|v|vdc|vac|a|amp|amps|cfm|rpm|kg|g|w|kw|psi|pa|c|f|%)?\b",
+        lower,
+    )
+    if attachments and text_has_any(lower, ("design", "diagnose", "analyze", "review", "compare", "tune", "inspect")):
+        reasons.append("attached files/images need interpretation")
+    if len(numeric_constraints) >= 5 and text_has_any(lower, ("design", "diagnose", "calculate", "size", "compare", "optimize")):
+        reasons.append("many numeric constraints are in play")
+    if len(query.split()) >= 90 and text_has_any(lower, ("design", "diagnose", "compare", "figure out", "optimize", "research")):
+        reasons.append("long multi-constraint request")
+    if text_has_any(lower, ("not sure", "unclear", "ambiguous", "conflicting", "multiple", "tradeoff", "trade-off")):
+        reasons.append("ambiguous or tradeoff-heavy wording")
+    if route.get("confidence") == "low" and contract.get("hardGate"):
+        reasons.append("low routing confidence on a hard task")
+    return reasons
+
+
+def manager_auto_deep_review_decision(messages, route, requested_depth, profile):
+    requested = safe_choice(requested_depth, MANAGER_DEPTH_LEVELS, "balanced")
+    decision = {
+        "enabled": profile in MANAGER_PROFILES,
+        "requestedDepth": requested,
+        "effectiveDepth": requested,
+        "escalated": False,
+        "model": "",
+        "reasons": [],
+    }
+    if profile not in MANAGER_PROFILES:
+        return decision
+
+    contract = task_contract(messages, route or {})
+    reasons = []
+    trigger_reasons = deep_review_trigger_terms(messages)
+    reasons.extend(trigger_reasons)
+    if contract.get("hardGate"):
+        reasons.append(f"hard task contract: {contract.get('kind', 'hard task')}")
+    reasons.extend(ambiguous_or_complex_task_signal(messages, route or {}, contract))
+
+    unique_reasons = list(dict.fromkeys(reasons))[:5]
+    force = bool(trigger_reasons)
+    should_escalate = requested == "balanced" and bool(unique_reasons)
+    if requested == "fast":
+        should_escalate = force
+    if requested == "full":
+        decision.update(
+            {
+                "effectiveDepth": "full",
+                "model": LOCAL_DEEP_REVIEW_MODEL,
+                "reasons": unique_reasons or ["Manager Full was selected"],
+            }
+        )
+        return decision
+    if should_escalate:
+        decision.update(
+            {
+                "effectiveDepth": "full",
+                "escalated": True,
+                "model": LOCAL_DEEP_REVIEW_MODEL,
+                "reasons": unique_reasons,
+            }
+        )
+    else:
+        decision["reasons"] = unique_reasons
+    return decision
+
+
+def auto_deep_review_note(decision):
+    if not (decision or {}).get("escalated"):
+        return ""
+    reasons = "; ".join((decision.get("reasons") or [])[:3]) or "hard or ambiguous work"
+    return f"Auto Deep Review escalated this run: {reasons}. Using local `{LOCAL_DEEP_REVIEW_MODEL}` for the review pass."
+
+
+def auto_deep_review_synthetic_check():
+    normal_messages = [{"role": "user", "text": "What is the inner diameter of a 3D printer CPAP hose?"}]
+    normal_route = route_manager(normal_messages, requested_profile="manager", web_search="disabled")
+    normal = manager_auto_deep_review_decision(normal_messages, normal_route, "balanced", "manager")
+
+    cad_messages = [
+        {
+            "role": "user",
+            "text": (
+                "Design a CPAP cooling duct in CAD for Fusion 360 with an 18 mm inlet, "
+                "1.5 mm clearance, 1 mm wall thickness, 5 mm max growth, and 0 mm Y growth."
+            ),
+        }
+    ]
+    cad_route = route_manager(cad_messages, requested_profile="manager", web_search="disabled")
+    cad = manager_auto_deep_review_decision(cad_messages, cad_route, "balanced", "manager")
+
+    correction_messages = [
+        {"role": "assistant", "text": "I staged a CAD package."},
+        {"role": "user", "text": "That was wrong and not acceptable. Fix this and go deep."},
+    ]
+    correction_route = route_manager(correction_messages, requested_profile="manager", web_search="disabled")
+    correction = manager_auto_deep_review_decision(correction_messages, correction_route, "fast", "manager")
+
+    non_manager = manager_auto_deep_review_decision(cad_messages, cad_route, "balanced", "local-oss")
+    note = auto_deep_review_note(cad)
+    return (
+        not normal.get("escalated")
+        and cad.get("escalated")
+        and cad.get("effectiveDepth") == "full"
+        and correction.get("escalated")
+        and correction.get("effectiveDepth") == "full"
+        and not non_manager.get("enabled")
+        and "qwen3.6" in note
+    )
+
+
 def local_research_prompt(query, route, evidence_pack, friendliness_level=None, humor_level=None):
     playbook = PROJECT_PLAYBOOKS.get(route.get("projectId"), PROJECT_PLAYBOOKS["general"])
     admin_context = build_admin_context([{"role": "user", "text": query}], route=route)
@@ -21175,6 +21345,9 @@ def run_manager_review_and_polish(
 
     review_messages = list(messages) + [{"role": "assistant", "text": primary_answer}]
     if emit:
+        escalation_note = auto_deep_review_note((route or {}).get("autoDeepReview") or {})
+        if escalation_note:
+            emit(escalation_note)
         label = "Balanced" if manager_depth == "balanced" else "Full"
         emit(f"Manager speed is {label}; running a local review pass.")
     try:
@@ -22438,6 +22611,21 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 route["engine"] = "local"
             route["effectiveProfile"] = profile
             route["reasoningLevel"] = reasoning_level
+        if manager_mode:
+            deep_review_decision = manager_auto_deep_review_decision(
+                messages,
+                route,
+                manager_depth,
+                profile,
+            )
+            route["autoDeepReview"] = deep_review_decision
+            if deep_review_decision.get("escalated"):
+                manager_depth = safe_choice(
+                    deep_review_decision.get("effectiveDepth"),
+                    MANAGER_DEPTH_LEVELS,
+                    manager_depth,
+                )
+                reasoning_level = "high"
         fast = is_fast_mode(effective_profile, reasoning_level)
         admin_topic = route_admin_topic(messages, route)
         if is_read_only_printer_status_query(messages):
