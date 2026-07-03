@@ -1,7 +1,7 @@
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
 
-@interface AppDelegate : NSObject <NSApplicationDelegate, WKNavigationDelegate>
+@interface AppDelegate : NSObject <NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate>
 @property(nonatomic, strong) NSWindow *window;
 @property(nonatomic, strong) WKWebView *webView;
 @property(nonatomic, strong) NSTask *serverTask;
@@ -41,6 +41,7 @@
 
     self.webView = [[WKWebView alloc] initWithFrame:NSZeroRect configuration:configuration];
     self.webView.navigationDelegate = self;
+    self.webView.UIDelegate = self;
     self.webView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
 
     self.window = [[NSWindow alloc]
@@ -158,6 +159,26 @@
     "<p>The native app could not reach <code>127.0.0.1:8765</code>. Try restarting the app or running <code>~/Applications/Codex_CLI_UI/start.command</code>.</p>"
     "</main></body></html>";
     [self.webView loadHTMLString:html baseURL:nil];
+}
+
+- (void)webView:(WKWebView *)webView
+runOpenPanelWithParameters:(WKOpenPanelParameters *)parameters
+initiatedByFrame:(WKFrameInfo *)frame
+completionHandler:(void (^)(NSArray<NSURL *> *URLs))completionHandler {
+    NSOpenPanel *panel = [NSOpenPanel openPanel];
+    panel.canChooseFiles = YES;
+    panel.canChooseDirectories = parameters.allowsDirectories;
+    panel.allowsMultipleSelection = parameters.allowsMultipleSelection;
+    panel.canCreateDirectories = NO;
+    panel.prompt = @"Attach";
+
+    [panel beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse result) {
+        if (result == NSModalResponseOK) {
+            completionHandler(panel.URLs);
+        } else {
+            completionHandler(nil);
+        }
+    }];
 }
 
 - (void)webView:(WKWebView *)webView
