@@ -17942,6 +17942,31 @@ def package_health_report():
     except Exception as exc:
         add("ui:clickable-local-paths", "fail", str(exc))
 
+    try:
+        index_text = (APP_DIR / "index.html").read_text(encoding="utf-8")
+        styles_text = (APP_DIR / "styles.css").read_text(encoding="utf-8")
+        attach_button_match = re.search(r'<button[^>]+id="attachButton"[^>]*>', index_text)
+        attach_button_html = attach_button_match.group(0) if attach_button_match else ""
+        attach_css_match = re.search(r"\.attach-button\s*\{(?P<body>.*?)\}", styles_text, re.DOTALL)
+        attach_css = attach_css_match.group("body") if attach_css_match else ""
+        file_input_css_match = re.search(r"\.file-input-overlay\s*\{(?P<body>.*?)\}", styles_text, re.DOTALL)
+        file_input_css = file_input_css_match.group("body") if file_input_css_match else ""
+        ok = (
+            'id="attachButton"' in attach_button_html
+            and 'aria-hidden="true"' not in attach_button_html
+            and "tabindex=\"-1\"" not in attach_button_html
+            and "pointer-events: none" not in attach_css
+            and "left: -9999px" in file_input_css
+            and "pointer-events: none" in file_input_css
+        )
+        add(
+            "ui:attach-plus-native-button",
+            "pass" if ok else "fail",
+            "visible plus button owns the click; hidden input is fallback only",
+        )
+    except Exception as exc:
+        add("ui:attach-plus-native-button", "fail", str(exc))
+
     py_compile = subprocess.run(
         ["/usr/bin/python3", "-m", "py_compile", str(APP_DIR / "server.py")],
         stdout=subprocess.PIPE,
