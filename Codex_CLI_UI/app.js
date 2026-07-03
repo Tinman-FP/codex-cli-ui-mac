@@ -2779,16 +2779,14 @@ async function fileToBase64(file) {
 }
 
 async function uploadAttachment(file) {
-  const dataBase64 = await fileToBase64(file);
+  const form = new FormData();
+  form.append("file", file, file.name);
+  form.append("name", file.name);
+  form.append("size", String(file.size || 0));
+  form.append("type", file.type || "application/octet-stream");
   const response = await fetch("/api/files/upload", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      name: file.name,
-      size: file.size,
-      type: file.type || "application/octet-stream",
-      dataBase64,
-    }),
+    body: form,
   });
   if (!response.ok) {
     throw new Error(`Upload failed with HTTP ${response.status}`);

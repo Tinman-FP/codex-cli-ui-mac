@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import base64
+import cgi
 import concurrent.futures
 import importlib.util
 import json
@@ -3623,18 +3624,12 @@ def sanitize_filename(value, fallback="attachment.bin"):
     return name[:180] or fallback
 
 
-def save_uploaded_file(payload):
-    name = sanitize_filename(payload.get("name"), fallback="attachment.bin")
-    raw_size = int(payload.get("size") or 0)
-    data_text = str(payload.get("dataBase64") or "")
-    if "," in data_text and data_text.lower().startswith("data:"):
-        data_text = data_text.split(",", 1)[1]
+def save_uploaded_bytes(name, data, content_type="application/octet-stream", raw_size=0):
+    name = sanitize_filename(name, fallback="attachment.bin")
+    data = data or b""
+    raw_size = int(raw_size or 0)
     if raw_size > MAX_UPLOAD_BYTES:
         raise ValueError(f"Upload is too large: {human_bytes(raw_size)} > {human_bytes(MAX_UPLOAD_BYTES)}")
-    try:
-        data = base64.b64decode(data_text, validate=True)
-    except Exception as exc:
-        raise ValueError(f"Attachment data is not valid base64: {exc}") from exc
     if len(data) > MAX_UPLOAD_BYTES:
         raise ValueError(f"Upload is too large: {human_bytes(len(data))} > {human_bytes(MAX_UPLOAD_BYTES)}")
     if raw_size and abs(raw_size - len(data)) > 1:
@@ -3653,8 +3648,54 @@ def save_uploaded_file(payload):
         "name": name,
         "path": str(target),
         "size": len(data),
-        "contentType": str(payload.get("type") or "application/octet-stream"),
+        "contentType": str(content_type or "application/octet-stream"),
     }
+
+
+def save_uploaded_file(payload):
+    name = sanitize_filename(payload.get("name"), fallback="attachment.bin")
+    raw_size = int(payload.get("size") or 0)
+    data_text = str(payload.get("dataBase64") or "")
+    if "," in data_text and data_text.lower().startswith("data:"):
+        data_text = data_text.split(",", 1)[1]
+    if raw_size > MAX_UPLOAD_BYTES:
+        raise ValueError(f"Upload is too large: {human_bytes(raw_size)} > {human_bytes(MAX_UPLOAD_BYTES)}")
+    try:
+        data = base64.b64decode(data_text, validate=True)
+    except Exception as exc:
+        raise ValueError(f"Attachment data is not valid base64: {exc}") from exc
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise ValueError(f"Upload is too large: {human_bytes(len(data))} > {human_bytes(MAX_UPLOAD_BYTES)}")
+    if raw_size and abs(raw_size - len(data)) > 1:
+        raise ValueError("Attachment size did not match the uploaded data.")
+    return save_uploaded_bytes(name, data, str(payload.get("type") or "application/octet-stream"), raw_size=raw_size)
+
+
+def save_uploaded_multipart(handler):
+    length = int(handler.headers.get("Content-Length", "0") or "0")
+    if length > MAX_UPLOAD_BYTES + 8192:
+        raise ValueError(f"Upload is too large: {human_bytes(length)} > {human_bytes(MAX_UPLOAD_BYTES)}")
+    environ = {
+        "REQUEST_METHOD": "POST",
+        "CONTENT_TYPE": handler.headers.get("Content-Type", ""),
+        "CONTENT_LENGTH": str(length),
+    }
+    form = cgi.FieldStorage(
+        fp=handler.rfile,
+        headers=handler.headers,
+        environ=environ,
+        keep_blank_values=True,
+    )
+    if "file" not in form:
+        raise ValueError("Multipart upload did not include a file field.")
+    file_item = form["file"]
+    if isinstance(file_item, list):
+        file_item = file_item[0]
+    filename = form.getfirst("name") or getattr(file_item, "filename", "") or "attachment.bin"
+    content_type = form.getfirst("type") or getattr(file_item, "type", "") or "application/octet-stream"
+    raw_size = int(form.getfirst("size") or 0)
+    data = file_item.file.read() if getattr(file_item, "file", None) else b""
+    return save_uploaded_bytes(filename, data, content_type, raw_size=raw_size)
 
 
 def default_admin_state():
@@ -21726,10 +21767,14 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path in {"/api/files/upload", "/api/upload", "/api/attachments", "/api/files/attach", "/files/upload"}:
-            length = int(self.headers.get("Content-Length", "0") or "0")
             try:
-                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
-                result = save_uploaded_file(payload)
+                content_type = str(self.headers.get("Content-Type", "") or "").lower()
+                if content_type.startswith("multipart/form-data"):
+                    result = save_uploaded_multipart(self)
+                else:
+                    length = int(self.headers.get("Content-Length", "0") or "0")
+                    payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+                    result = save_uploaded_file(payload)
             except json.JSONDecodeError:
                 self.send_error(400, "Invalid JSON")
                 return
@@ -23487,8 +23532,19 @@ class CodexUIHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class ReusableThreadingHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
 def main():
-    server = ThreadingHTTPServer((DEFAULT_HOST, DEFAULT_PORT), CodexUIHandler)
+    try:
+        server = ReusableThreadingHTTPServer((DEFAULT_HOST, DEFAULT_PORT), CodexUIHandler)
+    except OSError as exc:
+        if getattr(exc, "errno", None) == 48:
+            print(f"Codex CLI UI already running at http://{DEFAULT_HOST}:{DEFAULT_PORT}")
+            return
+        raise
     print(f"Codex CLI UI: http://{DEFAULT_HOST}:{DEFAULT_PORT}")
     print(f"Codex binary: {CODEX_BIN}")
     print(f"Profile: {DEFAULT_PROFILE}")
