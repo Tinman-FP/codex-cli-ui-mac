@@ -243,10 +243,12 @@
 
         <section class="composer-wrap">
           <div class="composer">
-            <button class="attach-button" id="attachButton" type="button" title="Attach files" aria-label="Attach files">
-              <span>+</span>
-            </button>
-            <input id="fileInput" type="file" multiple hidden />
+            <div class="attach-picker">
+              <button class="attach-button" id="attachButton" type="button" title="Attach files" tabindex="-1" aria-hidden="true">
+                <span>+</span>
+              </button>
+              <input id="fileInput" class="file-input-overlay" type="file" multiple aria-label="Attach files" />
+            </div>
             <textarea id="promptInput" rows="1" placeholder="Ask Codex"></textarea>
             <button class="send-button" id="sendButton" title="Send" aria-label="Send">
               <span>↑</span>

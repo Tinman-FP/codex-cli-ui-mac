@@ -2325,6 +2325,12 @@ input:focus {
   font-size: 21px;
 }
 
+.attach-picker {
+  position: relative;
+  width: 36px;
+  height: 46px;
+}
+
 .attach-button {
   width: 36px;
   height: 46px;
@@ -2337,19 +2343,45 @@ input:focus {
   font-size: 20px;
   font-weight: 800;
   box-shadow: var(--shadow);
+  pointer-events: none;
 }
 
-.attach-button:hover {
+.file-input-overlay {
+  position: absolute;
+  inset: 0;
+  width: 36px;
+  height: 46px;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 2;
+  font-size: 0;
+}
+
+.attach-picker:hover .attach-button {
   border-color: var(--accent);
   color: var(--text);
 }
 
+.file-input-overlay:focus-visible {
+  outline: none;
+}
+
+.attach-picker:focus-within .attach-button {
+  border-color: var(--accent);
+  outline: 3px solid rgba(37, 99, 235, 0.16);
+}
+
 .send-button:disabled,
 .attach-button:disabled,
+.file-input-overlay:disabled,
 .icon-text-button:disabled,
 .icon-button:disabled,
 .switch-button:disabled {
   cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.attach-picker:has(.file-input-overlay:disabled) .attach-button {
   opacity: 0.55;
 }
 
