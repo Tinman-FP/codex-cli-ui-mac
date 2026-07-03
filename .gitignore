@@ -1,7 +1,34 @@
 .DS_Store
 *.log
 __pycache__/
+*.py[cod]
+
+# Packaged app runtime state; keep public releases source-only.
 Codex_CLI_UI/data/*
 !Codex_CLI_UI/data/.gitkeep
 Codex_CLI_UI/logs/*
 !Codex_CLI_UI/logs/.gitkeep
+
+# Local runtime state, private machine inventory, history, logs, and caches
+# when running directly from the repository root.
+data/
+logs/
+
+# Local project geometry inputs; keep public releases source-only by default.
+CPAP Inputs/
+Wind Turbine/
+Codex_CLI_UI/CPAP Inputs/
+Codex_CLI_UI/Wind Turbine/
+
+# Local virtual environments and generated app bundles.
+.venv/
+build/
+Codex_CLI_UI/.venv/
+Codex_CLI_UI/build/
+
+# Temporary/package artifacts.
+*.tmp
+*.bak
+*.zip
+*.dmg
+*.pkg

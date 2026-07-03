@@ -103,9 +103,10 @@ const els = {
 };
 
 const state = loadState();
+const defaultCwd = state.cwd || "/Users/Shared/Documents/Codex";
 let config = {
   profile: "local-fast",
-  cwd: "~/Documents/Codex",
+  cwd: defaultCwd,
   accessLevel: "danger-full-access",
   reasoningLevel: "low",
   managerDepth: "balanced",
@@ -123,7 +124,11 @@ let config = {
   admin: null,
 };
 let activeController = null;
+let activeRun = null;
 let pendingAttachments = [];
+const MAX_BROWSER_UPLOAD_BYTES = 250 * 1024 * 1024;
+const nativeFilePickers = new Map();
+let composerIntent = { kind: "", messageId: "" };
 const testBench = {
   running: false,
   activeId: "",
@@ -230,13 +235,17 @@ function currentThread() {
 }
 
 function setRunning(isRunning) {
-  els.sendButton.disabled = isRunning;
+  const canSteer = Boolean(isRunning && activeRun);
+  els.sendButton.disabled = isRunning && !canSteer;
   els.attachButton.disabled = isRunning;
   els.fileInput.disabled = isRunning;
   if (els.runDeeperButton) els.runDeeperButton.disabled = isRunning;
   if (els.runAeroButton) els.runAeroButton.disabled = isRunning;
   if (els.runStructuralButton) els.runStructuralButton.disabled = isRunning;
-  els.promptInput.disabled = isRunning;
+  els.promptInput.disabled = isRunning && !canSteer;
+  els.promptInput.placeholder = canSteer ? "Steer Codex while he works" : "Ask Codex";
+  els.sendButton.title = canSteer ? "Send steering note" : "Send";
+  els.sendButton.setAttribute("aria-label", canSteer ? "Send steering note" : "Send");
   els.newThreadButton.disabled = isRunning;
   els.adminNavButton.disabled = isRunning;
   els.modeSelect.disabled = isRunning;
@@ -256,7 +265,7 @@ function setRunning(isRunning) {
   if (els.selfHealButton) els.selfHealButton.disabled = isRunning;
   if (els.refreshPrintingPackButton) els.refreshPrintingPackButton.disabled = isRunning;
   if (isRunning) {
-    els.runState.textContent = "Running";
+    els.runState.textContent = canSteer ? "Running · steer ready" : "Running";
     els.runState.className = "run-state warning";
   }
 }
@@ -542,6 +551,16 @@ const ENGINEERING_PACKS = {
     action: "FEA",
     toolIds: ["calculix", "gmsh", "freecad", "paraview", "openscad"],
   },
+  reasoning: {
+    label: "Reasoning Tools",
+    action: "",
+    toolIds: ["ast-grep", "tree-sitter-cli", "shellcheck", "hyperfine"],
+  },
+  codeQuality: {
+    label: "Code Quality",
+    action: "",
+    toolIds: ["ruff", "pytest", "mypy"],
+  },
 };
 
 function capabilityTools() {
@@ -582,11 +601,13 @@ function setPackChip(element, textElement, status) {
 function renderEngineeringStatus() {
   const aero = engineeringPackState(ENGINEERING_PACKS.aero);
   const structural = engineeringPackState(ENGINEERING_PACKS.structural);
+  const reasoning = engineeringPackState(ENGINEERING_PACKS.reasoning);
+  const codeQuality = engineeringPackState(ENGINEERING_PACKS.codeQuality);
   const combined = {
-    state: aero.state === "ready" && structural.state === "ready" ? "ready" : aero.installed + structural.installed ? "partial" : "missing",
-    installed: aero.installed + structural.installed,
-    total: aero.total + structural.total,
-    missing: [...aero.missing, ...structural.missing],
+    state: aero.state === "ready" && structural.state === "ready" && reasoning.state === "ready" && codeQuality.state === "ready" ? "ready" : aero.installed + structural.installed + reasoning.installed + codeQuality.installed ? "partial" : "missing",
+    installed: aero.installed + structural.installed + reasoning.installed + codeQuality.installed,
+    total: aero.total + structural.total + reasoning.total + codeQuality.total,
+    missing: [...aero.missing, ...structural.missing, ...reasoning.missing, ...codeQuality.missing],
   };
   setPackChip(els.aeroPackStatus, els.aeroPackText, aero);
   setPackChip(els.structuralPackStatus, els.structuralPackText, structural);
@@ -623,9 +644,13 @@ function renderEngineeringAdmin() {
     const action = document.createElement("button");
     action.className = "icon-text-button";
     action.type = "button";
-    action.disabled = Boolean(activeController);
-    action.innerHTML = `<span>${kind === "aero" ? "⇥" : "⌁"}</span><span>Run ${pack.action}</span>`;
-    action.addEventListener("click", () => runDeeperAnalysis(kind));
+    action.disabled = !pack.action || Boolean(activeController);
+    action.innerHTML = pack.action
+      ? `<span>${kind === "aero" ? "⇥" : "⌁"}</span><span>Run ${pack.action}</span>`
+      : `<span>✓</span><span>Inventory Only</span>`;
+    if (pack.action) {
+      action.addEventListener("click", () => runDeeperAnalysis(kind));
+    }
 
     card.append(header, toolList, action);
     els.engineeringAdminGrid.appendChild(card);
@@ -1274,7 +1299,7 @@ function renderMessages() {
       touchedIds = true;
     }
     const node = document.createElement("article");
-    node.className = `message ${message.role}${message.running ? " running" : ""}`;
+    node.className = `message ${message.role}${message.running ? " running" : ""}${message.steering ? " steering" : ""}`;
     const role = document.createElement("div");
     role.className = "message-role";
     role.textContent = message.role === "user" ? "You" : "Codex";
@@ -1305,6 +1330,9 @@ function renderMessages() {
     answer.className = "answer-text";
     renderMessageText(answer, message);
     body.appendChild(answer);
+    if (message.role === "user" && !message.running && String(message.text || "").trim()) {
+      body.appendChild(buildUserMessageActions(message));
+    }
     const responsePackage = buildResponsePackagePanel(message);
     if (responsePackage) body.appendChild(responsePackage);
     const thoughts = buildThoughtsCard(message);
@@ -1353,6 +1381,7 @@ function buildResponsePackagePanel(message) {
   const deliverables = responsePackageItems(message, "deliverables");
   const assumptions = responsePackageItems(message, "assumptions");
   const contract = message.taskContract || null;
+  const contractGate = message.contractGate || message.scorecard?.contractGate || null;
   const roleStyle = message.roleStyle || null;
   const scorecard = message.scorecard || null;
   if (!deliverables.length && !assumptions.length && !contract && !roleStyle && !scorecard) return null;
@@ -1403,10 +1432,13 @@ function buildResponsePackagePanel(message) {
     const summary = document.createElement("summary");
     const summaryTitle = document.createElement("span");
     summaryTitle.className = "answer-check-title";
-    summaryTitle.textContent = "Answer check";
+    summaryTitle.textContent = "Task contract";
     const score = document.createElement("span");
     score.className = `score-pill ${scorecard?.status || "pass"}`;
-    score.textContent = Number.isFinite(scorecard?.score) ? `${scorecard.score}%` : "Ready";
+    const gateText = contractGate?.status ? `${contractGate.status}` : "";
+    score.textContent = Number.isFinite(scorecard?.score)
+      ? `${scorecard.score}%${gateText ? ` · ${gateText}` : ""}`
+      : gateText || "Ready";
     summary.append(summaryTitle, score);
     details.appendChild(summary);
 
@@ -1415,6 +1447,16 @@ function buildResponsePackagePanel(message) {
       grid.className = "answer-check-grid";
       if (contract?.kind) grid.appendChild(buildAnswerCheckFact("Task", contract.kind));
       if (contract?.doneMeans) grid.appendChild(buildAnswerCheckFact("Done means", contract.doneMeans));
+      if (Array.isArray(contract?.mustDo) && contract.mustDo.length) {
+        grid.appendChild(buildAnswerCheckFact("Must do", contract.mustDo.join(", ")));
+      }
+      if (Array.isArray(contract?.requiredProof) && contract.requiredProof.length) {
+        grid.appendChild(buildAnswerCheckFact("Required proof", contract.requiredProof.join(", ")));
+      }
+      if (Array.isArray(contract?.rejectIf) && contract.rejectIf.length) {
+        grid.appendChild(buildAnswerCheckFact("Reject if", contract.rejectIf.slice(0, 4).join(", ")));
+      }
+      if (contractGate?.status) grid.appendChild(buildAnswerCheckFact("Gate", contractGate.status));
       if (contract?.role || roleStyle?.title) grid.appendChild(buildAnswerCheckFact("Role", contract?.role || roleStyle.title));
       if (roleStyle?.voice) grid.appendChild(buildAnswerCheckFact("Voice", roleStyle.voice));
       if (Array.isArray(roleStyle?.checklist) && roleStyle.checklist.length) {
@@ -1466,6 +1508,19 @@ function buildResponsePackagePanel(message) {
   return wrap.childElementCount ? wrap : null;
 }
 
+function buildUserMessageActions(message) {
+  const actions = document.createElement("div");
+  actions.className = "message-actions";
+  const edit = document.createElement("button");
+  edit.className = "message-action-button";
+  edit.type = "button";
+  edit.dataset.editMessageId = message.id;
+  edit.textContent = "Edit question";
+  edit.disabled = Boolean(activeController);
+  actions.appendChild(edit);
+  return actions;
+}
+
 function buildAnswerCheckFact(label, value) {
   const item = document.createElement("div");
   item.className = "answer-check-fact";
@@ -1487,7 +1542,7 @@ function buildFeedbackActions(message) {
   } else if (message.feedback === "good") {
     status.textContent = "Marked good";
   } else if (message.feedback === "fix") {
-    status.textContent = message.feedbackGoldenTest ? "Lesson saved + test" : "Lesson saved";
+    status.textContent = message.feedbackSelfHealing ? "Lesson saved + self-heal" : message.feedbackGoldenTest ? "Lesson saved + test" : "Lesson saved";
   } else if (message.feedback === "error") {
     status.textContent = "Feedback not saved";
   }
@@ -1508,7 +1563,14 @@ function buildFeedbackActions(message) {
   fix.textContent = "Fix this";
   fix.disabled = message.feedback === "saving";
 
-  actions.append(good, fix);
+  const steer = document.createElement("button");
+  steer.className = "feedback-button";
+  steer.type = "button";
+  steer.dataset.steerMessageId = message.id;
+  steer.textContent = "Steer";
+  steer.disabled = message.feedback === "saving";
+
+  actions.append(good, fix, steer);
   if (status.textContent) actions.appendChild(status);
   return actions;
 }
@@ -2169,7 +2231,7 @@ function switchMonitorStage(stage) {
 
 function trackMonitorThought(text) {
   const lower = String(text || "").toLowerCase();
-  if (lower.includes("review pass") || lower.includes("deepseek-r1")) {
+  if (lower.includes("review pass") || lower.includes("deepseek-r1") || lower.includes("qwen3.6")) {
     if (monitor.activeStage !== "review") switchMonitorStage("review");
   } else if (lower.includes("polishing the final answer") || lower.includes("polish")) {
     if (monitor.activeStage !== "polish") switchMonitorStage("polish");
@@ -2651,14 +2713,16 @@ function renderRunControls() {
   els.managerDepthSelect.title = managerSelected
     ? "Controls how much local review and polish Manager runs"
     : "Only affects Manager mode";
-  const sandboxlessMode = engine === "openai" || engine === "local-research" || engine === "local-review";
+  const sandboxlessMode = engine === "openai" || engine === "local-research" || engine === "research-apply" || engine === "local-review";
   els.accessSelect.disabled = Boolean(activeController) || sandboxlessMode;
   els.accessSelect.title = sandboxlessMode
     ? engine === "openai"
       ? "Cloud Research does not use local filesystem sandbox access"
       : engine === "local-review"
         ? "Review uses direct local Ollama, not the Codex sandbox"
-        : "Local Research uses public web fetches and Ollama, not the Codex sandbox"
+        : engine === "research-apply"
+          ? "Research + Apply uses public web fetches, Ollama, and local receipt files"
+          : "Local Research uses public web fetches and Ollama, not the Codex sandbox"
     : "";
   const webEnabled = normalizeWebSearch(thread.webSearch || config.webSearch) === "live";
   els.webAccessToggle.setAttribute("aria-checked", String(webEnabled));
@@ -2704,6 +2768,7 @@ function routeLabel(route) {
   const engineLabels = {
     cloud: "cloud",
     "local-research": "local research",
+    "research-apply": "research + apply",
     "local-review": "local review",
     "local-rule": "local rule",
     "local-status": "local status",
@@ -2725,28 +2790,93 @@ function appendLog(kind, text) {
   saveState();
 }
 
-async function fileToBase64(file) {
-  const buffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  const chunkSize = 0x8000;
-  let binary = "";
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+function nativeFilePickerAvailable() {
+  return Boolean(window.webkit?.messageHandlers?.codexOpenFiles);
+}
+
+function openNativeFilePicker() {
+  return new Promise((resolve, reject) => {
+    if (!nativeFilePickerAvailable()) {
+      reject(new Error("Native file picker is not available"));
+      return;
+    }
+    const requestId = crypto.randomUUID();
+    const timeoutId = window.setTimeout(() => {
+      nativeFilePickers.delete(requestId);
+      reject(new Error("Native file picker timed out"));
+    }, 120000);
+    nativeFilePickers.set(requestId, {
+      resolve: (files) => {
+        window.clearTimeout(timeoutId);
+        resolve(files);
+      },
+      reject: (error) => {
+        window.clearTimeout(timeoutId);
+        reject(error);
+      },
+    });
+    try {
+      window.webkit.messageHandlers.codexOpenFiles.postMessage({ requestId });
+    } catch (error) {
+      nativeFilePickers.delete(requestId);
+      window.clearTimeout(timeoutId);
+      reject(error);
+    }
+  });
+}
+
+window.codexReceiveNativeFiles = function codexReceiveNativeFiles(payload) {
+  const requestId = payload?.requestId || "";
+  const pending = nativeFilePickers.get(requestId);
+  if (!pending) return;
+  nativeFilePickers.delete(requestId);
+  if (payload?.error) {
+    pending.reject(new Error(payload.error));
+    return;
   }
-  return btoa(binary);
+  pending.resolve(Array.isArray(payload?.files) ? payload.files : []);
+};
+
+function attachmentFromNativeFile(file) {
+  const path = String(file?.path || "");
+  const fallbackName = path.split("/").filter(Boolean).pop() || "attached file";
+  return {
+    id: crypto.randomUUID(),
+    name: String(file?.name || fallbackName),
+    size: Number(file?.size || 0),
+    type: String(file?.type || file?.contentType || "application/octet-stream"),
+    path,
+    source: "native-local-path",
+  };
+}
+
+async function handleNativeFiles(files) {
+  const selected = Array.from(files || []).filter((file) => file?.path);
+  if (!selected.length || activeController) return;
+  els.runState.textContent = "Attaching";
+  els.runState.className = "run-state warning";
+  for (const file of selected) {
+    const attachment = attachmentFromNativeFile(file);
+    pendingAttachments.push(attachment);
+    appendLog(
+      "event",
+      `Attached local file ${attachment.name} (${formatFileSize(attachment.size || 0)})`
+    );
+  }
+  renderAttachmentTray();
+  els.runState.textContent = "Attachment ready";
+  els.runState.className = "run-state ok";
 }
 
 async function uploadAttachment(file) {
-  const dataBase64 = await fileToBase64(file);
+  const form = new FormData();
+  form.append("file", file, file.name);
+  form.append("name", file.name);
+  form.append("size", String(file.size || 0));
+  form.append("type", file.type || "application/octet-stream");
   const response = await fetch("/api/files/upload", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      name: file.name,
-      size: file.size,
-      type: file.type || "application/octet-stream",
-      dataBase64,
-    }),
+    body: form,
   });
   if (!response.ok) {
     throw new Error(`Upload failed with HTTP ${response.status}`);
@@ -2767,6 +2897,16 @@ async function uploadAttachment(file) {
 async function handleFiles(files) {
   const selected = Array.from(files || []).filter((file) => file && file.name);
   if (!selected.length || activeController) return;
+  const tooLarge = selected.find((file) => Number(file.size || 0) > MAX_BROWSER_UPLOAD_BYTES);
+  if (tooLarge) {
+    appendLog(
+      "error",
+      `${tooLarge.name} is ${formatFileSize(tooLarge.size)}. Use the native + button so Codex can reference the local path instead of uploading a copy.`
+    );
+    els.runState.textContent = "Use + button";
+    els.runState.className = "run-state error";
+    return;
+  }
   els.runState.textContent = "Attaching";
   els.runState.className = "run-state warning";
   for (const file of selected) {
@@ -2852,11 +2992,82 @@ function workingIntroForPrompt(text, attachments = []) {
   return "I’m on it, Tinman. I’ll check the right path and bring back the answer in plain English.";
 }
 
-async function sendPrompt() {
+async function sendLiveSteer() {
   const thread = currentThread();
   const text = els.promptInput.value.trim();
-  const attachments = pendingAttachments.slice();
-  if (!thread || (!text && !attachments.length) || activeController) return;
+  if (!thread || !activeRun || !text) return;
+  const pending = activeRun.pending;
+  const steerMessage = {
+    id: crypto.randomUUID(),
+    role: "user",
+    text: `Steer while working: ${text}`,
+    steering: true,
+    createdAt: new Date().toISOString(),
+  };
+  const pendingIndex = findMessageIndexById(thread, pending?.id);
+  if (pendingIndex >= 0) {
+    thread.messages.splice(pendingIndex, 0, steerMessage);
+  } else {
+    thread.messages.push(steerMessage);
+  }
+  pending.steeringNotes = pending.steeringNotes || [];
+  pending.steeringNotes.push(text);
+  if (pending.steeringNotes.length > 8) pending.steeringNotes.splice(0, pending.steeringNotes.length - 8);
+  els.promptInput.value = "";
+  autoSizeTextarea();
+  thread.updatedAt = new Date().toISOString();
+  addThought(pending, `Tinman steering received: ${compactLabel(text, 160)}`);
+  render();
+  saveState();
+
+  try {
+    const response = await fetch("/api/run/steer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        runId: activeRun.id,
+        text,
+        threadId: thread.id,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || `steer ${response.status}`);
+    }
+    els.runState.textContent = "Steer sent";
+    els.runState.className = "run-state warning";
+    appendLog("event", `live steer sent: ${compactLabel(text, 120)}`);
+  } catch (error) {
+    pending.steeringFailed = true;
+    addThought(pending, `Steering note could not reach the worker: ${error.message}`);
+    els.runState.textContent = "Steer failed";
+    els.runState.className = "run-state error";
+    appendLog("error", `live steer failed: ${error.message}`);
+  }
+}
+
+async function sendPrompt() {
+  if (activeController) {
+    await sendLiveSteer();
+    return;
+  }
+  const thread = currentThread();
+  const text = els.promptInput.value.trim();
+  let attachments = pendingAttachments.slice();
+  if (!thread || (!text && !attachments.length)) return;
+  let editingIndex = -1;
+  let editingMessage = null;
+  if (composerIntent.kind === "edit" && composerIntent.messageId) {
+    editingIndex = findMessageIndexById(thread, composerIntent.messageId);
+    editingMessage = editingIndex >= 0 ? thread.messages[editingIndex] : null;
+    if (editingMessage?.role !== "user") {
+      editingIndex = -1;
+      editingMessage = null;
+    }
+    if (editingMessage && !attachments.length && Array.isArray(editingMessage.attachments)) {
+      attachments = editingMessage.attachments.slice();
+    }
+  }
 
   thread.cwd = els.cwdInput.value.trim() || config.cwd;
   thread.profile = thread.profile || config.profile;
@@ -2866,17 +3077,20 @@ async function sendPrompt() {
   thread.friendlinessLevel = normalizeFriendliness(thread.friendlinessLevel || config.friendlinessLevel);
   thread.humorLevel = normalizeHumor(thread.humorLevel || config.humorLevel);
   thread.webSearch = normalizeWebSearch(thread.webSearch || config.webSearch);
+  if (editingIndex >= 0) {
+    thread.messages = thread.messages.slice(0, editingIndex);
+  }
   thread.messages.push({ id: crypto.randomUUID(), role: "user", text, attachments });
   if (isUntitledThread(thread)) {
     thread.title = (text || attachments[0]?.name || "Attached file").split(/\s+/).slice(0, 7).join(" ");
   }
   thread.updatedAt = new Date().toISOString();
   pendingAttachments = [];
+  composerIntent = { kind: "", messageId: "" };
   els.promptInput.value = "";
   autoSizeTextarea();
   renderAttachmentTray();
   render();
-  setRunning(true);
 
   const pending = {
     id: crypto.randomUUID(),
@@ -2886,6 +3100,14 @@ async function sendPrompt() {
     thoughts: [],
   };
   thread.messages.push(pending);
+  const runId = crypto.randomUUID();
+  activeRun = {
+    id: runId,
+    threadId: thread.id,
+    pending,
+    startedAt: new Date().toISOString(),
+  };
+  setRunning(true);
   renderMessages();
 
   activeController = new AbortController();
@@ -2904,6 +3126,7 @@ async function sendPrompt() {
         friendlinessLevel: thread.friendlinessLevel,
         humorLevel: thread.humorLevel,
         webSearch: thread.webSearch,
+        runId,
         messages: thread.messages.filter((message) => !message.running),
       }),
       signal: activeController.signal,
@@ -2926,6 +3149,7 @@ async function sendPrompt() {
     els.runState.className = "run-state warning";
   } finally {
     activeController = null;
+    activeRun = null;
     thread.updatedAt = new Date().toISOString();
     await refreshAdmin();
     setRunning(false);
@@ -3001,6 +3225,7 @@ async function runDeeperAnalysis(kind = "auto") {
     pending.deliverables = Array.isArray(payload.deliverables) ? payload.deliverables : [];
     pending.assumptions = Array.isArray(payload.assumptions) ? payload.assumptions : [];
     pending.scorecard = payload.scorecard || null;
+    pending.contractGate = payload.contractGate || null;
     pending.thoughts = Array.isArray(payload.thoughts) && payload.thoughts.length
       ? payload.thoughts
       : pending.thoughts;
@@ -3172,6 +3397,9 @@ async function runGoldenTest(test, signal) {
     warnings: [],
     logs: [],
     analyticalCore: null,
+    taskContract: null,
+    contractGate: null,
+    scorecard: null,
   };
   const response = await fetch("/api/run", {
     method: "POST",
@@ -3202,6 +3430,9 @@ async function runGoldenTest(test, signal) {
     if (event.type === "assistant") {
       run.answer = event.text || "";
       run.analyticalCore = event.analyticalCore || null;
+      run.taskContract = event.taskContract || null;
+      run.contractGate = event.contractGate || null;
+      run.scorecard = event.scorecard || null;
     }
     if (event.type === "thought") run.thoughts.push(event.text || "");
     if (event.type === "warning" || event.type === "error") run.warnings.push(event.text || event.type);
@@ -3236,6 +3467,9 @@ function evaluateGoldenTest(test, run) {
   const answer = String(run.answer || "").trim();
   const lower = answer.toLowerCase();
   const route = run.route || {};
+  const taskContract = run.taskContract || {};
+  const contractGate = run.contractGate || {};
+  const scorecard = run.scorecard || {};
   const checks = [];
 
   checks.push({
@@ -3324,6 +3558,41 @@ function evaluateGoldenTest(test, run) {
     });
   }
 
+  if (test.expectedContractKind) {
+    checks.push({
+      label: "contract-kind",
+      passed: taskContract.kind === test.expectedContractKind,
+      detail: `Expected ${test.expectedContractKind}; got ${taskContract.kind || "none"}.`,
+    });
+  }
+
+  if (test.expectedContractGate) {
+    checks.push({
+      label: "contract-gate",
+      passed: contractGate.status === test.expectedContractGate,
+      detail: `Expected ${test.expectedContractGate}; got ${contractGate.status || "none"}.`,
+    });
+  }
+
+  if (test.requiredContractProof?.length) {
+    const proofText = (taskContract.requiredProof || []).join(" ").toLowerCase();
+    const missing = test.requiredContractProof.filter((term) => !proofText.includes(term.toLowerCase()));
+    checks.push({
+      label: "contract-proof",
+      passed: missing.length === 0,
+      detail: missing.length ? `Missing: ${missing.join(", ")}` : "Contract proof terms found.",
+    });
+  }
+
+  if (test.minScorecard) {
+    const score = Number(scorecard.score || 0);
+    checks.push({
+      label: "scorecard",
+      passed: score >= Number(test.minScorecard),
+      detail: `Expected response scorecard >= ${test.minScorecard}; got ${score || "none"}.`,
+    });
+  }
+
   const passed = checks.every((check) => check.passed);
   return {
     status: passed ? "pass" : "fail",
@@ -3333,6 +3602,9 @@ function evaluateGoldenTest(test, run) {
     route,
     returnCode: run.returnCode,
     analyticalCore: run.analyticalCore,
+    taskContract: run.taskContract,
+    contractGate: run.contractGate,
+    scorecard: run.scorecard,
     thoughts: run.thoughts,
     warnings: run.warnings,
   };
@@ -3355,6 +3627,7 @@ function handleEvent(event, pending) {
     pending.deliverables = Array.isArray(event.deliverables) ? event.deliverables : [];
     pending.assumptions = Array.isArray(event.assumptions) ? event.assumptions : [];
     pending.scorecard = event.scorecard || null;
+    pending.contractGate = event.contractGate || null;
     renderMessages();
     return;
   }
@@ -3401,6 +3674,8 @@ function handleEvent(event, pending) {
         ? "Starting OpenAI Cloud Research."
         : event.engine === "local-research"
           ? "Starting Local Research with free web sources and Ollama."
+          : event.engine === "research-apply"
+            ? "Starting Research + Apply with free web sources, Ollama, and a local project receipt."
           : event.engine === "local-review"
             ? `Starting Local Review with ${event.model || "Ollama"}.`
             : event.model
@@ -3447,6 +3722,39 @@ function addThought(pending, text) {
 
 function findMessageById(thread, id) {
   return (thread.messages || []).find((message) => message.id === id);
+}
+
+function findMessageIndexById(thread, id) {
+  return (thread.messages || []).findIndex((message) => message.id === id);
+}
+
+function setComposerText(text) {
+  els.promptInput.value = text;
+  autoSizeTextarea();
+  els.promptInput.focus();
+}
+
+function startEditMessage(messageId) {
+  const thread = currentThread();
+  const index = findMessageIndexById(thread, messageId);
+  const message = index >= 0 ? thread.messages[index] : null;
+  if (!message || message.role !== "user") return;
+  composerIntent = { kind: "edit", messageId };
+  setComposerText(message.text || "");
+  els.runState.textContent = "Editing question";
+  els.runState.className = "run-state warning";
+  appendLog("event", "editing earlier question; next send reruns from that point");
+}
+
+function startSteerMessage(messageId) {
+  const thread = currentThread();
+  const message = findMessageById(thread, messageId);
+  if (!message || message.role !== "assistant") return;
+  composerIntent = { kind: "steer", messageId };
+  setComposerText("Steer the previous answer this way: ");
+  els.runState.textContent = "Steer ready";
+  els.runState.className = "run-state warning";
+  appendLog("event", "steer prompt prepared for the previous answer");
 }
 
 function latestUserPromptForMessage(thread, message) {
@@ -3500,6 +3808,9 @@ async function sendMessageFeedback(messageId, rating) {
         note,
         prompt: latestUserPromptForMessage(thread, message),
         answer: message.text || "",
+        messages: thread.messages.filter((item) => !item.running).slice(-8),
+        cwd: thread.cwd || config.cwd,
+        webSearch: thread.webSearch || config.webSearch,
         route: message.route || {},
         projectId: message.route?.projectId || message.adminTopic?.projectId || "general",
       }),
@@ -3510,6 +3821,7 @@ async function sendMessageFeedback(messageId, rating) {
     message.feedback = rating;
     message.feedbackNote = note;
     message.feedbackGoldenTest = payload.goldenTest || null;
+    message.feedbackSelfHealing = payload.selfHealing?.event?.patchQueued || payload.selfHealing?.event || null;
     if (payload.goldenTests) config.goldenTests = payload.goldenTests;
     if (payload.admin) config.admin = payload.admin;
     if (payload.goldenTest) appendLog("status", `Regression test saved: ${payload.goldenTest.name || payload.goldenTest.id}`);
@@ -3625,10 +3937,11 @@ function engineValue(engine) {
     codex: 1,
     local: 1,
     "local-research": 2,
-    "local-review": 3,
-    openai: 4,
-    cloud: 4,
-    manager: 5,
+    "research-apply": 3,
+    "local-review": 4,
+    openai: 5,
+    cloud: 5,
+    manager: 6,
   };
   return values[engine] || 1;
 }
@@ -3694,6 +4007,18 @@ els.conversation.addEventListener("click", (event) => {
   if (localPathLink) {
     event.preventDefault();
     openLocalPath(localPathLink.dataset.localPath);
+    return;
+  }
+  const editButton = event.target.closest("[data-edit-message-id]");
+  if (editButton && !activeController) {
+    event.preventDefault();
+    startEditMessage(editButton.dataset.editMessageId);
+    return;
+  }
+  const steerButton = event.target.closest("[data-steer-message-id]");
+  if (steerButton && !activeController) {
+    event.preventDefault();
+    startSteerMessage(steerButton.dataset.steerMessageId);
     return;
   }
   const button = event.target.closest("[data-feedback-id]");
@@ -3774,8 +4099,17 @@ els.webAccessToggle.addEventListener("click", () => {
   renderRunControls();
 });
 
-els.attachButton.addEventListener("click", () => {
+els.attachButton.addEventListener("click", async () => {
   if (activeController) return;
+  if (nativeFilePickerAvailable()) {
+    try {
+      const files = await openNativeFilePicker();
+      await handleNativeFiles(files);
+      return;
+    } catch (error) {
+      appendLog("warning", `Native file picker failed: ${error.message}; using browser picker`);
+    }
+  }
   els.fileInput.click();
 });
 

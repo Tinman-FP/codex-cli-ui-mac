@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import base64
+import cgi
 import concurrent.futures
 import importlib.util
 import json
@@ -44,11 +45,17 @@ LOCAL_TOOL_OUTPUT_DIR = DATA_DIR / "generated" / "printer-macros"
 LOCAL_CAD_OUTPUT_DIR = DATA_DIR / "generated" / "cad"
 LOCAL_AERO_OUTPUT_DIR = DATA_DIR / "generated" / "aero-cfd"
 LOCAL_STRUCTURAL_OUTPUT_DIR = DATA_DIR / "generated" / "structural-fea"
+LOCAL_EMBEDDED_IMAGE_OUTPUT_DIR = DATA_DIR / "generated" / "embedded-images"
 LOCAL_DIAGRAM_OUTPUT_DIR = DATA_DIR / "generated" / "engineering-diagrams"
 LOCAL_QUALITY_OUTPUT_DIR = DATA_DIR / "generated" / "quality-gates"
+LOCAL_ORCA_PROFILE_OUTPUT_DIR = DATA_DIR / "generated" / "orca-profiles"
+LOCAL_RESEARCH_APPLY_OUTPUT_DIR = DATA_DIR / "generated" / "research-apply"
+LOCAL_PROJECT_APPLY_OUTPUT_DIR = DATA_DIR / "generated" / "project-apply"
 SOURCE_VAULT_DIR = DATA_DIR / "source-vault"
 PRINTING_SOURCE_VAULT_DIR = SOURCE_VAULT_DIR / "3d-printing"
 PRINTING_SOURCE_INDEX_PATH = PRINTING_SOURCE_VAULT_DIR / "source_index.json"
+PUBLIC_TEST_BANK_DIR = APP_DIR / "tests"
+MANUFACTURING_TEST_BANK_PATH = PUBLIC_TEST_BANK_DIR / "manufacturing_questions.json"
 UPLOAD_DIR = DATA_DIR / "uploads"
 CAPABILITY_TOOL_LOG_PATH = DATA_DIR / "capability_tool_log.jsonl"
 AUTONOMY_SUPERVISOR_LOG_PATH = DATA_DIR / "autonomy_supervisor.jsonl"
@@ -68,7 +75,7 @@ CODEX_BIN = os.environ.get(
     "CODEX_BIN", "/Applications/Codex.app/Contents/Resources/codex"
 )
 DEFAULT_PROFILE = os.environ.get("CODEX_PROFILE", "manager")
-DEFAULT_CWD = os.environ.get("CODEX_CWD", str(Path.home() / "Documents" / "Codex"))
+DEFAULT_CWD = os.environ.get("CODEX_CWD", "/Users/williamtinney/Documents/Codex")
 DEFAULT_HOST = os.environ.get("CODEX_UI_HOST", "127.0.0.1")
 DEFAULT_PORT = int(os.environ.get("CODEX_UI_PORT", "8765"))
 DEFAULT_ACCESS_LEVEL = os.environ.get("CODEX_ACCESS_LEVEL", "danger-full-access")
@@ -81,13 +88,14 @@ DEFAULT_OPENAI_MODEL = os.environ.get("OPENAI_RESEARCH_MODEL", "gpt-5.5")
 LOCAL_RESEARCH_MODEL = os.environ.get("LOCAL_RESEARCH_MODEL", "gpt-oss-20b")
 LOCAL_CODER_MODEL = os.environ.get("LOCAL_CODER_MODEL", "qwen2.5-coder-7b")
 LOCAL_REVIEW_MODEL = os.environ.get("LOCAL_REVIEW_MODEL", "deepseek-r1-8b")
+LOCAL_DEEP_REVIEW_MODEL = os.environ.get("LOCAL_DEEP_REVIEW_MODEL", "qwen3.6:27b")
 MANAGER_POLISH_MODEL = os.environ.get("MANAGER_POLISH_MODEL", LOCAL_RESEARCH_MODEL)
 FREE_ONLY = os.environ.get("CODEX_FREE_ONLY", "1").strip().lower() not in {
     "0",
     "false",
     "no",
 }
-QIDI_MOONRAKER_URL = os.environ.get("QIDI_MOONRAKER_URL", "").strip()
+QIDI_MOONRAKER_URL = os.environ.get("QIDI_MOONRAKER_URL", "http://192.168.50.145:7125")
 PYTHON_USER_BIN = (
     Path.home()
     / "Library"
@@ -96,10 +104,10 @@ PYTHON_USER_BIN = (
     / "bin"
 )
 PATH_FOR_CODEX = (
-    f"{Path.home() / '.local' / 'bin'}:{PYTHON_USER_BIN}:/usr/local/bin:/opt/homebrew/bin:/Applications/Codex.app/Contents/Resources:"
+    f"/Users/williamtinney/.local/bin:{PYTHON_USER_BIN}:/usr/local/bin:/opt/homebrew/bin:/Applications/Codex.app/Contents/Resources:"
     "/Applications/Codex.app/Contents/Resources/cua_node/bin:"
     "/usr/bin:/bin:/usr/sbin:/sbin:"
-    f"{Path.home() / '.cache' / 'codex-runtimes' / 'codex-primary-runtime' / 'dependencies' / 'bin'}"
+    "/Users/williamtinney/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin"
 )
 ACCESS_LEVELS = {"read-only", "workspace-write", "danger-full-access"}
 REASONING_LEVELS = {"low", "medium", "high"}
@@ -109,7 +117,9 @@ PROFILE_LEVELS = {
     "local-oss",
     "local-coder",
     "local-review",
+    "local-deep-review",
     "local-research",
+    "research-apply",
     "cloud-research",
 }
 CODEX_PROFILE_MODELS = {
@@ -119,12 +129,16 @@ CODEX_PROFILE_MODELS = {
 }
 CLOUD_PROFILES = {"cloud-research"}
 LOCAL_RESEARCH_PROFILES = {"local-research"}
-LOCAL_REVIEW_PROFILES = {"local-review"}
+RESEARCH_APPLY_PROFILES = {"research-apply"}
+LOCAL_REVIEW_PROFILES = {"local-review", "local-deep-review"}
 MANAGER_PROFILES = {"manager"}
 WEB_SEARCH_LEVELS = {"live", "disabled"}
 MANAGER_DEPTH_LEVELS = {"fast", "balanced", "full"}
 FRIENDLINESS_LEVELS = {"focused", "warm", "high"}
 HUMOR_LEVELS = {"off", "light", "playful"}
+LIVE_STEERING_LOCK = threading.Lock()
+LIVE_STEERING_BY_RUN = {}
+LIVE_STEERING_TTL_SECONDS = 60 * 60
 QUALITY_FEEDBACK_MAX_CONTEXT = 6
 HISTORY_MAX_DOCS = 6
 HISTORY_MAX_CHARS = 9000
@@ -137,7 +151,7 @@ QIDI_CONTEXT_TERMS = {
     "qidi",
     "plus 4",
     "plus4",
-    "vpn",
+    "makersvpn",
     "tailscale",
     "moonraker",
     "printer",
@@ -321,6 +335,22 @@ ADMIN_TAXONOMY = {
             "cad": {"name": "CAD", "triggers": ("cad", "fusion", "model", "step", "stl")},
         },
     },
+    "embedded-linux": {
+        "name": "Embedded Linux & Images",
+        "description": "Raspberry Pi, RatOS, boot media, firmware, kernels, and appliance OS images.",
+        "triggers": (
+            "ratos", "rat os", "raspberry pi", "rasberry pi", "rpi", "pi 5",
+            "pi5", "pi 4", "pi4", ".img.xz", ".img", "boot partition",
+            "boot image", "dtb", "device tree", "firmware", "kernel",
+            "os image", "sd card image",
+        ),
+        "routeProjects": ("embedded-linux-images",),
+        "folders": {
+            "os-images": {"name": "OS Images", "triggers": (".img.xz", ".img", "image", "os image", "sd card")},
+            "boot-firmware": {"name": "Boot & Firmware", "triggers": ("boot", "dtb", "device tree", "firmware", "kernel", "overlay")},
+            "services": {"name": "Services", "triggers": ("klipper", "moonraker", "ratos", "service", "systemd")},
+        },
+    },
     "reference": {
         "name": "Reference",
         "description": "Stable formulas, definitions, part references, and study notes.",
@@ -460,6 +490,61 @@ PROJECT_QUERY_HINTS = {
         "fiberseeker",
         "fibreseeker",
         "push plastics",
+        "3d printing",
+        "fdm",
+        "resin",
+        "sls",
+        "warping",
+        "stringing",
+        "under-extruding",
+        "under extruding",
+        "layer-shifting",
+        "layer shifting",
+        "print settings",
+        "print failed",
+    ),
+    "cnc-machining": (
+        "cnc",
+        "machining",
+        "machine this",
+        "feeds and speeds",
+        "feed rate",
+        "spindle speed",
+        "milled",
+        "turned",
+        "laser cut",
+        "waterjet",
+        "chatter",
+        "surface finish",
+        "fixture",
+        "fixturing",
+        "toolpath",
+        "pockets",
+        "contours",
+        "holes",
+        "finishing",
+    ),
+    "aviation-engineering": (
+        "aircraft generate lift",
+        "climb rate",
+        "range",
+        "endurance",
+        "fuel burn",
+        "weight and balance",
+        "stalls",
+        "spins",
+        "dutch roll",
+        "adverse yaw",
+        "flaps",
+        "slats",
+        "spoilers",
+        "trim",
+        "control surfaces",
+        "indicated",
+        "true airspeed",
+        "ground speed",
+        "density altitude",
+        "performance charts",
     ),
     "codex-cli-ui-local-agent": (
         "codex cli",
@@ -497,6 +582,10 @@ PROJECT_QUERY_HINTS = {
         "openfoam",
         "paraview",
         "vspaero",
+        "xfoil",
+        "openvsp",
+        "su2",
+        "qblade",
         "stress",
         "strain",
         "deflection",
@@ -514,8 +603,6 @@ PROJECT_QUERY_HINTS = {
         "cooling duct",
         "part cooling",
     ),
-    "research-parts-reference": ("fk275", "serpentine belt", "cross reference", "part number"),
-    "energy-power-research": ("wind turbine", "alternator", "60vdc", "60 vdc", "300 rpm"),
     "engineering-diagrams": (
         "block diagram",
         "wiring diagram",
@@ -528,6 +615,24 @@ PROJECT_QUERY_HINTS = {
         "battery backup",
         "machine architecture",
     ),
+    "embedded-linux-images": (
+        "ratos",
+        "rat os",
+        "raspberry pi",
+        "rasberry pi",
+        "pi 5",
+        "pi5",
+        "pi 4",
+        "pi4",
+        ".img.xz",
+        "sd card image",
+        "boot partition",
+        "dtb",
+        "kernel",
+    ),
+    "research-parts-reference": ("fk275", "serpentine belt", "cross reference", "part number"),
+    "energy-power-research": ("wind turbine", "alternator", "60vdc", "60 vdc", "300 rpm"),
+    "aviation-engineering": ("aircraft performance", "aerodynamic data", "density altitude", "weight and balance"),
     "bible-kjv-study": ("king james", "kjv", "bible", "scripture"),
 }
 PROJECT_PLAYBOOKS = {
@@ -619,7 +724,9 @@ PROJECT_PLAYBOOKS = {
             "codex cli", "codex ui", "codex cli ui", "ollama", "local-oss",
             "local-fast", "startup inventory", "access level", "reasoning",
             "web access", "dock", "launchagent", "manager agent", "router",
-            "cloud research", "openai cli",
+            "cloud research", "openai cli", "test bank", "golden test",
+            "steer", "edit question", "fix this", "self-healing", "self healing",
+            "self repair", "package", "github zip",
         ),
         "rules": (
             "Keep private inventory local unless the user explicitly chooses a cloud path.",
@@ -642,6 +749,27 @@ PROJECT_PLAYBOOKS = {
             "Prefer reversible diagnostics before resets or account changes.",
             "Use Keychain, app settings, and system logs carefully; do not expose secrets in chat.",
             "For network access, distinguish LAN, Tailscale, VPN, and public internet reachability.",
+        ),
+    },
+    "embedded-linux-images": {
+        "name": "Embedded Linux & OS Images",
+        "specialist": "Embedded Linux Specialist",
+        "preferred_engine": "local",
+        "local_profile": "local-coder",
+        "reasoning": "high",
+        "triggers": (
+            "ratos", "rat os", "raspberry pi", "rasberry pi", "rpi",
+            "pi 5", "pi5", "pi 4", "pi4", "bookworm", "bullseye",
+            ".img.xz", ".img", "sd card image", "boot image", "os image",
+            "boot partition", "dtb", "device tree", "kernel", "firmware",
+            "initramfs", "arm64", "aarch64", "rpi-eeprom",
+        ),
+        "rules": (
+            "Classify OS image, boot firmware, kernel, DTB, overlays, and userland before choosing tools.",
+            "Do not route compressed OS images to CAD, CFD, or structural FEA just because the user says create or make.",
+            "Inspect the source image and boot contents before claiming a Pi 5 compatible image exists.",
+            "Check storage before expanding or rewriting multi-gigabyte images, and ask before writing removable media or flashing hardware.",
+            "Separate a staged compatibility preflight from a boot-tested image; never call it seamless until boot and services are verified.",
         ),
     },
     "cad-modeling-projects": {
@@ -668,6 +796,48 @@ PROJECT_PLAYBOOKS = {
             "For mechanical or structural requests, identify loads, constraints, material, process, print orientation, safety factor, and likely failure modes before creating geometry or claiming strength.",
         ),
     },
+    "cnc-machining": {
+        "name": "CNC Machining",
+        "specialist": "CNC Manufacturing Specialist",
+        "preferred_engine": "local",
+        "local_profile": "local-oss",
+        "reasoning": "high",
+        "triggers": (
+            "cnc", "machining", "machine this", "feeds and speeds", "feed rate",
+            "spindle speed", "sfm", "chip load", "milled", "turned", "lathe",
+            "mill", "laser cut", "waterjet", "chatter", "surface finish",
+            "fixture", "fixturing", "toolpath", "pockets", "contours",
+            "holes", "finishing", "machining cost",
+        ),
+        "rules": (
+            "Start by identifying material, machine rigidity, cutter/tooling, operation, workholding, and tolerance requirements.",
+            "For feeds and speeds, state assumptions and formulas instead of inventing a universal RPM/feed.",
+            "For chatter or finish problems, rank causes: rigidity/workholding, tool stickout, cutter geometry, chip load, spindle speed, depth/width of cut, coolant, and toolpath.",
+            "For make/buy/process choices, compare machining, turning, laser/waterjet, and additive manufacturing by tolerance, material, geometry, cost, and setup risk.",
+        ),
+    },
+    "aviation-engineering": {
+        "name": "Aviation Engineering",
+        "specialist": "Aviation Engineering Specialist",
+        "preferred_engine": "local",
+        "local_profile": "local-oss",
+        "reasoning": "high",
+        "triggers": (
+            "aircraft generate lift", "aircraft performance", "climb rate",
+            "range", "endurance", "fuel burn", "weight and balance",
+            "stall", "stalls", "spin", "spins", "dutch roll", "adverse yaw",
+            "flaps", "slats", "spoilers", "trim", "control surface",
+            "control surfaces", "indicated airspeed", "true airspeed",
+            "ground speed", "density altitude", "performance chart",
+            "performance charts", "aerodynamic data",
+        ),
+        "rules": (
+            "Separate conceptual aviation education from flight-planning or operational advice.",
+            "For performance questions, name the controlling variables and explain directionally before doing math.",
+            "For weight and balance, keep units, arm, moment, datum, and envelope checks explicit.",
+            "For stalls/spins/control-surface questions, explain the aerodynamic mechanism and the practical consequence without pretending to replace aircraft-specific manuals or training.",
+        ),
+    },
     "research-parts-reference": {
         "name": "Research, Parts & Cross-Reference",
         "specialist": "Parts Research Specialist",
@@ -682,6 +852,25 @@ PROJECT_PLAYBOOKS = {
             "Exact equivalence requires matching dimensions, material/profile, and functional spec.",
             "Reject lookalikes when profile, length, rib count, voltage/RPM, or material does not line up.",
             "Show why near-matches fail so Tinman can avoid buying the wrong part.",
+        ),
+    },
+    "engineering-diagrams": {
+        "name": "Engineering Diagrams",
+        "specialist": "Systems Diagram Engineer",
+        "preferred_engine": "local",
+        "local_profile": "local-oss",
+        "reasoning": "high",
+        "triggers": (
+            "block diagram", "wiring diagram", "electrical diagram", "schematic",
+            "architecture diagram", "system diagram", "power diagram", "grid tie",
+            "drawio", "draw.io", "graphviz", "dot file", "mermaid", "kicad",
+            "connector", "pinout", "wire gauge", "wiring harness", "cnc", "3d printer architecture",
+        ),
+        "rules": (
+            "Create editable diagram artifacts, not just prose, when asked for diagrams.",
+            "Separate block diagrams from wiring/schematic detail and label power, signal, safety, and ground paths.",
+            "Show assumptions, ratings to verify, protection devices, disconnects, grounding/bonding, connector/pin details, and unresolved engineering inputs.",
+            "Use Graphviz for clean layout when available, draw.io XML for editing, and KiCad notes/files when connector-level schematic work is needed.",
         ),
     },
     "energy-power-research": {
@@ -699,26 +888,6 @@ PROJECT_PLAYBOOKS = {
             "For electrical recommendations, verify voltage, RPM, phase/output type, power rating, and price separately.",
             "Do not extrapolate voltage at RPM unless you mark it as an estimate and explain load sag.",
             "Lead with one best practical pick, then list rejects or seller-confirmation questions.",
-        ),
-    },
-    "engineering-diagrams": {
-        "name": "Engineering Diagrams",
-        "specialist": "Systems Diagram Engineer",
-        "preferred_engine": "local",
-        "local_profile": "local-oss",
-        "reasoning": "high",
-        "triggers": (
-            "block diagram", "wiring diagram", "electrical diagram", "schematic",
-            "architecture diagram", "system diagram", "power diagram", "solar",
-            "backup battery", "battery backup", "power grid", "grid tie", "inverter",
-            "drawio", "draw.io", "graphviz", "dot file", "mermaid", "kicad",
-            "connector", "pinout", "wire gauge", "wiring harness", "cnc", "3d printer architecture",
-        ),
-        "rules": (
-            "Create editable diagram artifacts, not just prose, when asked for diagrams.",
-            "Separate block diagrams from wiring/schematic detail and label power, signal, safety, and ground paths.",
-            "Show assumptions, ratings to verify, protection devices, disconnects, grounding/bonding, connector/pin details, and unresolved engineering inputs.",
-            "Use Graphviz for clean layout when available, draw.io XML for editing, and KiCad notes/files when connector-level schematic work is needed.",
         ),
     },
     "bible-kjv-study": {
@@ -776,7 +945,7 @@ GOLDEN_TESTS = [
         "webSearch": "disabled",
         "expectedProjectId": "general",
         "directAnswer": True,
-        "requiredTerms": [str(Path.home())],
+        "requiredTerms": ["/Users/williamtinney"],
         "forbiddenTerms": ["cannot access", "i do not have"],
         "goal": "Prove local command work returns a final answer.",
     },
@@ -846,6 +1015,9 @@ GOLDEN_TESTS = [
         "directAnswer": True,
         "directTerms": ["19 mm", "about 19 mm", "15 mm"],
         "requiredTerms": ["this is why", "you should also consider"],
+        "expectedContractKind": "Direct answer",
+        "expectedContractGate": "pass",
+        "requiredContractProof": ["direct answer", "why/caveat"],
         "forbiddenTerms": ["fusion 360 script", "openscad model", "staged", "cad package"],
         "minAnalyticalScore": 82,
         "goal": "Answer the hose-size question directly instead of staging CAD artifacts.",
@@ -862,6 +1034,9 @@ GOLDEN_TESTS = [
         "directAnswer": True,
         "directTerms": [".f3d", ".f3z", ".step"],
         "requiredTerms": [".f3d", ".f3z", ".step", "stl"],
+        "expectedContractKind": "CAD reference",
+        "expectedContractGate": "pass",
+        "requiredContractProof": ["direct format recommendation", "why/caveat"],
         "forbiddenTerms": ["fusion 360 script:", "openscad model:", "staged a first-pass"],
         "minAnalyticalScore": 82,
         "goal": "Answer the CAD reference question without creating unrelated artifacts.",
@@ -913,6 +1088,38 @@ GOLDEN_TESTS = [
         "forbiddenTerms": ["fusion 360", "cad package", "buildVolume", "machine specs only"],
         "minAnalyticalScore": 82,
         "goal": "Pull the actual local Orca/TinmanX1 PET-CF 0.6 nozzle filament profile instead of returning machine specs or generic tuning.",
+    },
+    {
+        "id": "hard-orca-profile-creation-not-pull",
+        "name": "Orca Profile Creation Not Pull",
+        "group": "Hard Cases",
+        "prompt": "Can you create an Orca PETG filament profile for all printers all nozzle sizes? Use the best practices and lessons learned from what we have done and industry. Use all the resources you have available for a perfect profile.",
+        "profile": "manager",
+        "managerDepth": "fast",
+        "webSearch": "disabled",
+        "expectedProjectId": "tinmanx-slicer-research",
+        "directAnswer": True,
+        "directTerms": ["created", "starter profile pack", "orca petg"],
+        "requiredTerms": ["petg", "profile pack", "calibration", "this is why", "you should also consider"],
+        "forbiddenTerms": ["actual local slicer profile data", "petg-cf", "machine specs", "fusion 360"],
+        "minAnalyticalScore": 82,
+        "goal": "Create a starter Orca filament-profile package for the requested material instead of pulling an unrelated existing profile.",
+    },
+    {
+        "id": "hard-orca-nozzle-visibility-options",
+        "name": "Orca Nozzle Visibility Options",
+        "group": "Hard Cases",
+        "prompt": "I am able to sync the filament type and color into the prepare tab. I would still like to be able to see what nozzle is installed on the machine and what type in Orca. What are my options at this point?",
+        "profile": "manager",
+        "managerDepth": "fast",
+        "webSearch": "disabled",
+        "expectedProjectId": "tinmanx-slicer-research",
+        "directAnswer": True,
+        "directTerms": ["configured nozzle", "installed physical nozzle", "local inventory"],
+        "requiredTerms": ["orca", "this is why", "you should also consider"],
+        "forbiddenTerms": ["ssh password", "password", "fusion 360", "cad package", "moonraker status only"],
+        "minAnalyticalScore": 82,
+        "goal": "Treat Orca nozzle display/sync questions as slicer-profile workflow design, not live printer status or CAD.",
     },
     {
         "id": "hard-pctg-temp-tower-image",
@@ -979,6 +1186,8 @@ GOLDEN_TESTS = [
         "expectedProjectId": "cad-modeling-projects",
         "expectedEngine": "local",
         "requiredTerms": ["fusion 360", "18", "12-15 cfm", "cfd", "validation"],
+        "expectedContractKind": "CAD/design deliverable",
+        "requiredContractProof": ["clickable CAD/script/readme files", "assumptions", "fit/validation"],
         "anyTerms": ["duct", "plenum", "outlet", "airflow", "artifact"],
         "forbiddenTerms": ["moonraker", "unreachable", "printer status", "qidi plus 4", "nozzle temperature"],
         "minAnalyticalScore": 82,
@@ -1011,9 +1220,29 @@ GOLDEN_TESTS = [
         "expectedProjectId": "cad-modeling-projects",
         "directAnswer": True,
         "requiredTerms": ["did not find a readable stl", "attach the stl", "stopped before generating fake duct geometry"],
+        "expectedContractKind": "STL/CAD deliverable",
+        "expectedContractGate": "pass",
+        "requiredContractProof": ["source STL status", "missing-attachment blocker", "validation limits"],
         "forbiddenTerms": ["i generated an inferred", "duct stl:", "airway stl", "fusion 360 script", "openscad model"],
         "minAnalyticalScore": 82,
         "goal": "If macOS pasted only an STL filename, stop before inventing geometry and ask for the actual file.",
+    },
+    {
+        "id": "hard-ratos-pi5-image-port-not-fea",
+        "name": "RatOS Pi 5 Image Port",
+        "group": "Hard Cases",
+        "prompt": "I have downloaded a file in the downloads folder. It is Rat OS. It works on rasberry pi 4 but not rasberry pi 5. can you create a working version that will work seemlessly on the pi 5?2026-03-04-RatOS-2.1.0-raspberry-rpi32.img.xz",
+        "profile": "manager",
+        "managerDepth": "fast",
+        "webSearch": "disabled",
+        "expectedProjectId": "embedded-linux-images",
+        "expectedContractKind": "Embedded/Linux image port",
+        "expectedContractGate": "pass",
+        "requiredTerms": ["ratos", "raspberry pi 5", "boot", "kernel", "dtb", "image"],
+        "requiredContractProof": ["source image status", "boot/kernel/firmware checklist", "storage or flash safety boundary"],
+        "forbiddenTerms": ["structural fea", "calculix", "aluminum 6061", "fusion 360 script", "openscad model", "cad package"],
+        "minAnalyticalScore": 82,
+        "goal": "Classify RatOS img.xz work as an embedded Linux image-porting job, not CAD/FEA or generic file staging.",
     },
 ]
 HARD_CASE_GOLDEN_TEST_IDS = {
@@ -1022,12 +1251,404 @@ HARD_CASE_GOLDEN_TEST_IDS = {
     "hard-marlin-diagnostic",
     "hard-orca-filament-profile",
     "hard-orca-current-petcf-06-profile",
+    "hard-orca-profile-creation-not-pull",
+    "hard-orca-nozzle-visibility-options",
     "hard-pctg-temp-tower-image",
     "hard-pctg-temp-tower-pa-followup",
     "hard-cpap-duct-design-not-status",
     "hard-cpap-duct-wall-thickness",
     "hard-stl-filename-missing-attachment",
+    "hard-ratos-pi5-image-port-not-fea",
 }
+
+CONTRACT_GATE_GOLDEN_TEST_IDS = {
+    "hard-cpap-hose-id",
+    "hard-fusion-component-format",
+    "hard-ratos-pi5-image-port-not-fea",
+    "hard-cpap-duct-design-not-status",
+    "hard-stl-filename-missing-attachment",
+}
+
+
+DOMAIN_SAMPLE_QUESTION_GROUPS = {
+    "3D Printing": {
+        "project": "tinmanx-slicer-research",
+        "questions": (
+            "What material should I use for this part: PLA, PETG, ABS, ASA, nylon, carbon-fiber filled, etc.?",
+            "Why is my print warping, stringing, under-extruding, or layer-shifting?",
+            "What print settings should I use for strength, heat resistance, or surface finish?",
+            "How should I orient this part for best strength?",
+            "Can this part be redesigned to print without supports?",
+            "What tolerances should I design for FDM, resin, or SLS printing?",
+            "Why did this print fail halfway through?",
+            "Is this part strong enough for its intended use?",
+        ),
+    },
+    "CNC Machining": {
+        "project": "cnc-machining",
+        "questions": (
+            "What material should I machine this from?",
+            "What feeds and speeds should I use?",
+            "Should this part be milled, turned, laser cut, waterjet cut, or 3D printed?",
+            "How do I reduce chatter or poor surface finish?",
+            "What tolerances are realistic for this geometry?",
+            "How should I fixture this part?",
+            "Can this design be simplified to reduce machining cost?",
+            "What toolpath strategy should I use for pockets, contours, holes, or finishing?",
+        ),
+    },
+    "Solar And Wind Technology": {
+        "project": "energy-power-research",
+        "questions": (
+            "How large of a solar system do I need for my house, cabin, RV, or equipment?",
+            "How many panels and batteries are required for a given load?",
+            "What size charge controller or inverter do I need?",
+            "Is wind power practical at my location?",
+            "How do I compare solar versus wind for off-grid power?",
+            "What affects solar panel efficiency?",
+            "How much power can I realistically generate per day?",
+            "How do battery chemistry, depth of discharge, and temperature affect system design?",
+        ),
+    },
+    "Aerodynamics": {
+        "project": "cad-modeling-projects",
+        "questions": (
+            "How does airfoil shape affect lift and drag?",
+            "What causes stall, separation, turbulence, or vortex formation?",
+            "How do I reduce drag on a vehicle, aircraft, duct, or enclosure?",
+            "What is the difference between lift coefficient, drag coefficient, and Reynolds number?",
+            "How does angle of attack affect performance?",
+            "What wing shape or control surface layout should I use?",
+            "How do propellers, fans, and ducts behave aerodynamically?",
+            "How do I estimate aerodynamic forces without full simulation?",
+        ),
+    },
+    "CFD Analysis": {
+        "project": "cad-modeling-projects",
+        "questions": (
+            "What CFD setup should I use for this problem?",
+            "What boundary conditions are appropriate?",
+            "How fine does the mesh need to be?",
+            "Which turbulence model should I use?",
+            "Why is my CFD solution not converging?",
+            "How do I interpret pressure, velocity, vorticity, and streamline plots?",
+            "Is my CFD result physically realistic?",
+            "How do I validate CFD results against hand calculations or test data?",
+        ),
+    },
+    "Engineering": {
+        "project": "cad-modeling-projects",
+        "questions": (
+            "Is this design strong enough?",
+            "What material, thickness, fastener size, or weld type should I use?",
+            "How do I calculate load, stress, torque, pressure, or deflection?",
+            "What factor of safety is appropriate?",
+            "How can this part be redesigned to be cheaper, stronger, lighter, or easier to manufacture?",
+            "What failure modes should I worry about?",
+            "How do I turn an idea into a manufacturable design?",
+            "Can you review this sketch, CAD concept, or drawing for problems?",
+        ),
+    },
+    "Aviation": {
+        "project": "aviation-engineering",
+        "questions": (
+            "How do aircraft generate lift?",
+            "What affects climb rate, range, endurance, and fuel burn?",
+            "How do weight and balance calculations work?",
+            "What causes stalls, spins, Dutch roll, or adverse yaw?",
+            "How do flaps, slats, spoilers, trim, and control surfaces work?",
+            "What is the difference between indicated, true, and ground speed?",
+            "How do weather, density altitude, and wind affect performance?",
+            "How do I interpret aircraft performance charts or aerodynamic data?",
+        ),
+    },
+}
+
+
+FUSION_ORCA_SAMPLE_QUESTION_GROUPS = {
+    "Fusion 360": {
+        "project": "cad-modeling-projects",
+        "questions": (
+            "How do I export a STEP file while keeping component and body names useful?",
+            "How should I set up user parameters for a printed bracket so I can resize it later?",
+            "Why did my Fusion sketch turn under-constrained, and how do I fix it cleanly?",
+            "When should I use joints instead of align or move/copy in an assembly?",
+            "How much clearance should I model between a printed peg and hole for FDM?",
+            "How do I turn an STL mesh into an editable solid without destroying the geometry?",
+            "How should I set the origin and axes before exporting a part for CNC or 3D printing?",
+            "How do I use construction planes to make accurate angled features?",
+            "Why does my loft or sweep twist, fail, or create ugly geometry?",
+            "How do I prepare a modeled part for CAM toolpaths in the Manufacture workspace?",
+            "What are good Fusion 360 practices for fillets and chamfers on 3D printed parts?",
+            "How do I make a drawing with useful dimensions and tolerances from a Fusion model?",
+            "How should I split a body so a large part prints cleanly without support?",
+            "How should I model heat-set inserts, screw bosses, and threaded holes?",
+            "How do I export STL or 3MF with the right units, orientation, and resolution?",
+            "What information do you need from me before making a parametric Fusion 360 script?",
+            "How do I diagnose a timeline feature that broke after I changed an early sketch?",
+            "How should I organize components, bodies, sketches, and construction geometry in a real assembly?",
+            "How do I design snap fits or tabs that will survive repeated use?",
+            "How do I check whether a Fusion model is manufacturable before I print or machine it?",
+        ),
+    },
+    "OrcaSlicer Codex App": {
+        "project": "orcaslicer-codex",
+        "questions": (
+            "How do I fix a missing custom preset after updating Orca Slicer?",
+            "How do I copy a preset safely without overwriting the system profile?",
+            "How do I troubleshoot a printer host mapping that does not persist after restart?",
+            "How do I back up Orca user presets before editing them?",
+            "How do I compare two Orca profiles and find the setting that changed?",
+            "How do I verify the installed app sees a new preset after I add it?",
+            "How do I safely edit OrcaSlicer.conf without the app overwriting it?",
+            "How do I diagnose an Orca printer host mapping that keeps reconnecting or disappearing?",
+        ),
+    },
+    "Orca Profile Workflow": {
+        "project": "tinmanx-slicer-research",
+        "questions": (
+            "How do I tell whether Orca is using the machine profile, filament profile, or process profile for a setting?",
+            "Why does Orca show my filament but not the printer or nozzle I expect?",
+            "What do machine, filament, and process profiles each control when tuning a filament in Orca?",
+            "How do I keep custom printer, filament, and process profiles organized for Orca calibration across machines?",
+            "What should I check when the prepare tab and device tab disagree about printer or filament state?",
+        ),
+    },
+    "Orca Filament Calibration": {
+        "project": "tinmanx-slicer-research",
+        "questions": (
+            "What order should I run Orca filament calibration tests for a brand-new material?",
+            "How do I tune filament flow ratio in Orca without hiding an extrusion problem?",
+            "How do I read a filament temperature tower and choose the best nozzle temperature?",
+            "How do I tune filament pressure advance or K value from an Orca calibration print?",
+            "How do I create a PET-CF filament profile for a 0.6 nozzle on my Qidi Plus 4?",
+            "What filament settings matter most for ASA warping and corner lift in Orca?",
+            "How should I set filament max volumetric speed for a new high-flow material?",
+            "How do I decide filament part cooling for PLA, ABS, ASA, PCTG, and PET-CF?",
+            "How should I set filament retraction for a direct-drive printer in Orca?",
+            "How do I copy a filament profile across machines, nozzle sizes, and material variants?",
+            "How do I tune PET-CF without accidentally using PETG-CF assumptions?",
+            "How do I use shrinkage compensation or XY compensation for dimensionally accurate parts?",
+            "How should I tune supports for easy removal without ruining overhang quality?",
+            "How should I set filament bed, nozzle, and chamber temperatures for nylon or polycarbonate?",
+            "How should I save Orca calibration results per filament profile, material, nozzle size, and speed range?",
+            "How do I diagnose stringing if temperature, retraction, and filament dryness all interact?",
+            "How do I decide whether a bad print is caused by filament settings, process settings, or machine limits?",
+        ),
+    },
+}
+
+
+def domain_sample_test_id(category, index):
+    clean = re.sub(r"[^a-z0-9]+", "-", category.lower()).strip("-")
+    return f"domain-sample-{clean}-{index:02d}"
+
+
+def fusion_orca_sample_test_id(category, index):
+    clean = re.sub(r"[^a-z0-9]+", "-", category.lower()).strip("-")
+    return f"fusion-orca-sample-{clean}-{index:02d}"
+
+
+def domain_sample_golden_tests():
+    tests = []
+    for category, info in DOMAIN_SAMPLE_QUESTION_GROUPS.items():
+        project_id = info["project"]
+        for index, question in enumerate(info["questions"], 1):
+            prompt = f"{category}: {question}"
+            tests.append(
+                {
+                    "id": domain_sample_test_id(category, index),
+                    "name": prompt if len(prompt) <= 58 else prompt[:46].rstrip() + " [truncated]",
+                    "group": "Domain Samples",
+                    "prompt": prompt,
+                    "profile": "manager",
+                    "managerDepth": "fast",
+                    "webSearch": "disabled",
+                    "expectedProjectId": project_id,
+                    "directAnswer": True,
+                    "directTerms": [],
+                    "requiredTerms": ["this is why", "you should also consider"],
+                    "forbiddenTerms": [
+                        "run failed",
+                        "no final message returned",
+                        "no response",
+                        "load failed",
+                        "recovery plan:",
+                        "i do not have access",
+                        "i don't have access",
+                        "you can check it yourself",
+                    ],
+                    "minAnalyticalScore": 74,
+                    "goal": "Curated real-world domain sample: route to the right expert lane and answer in Tinman's direct why/consider style.",
+                    "source": "domain-sample",
+                }
+            )
+    return tests
+
+
+def fusion_orca_sample_golden_tests():
+    tests = []
+    for category, info in FUSION_ORCA_SAMPLE_QUESTION_GROUPS.items():
+        project_id = info["project"]
+        for index, question in enumerate(info["questions"], 1):
+            prompt = f"{category}: {question}"
+            tests.append(
+                {
+                    "id": fusion_orca_sample_test_id(category, index),
+                    "name": prompt if len(prompt) <= 58 else prompt[:46].rstrip() + " [truncated]",
+                    "group": "Fusion & Orca Samples",
+                    "prompt": prompt,
+                    "profile": "manager",
+                    "managerDepth": "fast",
+                    "webSearch": "disabled",
+                    "expectedProjectId": project_id,
+                    "directAnswer": True,
+                    "directTerms": [],
+                    "requiredTerms": ["this is why", "you should also consider"],
+                    "forbiddenTerms": [
+                        "run failed",
+                        "no final message returned",
+                        "no response",
+                        "load failed",
+                        "recovery plan:",
+                        "printer status",
+                        "fusion 360 script:",
+                        "openscad model:",
+                        "staged a first-pass cad package",
+                        "machine specs only",
+                        "i do not have access",
+                        "i don't have access",
+                        "you can check it yourself",
+                    ],
+                    "minAnalyticalScore": 72,
+                    "goal": "Common Fusion 360 and Orca Slicer sample: route correctly, answer directly, and avoid wrong-tool or file-receipt detours.",
+                    "source": "fusion-orca-sample",
+                }
+            )
+    return tests
+
+
+TINMANX1_POLYMAKER_SCENARIO_PROMPT = (
+    "Lets move to TinmanX1. In TinmanX1 I would like you to update the Polymaker filament system preset "
+    "to include all of the current filaments available by polymaker to include the Fiberon line. the print "
+    "settings should be available on the website. I also have attached 100 more questions to test. I would "
+    "also like a steer and edit question functions just like yours wired in in the same location that you have. "
+    "another addition, when I tell him he is wrong, I want him to figure out why and fix his own code to make "
+    "sure it doesnt happen again. Once done with that, lets update github. I would like the entire package that "
+    "we created including all of the downloads available in 1 github zip file so that my friends can download "
+    "exactly what we have created"
+)
+
+
+def load_manufacturing_question_bank():
+    try:
+        data = json.loads(MANUFACTURING_TEST_BANK_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    rows = data.get("questions") if isinstance(data, dict) else []
+    if not isinstance(rows, list):
+        return []
+    normalized = []
+    for index, row in enumerate(rows, 1):
+        if not isinstance(row, dict):
+            continue
+        question = str(row.get("question") or "").strip()
+        category = str(row.get("category") or "").strip()
+        if not question or category not in {"CAD", "CNC Machining"}:
+            continue
+        try:
+            question_id = int(row.get("id") or index)
+        except (TypeError, ValueError):
+            question_id = index
+        normalized.append({"id": question_id, "category": category, "question": question})
+    return normalized
+
+
+def manufacturing_sample_test_id(row):
+    category = "cad" if row.get("category") == "CAD" else "cnc"
+    return f"manufacturing-sample-{category}-{int(row.get('id') or 0):03d}"
+
+
+def manufacturing_sample_golden_tests():
+    tests = []
+    for row in load_manufacturing_question_bank():
+        category = row["category"]
+        prompt = f"{category}: {row['question']}"
+        expected_project = "cad-modeling-projects" if category == "CAD" else "cnc-machining"
+        tests.append(
+            {
+                "id": manufacturing_sample_test_id(row),
+                "name": prompt if len(prompt) <= 58 else prompt[:46].rstrip() + " [truncated]",
+                "group": "Manufacturing Samples",
+                "prompt": prompt,
+                "profile": "manager",
+                "managerDepth": "fast",
+                "webSearch": "disabled",
+                "expectedProjectId": expected_project,
+                "directAnswer": True,
+                "directTerms": [],
+                "requiredTerms": ["this is why", "you should also consider"],
+                "forbiddenTerms": [
+                    "run failed",
+                    "no final message returned",
+                    "no response",
+                    "load failed",
+                    "recovery plan:",
+                    "fusion 360 script:",
+                    "openscad model:",
+                    "staged a first-pass cad package",
+                    "i do not have access",
+                    "i don't have access",
+                    "you can check it yourself",
+                ],
+                "minAnalyticalScore": 76,
+                "goal": "Public manufacturing sample: route CAD and CNC questions correctly and answer directly in Tinman's why/consider style.",
+                "source": "manufacturing-sample",
+            }
+        )
+    return tests
+
+
+SCENARIO_GOLDEN_TESTS = [
+    {
+        "id": "scenario-tinmanx1-polymaker-steer-self-repair-release",
+        "name": "TinmanX1 Polymaker UI Self-Repair Release Scenario",
+        "group": "Workflow Scenarios",
+        "prompt": TINMANX1_POLYMAKER_SCENARIO_PROMPT,
+        "profile": "manager",
+        "managerDepth": "fast",
+        "webSearch": "disabled",
+        "expectedProjectId": "codex-cli-ui-local-agent",
+        "directAnswer": True,
+        "requiredTerms": [
+            "polymaker",
+            "fiberon",
+            "steer",
+            "edit",
+            "self-healing",
+            "github",
+            "zip",
+            "this is why",
+            "you should also consider",
+        ],
+        "forbiddenTerms": [
+            "no final message returned",
+            "load failed",
+            "recovery plan:",
+            "i cannot",
+            "i can't",
+        ],
+        "minAnalyticalScore": 82,
+        "goal": "Complex Codex CLI UI/TinmanX1 request should become a sequenced implementation plan with test-bank, UI, self-repair, release, and packaging cautions.",
+        "source": "workflow-scenario",
+    }
+]
+
+
+GOLDEN_TESTS.extend(domain_sample_golden_tests())
+GOLDEN_TESTS.extend(fusion_orca_sample_golden_tests())
+GOLDEN_TESTS.extend(manufacturing_sample_golden_tests())
+GOLDEN_TESTS.extend(SCENARIO_GOLDEN_TESTS)
 
 
 def default_generated_golden_tests():
@@ -1073,6 +1694,8 @@ def generated_golden_test_from_improvement(item):
     item_id = item.get("id") or improvement_item_id("improvement-test", item.get("prompt"), item.get("title"))
     prompt = compact(item.get("prompt") or item.get("title") or item.get("evidence") or "Answer this request with the improved response standard.", 700)
     evidence = " ".join(str(item.get(key, "")) for key in ("prompt", "title", "evidence", "recommendation", "nextAction")).lower()
+    diagnosis = item.get("diagnosis") if isinstance(item.get("diagnosis"), dict) else {}
+    failure_kind = str(diagnosis.get("failureKind") or "").lower()
     project_id = str(item.get("projectId") or "general")
     web_like = any(term in evidence for term in ("web", "search", "source", "price", "current", "latest", "availability", "stock", "today"))
     tool_like = item.get("type") == "tool-gap" or any(term in evidence for term in ("tool", "command not found", "missing command", "recovery", "load failed", "no final"))
@@ -1089,6 +1712,13 @@ def generated_golden_test_from_improvement(item):
         "i don't have access",
         "you can check it yourself",
     ]
+
+    if failure_kind in {"wrong-objective", "direct-answer-shape", "tone-format"}:
+        required.extend(("this is why", "you should also consider"))
+    if failure_kind in {"wrong-route", "wrong-artifact-route"}:
+        forbidden.extend(("fusion 360 script", "openscad model", "moonraker", "offline/unreachable"))
+    if failure_kind in {"unfinished-runtime", "missing-proof"}:
+        forbidden.extend(("load failed", "no final response", "staged a first-pass"))
 
     if web_like:
         any_terms.extend(("source", "http", "sources checked"))
@@ -1285,6 +1915,108 @@ def hard_case_golden_tests_synthetic_check():
     return True
 
 
+def contract_gate_golden_tests_synthetic_check():
+    by_id = {test.get("id"): test for test in golden_tests()}
+    if not CONTRACT_GATE_GOLDEN_TEST_IDS.issubset(by_id):
+        return False
+    for test_id in CONTRACT_GATE_GOLDEN_TEST_IDS:
+        test = by_id[test_id]
+        if not test.get("expectedContractKind"):
+            return False
+        if not test.get("requiredContractProof"):
+            return False
+    return True
+
+
+def domain_sample_golden_tests_synthetic_check():
+    expected_count = sum(len(info["questions"]) for info in DOMAIN_SAMPLE_QUESTION_GROUPS.values())
+    tests = [test for test in golden_tests() if test.get("source") == "domain-sample"]
+    if len(tests) != expected_count:
+        return False
+    for test in tests:
+        route = route_manager(
+            [{"role": "user", "text": test.get("prompt", "")}],
+            requested_profile="manager",
+            web_search="disabled",
+        )
+        if route.get("projectId") != test.get("expectedProjectId"):
+            return False
+        if test.get("group") != "Domain Samples":
+            return False
+        if "this is why" not in test.get("requiredTerms", []):
+            return False
+    return True
+
+
+def fusion_orca_sample_golden_tests_synthetic_check():
+    expected_count = sum(len(info["questions"]) for info in FUSION_ORCA_SAMPLE_QUESTION_GROUPS.values())
+    tests = [test for test in golden_tests() if test.get("source") == "fusion-orca-sample"]
+    if len(tests) != expected_count:
+        return False
+    seen = {category: 0 for category in FUSION_ORCA_SAMPLE_QUESTION_GROUPS}
+    for test in tests:
+        prompt = str(test.get("prompt") or "")
+        category = prompt.split(":", 1)[0]
+        info = FUSION_ORCA_SAMPLE_QUESTION_GROUPS.get(category)
+        if not info:
+            return False
+        seen[category] += 1
+        route = route_manager(
+            [{"role": "user", "text": prompt}],
+            requested_profile="manager",
+            web_search="disabled",
+        )
+        if route.get("projectId") != info.get("project"):
+            return False
+        if test.get("group") != "Fusion & Orca Samples":
+            return False
+        if "this is why" not in test.get("requiredTerms", []):
+            return False
+        if "you should also consider" not in test.get("requiredTerms", []):
+            return False
+    return all(seen[category] == len(info["questions"]) for category, info in FUSION_ORCA_SAMPLE_QUESTION_GROUPS.items())
+
+
+def manufacturing_sample_golden_tests_synthetic_check():
+    rows = load_manufacturing_question_bank()
+    tests = [test for test in golden_tests() if test.get("source") == "manufacturing-sample"]
+    if len(rows) < 100 or len(tests) != len(rows):
+        return False
+    expected = {
+        "CAD": "cad-modeling-projects",
+        "CNC Machining": "cnc-machining",
+    }
+    seen = {"CAD": 0, "CNC Machining": 0}
+    for row in rows:
+        seen[row["category"]] += 1
+        prompt = f"{row['category']}: {row['question']}"
+        route = route_manager(
+            [{"role": "user", "text": prompt}],
+            requested_profile="manager",
+            web_search="disabled",
+        )
+        if route.get("projectId") != expected[row["category"]]:
+            return False
+    return seen["CAD"] == 50 and seen["CNC Machining"] == 50
+
+
+def workflow_scenario_golden_tests_synthetic_check():
+    by_id = {test.get("id"): test for test in golden_tests()}
+    test = by_id.get("scenario-tinmanx1-polymaker-steer-self-repair-release")
+    if not test or test.get("expectedProjectId") != "codex-cli-ui-local-agent":
+        return False
+    route = route_manager(
+        [{"role": "user", "text": test.get("prompt", "")}],
+        requested_profile="manager",
+        web_search="disabled",
+    )
+    return (
+        route.get("projectId") == "codex-cli-ui-local-agent"
+        and "self-healing" in test.get("requiredTerms", [])
+        and test.get("source") == "workflow-scenario"
+    )
+
+
 BENCHMARK_TESTS = [
     {
         "id": "fast-direct",
@@ -1368,6 +2100,7 @@ QUALITY_RUBRIC_RULES = [
     "Classify the domain, platform, and operating system or firmware before choosing tools when that choice affects the answer.",
     "Use the right diagnostic family for the detected platform; do not use Klipper/Moonraker tools for Marlin/Prusa, RepRapFirmware, Bambu, or other non-Klipper systems unless evidence says they apply.",
     "When information or tooling is missing, state the gap, look for a safe/free way to discover or add the capability, then retry before giving up.",
+    "For codebase, script, installer, or self-repair work, prefer structural search with ast-grep/tree-sitter, shell linting with ShellCheck, and speed checks with hyperfine when those tools fit the problem.",
     "For recommendations, make one clear pick before alternatives unless Tinman asked for a broad comparison.",
     "Include the core reason under `This is why:` and practical caveats under `You should also consider:` when those labels fit the question.",
     "For shopping, current facts, prices, availability, specifications, or latest information, use live/current evidence and cite concise source URLs.",
@@ -1452,6 +2185,142 @@ FREE_TOOL_MANIFEST = {
         "capabilities": ["isolated Python CLI installs"],
         "free": True,
         "autoInstall": True,
+    },
+    "ast-grep": {
+        "label": "ast-grep",
+        "commands": ["sg", "ast-grep"],
+        "brew": ["ast-grep"],
+        "estimatedBytes": 70 * MIB,
+        "capabilities": [
+            "language-aware code search",
+            "structural refactor inspection",
+            "self-repair patch targeting",
+        ],
+        "free": True,
+        "autoInstall": True,
+    },
+    "tree-sitter-cli": {
+        "label": "Tree-sitter CLI",
+        "commands": ["tree-sitter"],
+        "brew": ["tree-sitter-cli"],
+        "estimatedBytes": 20 * MIB,
+        "capabilities": [
+            "syntax tree inspection",
+            "language grammar checks",
+            "code structure diagnostics",
+        ],
+        "free": True,
+        "autoInstall": True,
+    },
+    "shellcheck": {
+        "label": "ShellCheck",
+        "commands": ["shellcheck"],
+        "brew": ["shellcheck"],
+        "estimatedBytes": 90 * MIB,
+        "capabilities": [
+            "shell script linting",
+            "installer safety review",
+            "mac/Linux automation diagnostics",
+        ],
+        "free": True,
+        "autoInstall": True,
+    },
+    "hyperfine": {
+        "label": "hyperfine",
+        "commands": ["hyperfine"],
+        "brew": ["hyperfine"],
+        "estimatedBytes": 15 * MIB,
+        "capabilities": [
+            "command benchmarking",
+            "model/tool latency comparison",
+            "performance regression checks",
+        ],
+        "free": True,
+        "autoInstall": True,
+    },
+    "ruff": {
+        "label": "Ruff",
+        "commands": ["ruff"],
+        "pythonModules": ["ruff"],
+        "pip": ["ruff"],
+        "estimatedBytes": 60 * MIB,
+        "capabilities": [
+            "fast Python linting",
+            "import and syntax cleanup",
+            "self-repair validation for Python code",
+        ],
+        "free": True,
+        "autoInstall": True,
+    },
+    "pytest": {
+        "label": "pytest",
+        "commands": ["pytest"],
+        "pythonModules": ["pytest"],
+        "pip": ["pytest"],
+        "estimatedBytes": 80 * MIB,
+        "capabilities": [
+            "Python regression tests",
+            "self-repair verification",
+            "golden test execution",
+        ],
+        "free": True,
+        "autoInstall": True,
+    },
+    "mypy": {
+        "label": "mypy",
+        "commands": ["mypy"],
+        "pythonModules": ["mypy"],
+        "pip": ["mypy"],
+        "estimatedBytes": 100 * MIB,
+        "capabilities": [
+            "Python static typing checks",
+            "interface drift detection",
+            "large refactor validation",
+        ],
+        "free": True,
+        "autoInstall": True,
+    },
+    "dspy": {
+        "label": "DSPy",
+        "commands": [],
+        "pythonModules": ["dspy"],
+        "pip": ["dspy"],
+        "estimatedBytes": 650 * MIB,
+        "capabilities": [
+            "structured reasoning programs",
+            "prompt/test optimization",
+            "answer-quality tuning loops",
+        ],
+        "free": True,
+        "autoInstall": False,
+    },
+    "lancedb": {
+        "label": "LanceDB",
+        "commands": [],
+        "pythonModules": ["lancedb"],
+        "pip": ["lancedb"],
+        "estimatedBytes": 550 * MIB,
+        "capabilities": [
+            "local vector memory",
+            "retrieval over cached manuals",
+            "offline knowledge search",
+        ],
+        "free": True,
+        "autoInstall": False,
+    },
+    "mlx-lm": {
+        "label": "MLX LM",
+        "commands": ["mlx_lm.generate"],
+        "pythonModules": ["mlx_lm"],
+        "pip": ["mlx-lm"],
+        "estimatedBytes": 1200 * MIB,
+        "capabilities": [
+            "Apple-silicon local model runtime",
+            "local fine-tuning experiments",
+            "quantized model evaluation",
+        ],
+        "free": True,
+        "autoInstall": False,
     },
     "poppler": {
         "label": "Poppler PDF tools",
@@ -1635,6 +2504,9 @@ COMMAND_TO_FREE_TOOL = {
     for tool_id, manifest in FREE_TOOL_MANIFEST.items()
     for command in manifest.get("commands", [])
 }
+REASONING_TOOL_IDS = ["ast-grep", "tree-sitter-cli", "shellcheck", "hyperfine"]
+CODE_QUALITY_TOOL_IDS = ["ruff", "pytest", "mypy"]
+OPTIONAL_REASONING_TOOL_IDS = ["dspy", "lancedb", "mlx-lm"]
 
 
 def json_line(handler, payload):
@@ -1664,7 +2536,7 @@ def is_fast_mode(profile, reasoning_level):
 def default_reasoning_for_profile(profile):
     if profile == "local-fast":
         return "low"
-    if profile in {"local-review", "local-research", "cloud-research"}:
+    if profile in (LOCAL_REVIEW_PROFILES | {"local-research", "research-apply", "cloud-research"}):
         return "high"
     return DEFAULT_REASONING_LEVEL
 
@@ -1717,6 +2589,58 @@ def compact(text, limit=1400):
     if len(text) > limit:
         return text[:limit].rstrip() + "..."
     return text
+
+
+def safe_run_id(value):
+    run_id = re.sub(r"[^A-Za-z0-9_.:-]", "", str(value or ""))[:96]
+    return run_id
+
+
+def prune_live_steering(now=None):
+    now = now or time.time()
+    with LIVE_STEERING_LOCK:
+        stale = [
+            run_id
+            for run_id, state in LIVE_STEERING_BY_RUN.items()
+            if now - float(state.get("updatedAt", 0) or 0) > LIVE_STEERING_TTL_SECONDS
+        ]
+        for run_id in stale:
+            LIVE_STEERING_BY_RUN.pop(run_id, None)
+
+
+def add_live_steering(run_id, text):
+    run_id = safe_run_id(run_id)
+    note = compact(text, 1600)
+    if not run_id:
+        raise ValueError("Missing runId")
+    if not note:
+        raise ValueError("Missing steering text")
+    now = time.time()
+    prune_live_steering(now)
+    with LIVE_STEERING_LOCK:
+        state = LIVE_STEERING_BY_RUN.setdefault(run_id, {"notes": [], "createdAt": now, "updatedAt": now})
+        state["notes"].append({"text": note, "createdAt": now})
+        state["notes"] = state["notes"][-12:]
+        state["updatedAt"] = now
+        return len(state["notes"])
+
+
+def live_steering_notes(run_id):
+    run_id = safe_run_id(run_id)
+    if not run_id:
+        return []
+    prune_live_steering()
+    with LIVE_STEERING_LOCK:
+        state = LIVE_STEERING_BY_RUN.get(run_id) or {}
+        return [str(item.get("text") or "").strip() for item in state.get("notes", []) if str(item.get("text") or "").strip()]
+
+
+def finish_live_steering(run_id):
+    run_id = safe_run_id(run_id)
+    if not run_id:
+        return
+    with LIVE_STEERING_LOCK:
+        LIVE_STEERING_BY_RUN.pop(run_id, None)
 
 
 def redact_quality_text(text):
@@ -1879,6 +2803,16 @@ def record_quality_feedback(payload):
             "specialist": route.get("specialist"),
         },
     }
+    if isinstance(payload.get("diagnosis"), dict):
+        diagnosis = payload["diagnosis"]
+        record["diagnosis"] = {
+            "failureKind": compact(diagnosis.get("failureKind") or "", 80),
+            "patchTarget": compact(diagnosis.get("patchTarget") or "", 120),
+            "recommendation": compact(redact_quality_text(diagnosis.get("recommendation") or ""), 500),
+            "nextAction": compact(redact_quality_text(diagnosis.get("nextAction") or ""), 360),
+            "safePatch": bool(diagnosis.get("safePatch")),
+            "gaps": diagnosis.get("gaps", [])[:4] if isinstance(diagnosis.get("gaps"), list) else [],
+        }
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with QUALITY_FEEDBACK_PATH.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, separators=(",", ":")) + "\n")
@@ -1941,6 +2875,7 @@ def improvement_status_rank(value):
 
 
 def improvement_lab_item_summary(item):
+    diagnosis = item.get("diagnosis") if isinstance(item.get("diagnosis"), dict) else {}
     return {
         "id": item.get("id"),
         "type": item.get("type", "improvement"),
@@ -1961,6 +2896,9 @@ def improvement_lab_item_summary(item):
         "archivedAt": item.get("archivedAt"),
         "promotedTestAt": item.get("promotedTestAt"),
         "goldenTestId": item.get("goldenTestId"),
+        "diagnosis": diagnosis,
+        "failureKind": diagnosis.get("failureKind", ""),
+        "patchTarget": diagnosis.get("patchTarget", ""),
     }
 
 
@@ -1990,6 +2928,16 @@ def store_improvement_item(item):
         "nextAction": compact(redact_quality_text(item.get("nextAction") or ""), 500),
         "evidence": compact(redact_quality_text(item.get("evidence") or ""), 700),
     }
+    if isinstance(item.get("diagnosis"), dict):
+        diagnosis = item["diagnosis"]
+        fields["diagnosis"] = {
+            "failureKind": compact(diagnosis.get("failureKind") or "", 80),
+            "patchTarget": compact(diagnosis.get("patchTarget") or "", 120),
+            "recommendation": compact(redact_quality_text(diagnosis.get("recommendation") or ""), 500),
+            "nextAction": compact(redact_quality_text(diagnosis.get("nextAction") or ""), 360),
+            "safePatch": bool(diagnosis.get("safePatch")),
+            "gaps": diagnosis.get("gaps", [])[:4] if isinstance(diagnosis.get("gaps"), list) else [],
+        }
     if existing:
         status = safe_choice(existing.get("status"), {"open", "reviewed", "archived"}, "open")
         existing.update(fields)
@@ -2026,6 +2974,18 @@ def quality_feedback_improvement_item(record):
     prompt = compact(record.get("prompt") or "", 260)
     note = compact(record.get("note") or "", 260)
     project_id = str(record.get("projectId") or "general")
+    diagnosis = record.get("diagnosis") if isinstance(record.get("diagnosis"), dict) else {}
+    failure_kind = compact(diagnosis.get("failureKind") or "answer-quality", 80)
+    patch_target = compact(diagnosis.get("patchTarget") or "route, prompt, rubric, tool, or regression path", 120)
+    recommendation = (
+        diagnosis.get("recommendation")
+        or note
+        or "Turn this feedback into a reusable answer rule, then rerun the same style of request as a regression check."
+    )
+    next_action = (
+        diagnosis.get("nextAction")
+        or "Create or update a golden prompt test and adjust the project playbook/rubric that produced the weak answer."
+    )
     return {
         "id": improvement_item_id("quality-feedback", record.get("id") or prompt or note),
         "type": "answer-quality",
@@ -2033,14 +2993,12 @@ def quality_feedback_improvement_item(record):
         "source": "Fix this feedback",
         "projectId": project_id,
         "project": record.get("project") or project_id.replace("-", " ").title(),
-        "title": f"Improve answer quality: {compact(prompt or project_id, 72)}",
+        "title": f"Repair {failure_kind}: {compact(prompt or project_id, 72)}",
         "prompt": prompt,
         "evidence": note or compact(record.get("answer") or "", 420),
-        "recommendation": (
-            note
-            or "Turn this feedback into a reusable answer rule, then rerun the same style of request as a regression check."
-        ),
-        "nextAction": "Create or update a golden prompt test and adjust the project playbook/rubric that produced the weak answer.",
+        "recommendation": recommendation,
+        "nextAction": f"{next_action} Patch target: {patch_target}.",
+        "diagnosis": diagnosis,
     }
 
 
@@ -2065,6 +3023,297 @@ def golden_test_from_feedback_improvement(record, improvement):
         ),
     }
     return upsert_generated_golden_test(generated_golden_test_from_improvement(item))
+
+
+def correction_language_present(text):
+    lower = str(text or "").lower()
+    return text_has_any(
+        lower,
+        (
+            "wrong",
+            "not acceptable",
+            "failed",
+            "failure",
+            "fix this",
+            "still not",
+            "didn't answer",
+            "did not answer",
+            "missed the point",
+            "no response",
+            "try again",
+            "massive disappointment",
+        ),
+    )
+
+
+def previous_failed_answer_context(messages):
+    latest_user_index = None
+    for index in range(len(messages or []) - 1, -1, -1):
+        if str((messages or [])[index].get("role", "")).lower() == "user":
+            latest_user_index = index
+            break
+    if latest_user_index is None:
+        return None
+    correction = str((messages or [])[latest_user_index].get("text") or "").strip()
+    if not correction_language_present(correction):
+        return None
+    assistant_index = None
+    for index in range(latest_user_index - 1, -1, -1):
+        message = (messages or [])[index]
+        if str(message.get("role", "")).lower() == "assistant" and str(message.get("text") or "").strip():
+            assistant_index = index
+            break
+    if assistant_index is None:
+        return None
+    prompt_index = None
+    for index in range(assistant_index - 1, -1, -1):
+        message = (messages or [])[index]
+        if str(message.get("role", "")).lower() == "user" and str(message.get("text") or "").strip():
+            prompt_index = index
+            break
+    prompt = str((messages or [])[prompt_index].get("text") or "").strip() if prompt_index is not None else correction
+    answer = str((messages or [])[assistant_index].get("text") or "").strip()
+    return {
+        "prompt": prompt,
+        "answer": answer,
+        "correction": correction,
+        "messages": [
+            {"role": "user", "text": prompt},
+            {"role": "assistant", "text": answer},
+            {"role": "user", "text": correction},
+        ],
+    }
+
+
+def diagnose_answer_failure(messages, route=None, answer_text="", correction_text="", web_search="live"):
+    route = route or {}
+    answer = str(answer_text or "")
+    correction = str(correction_text or "").lower()
+    contract = task_contract(messages, route)
+    supervisor = autonomy_supervisor_status(
+        messages,
+        route=route,
+        answer_text=answer,
+        web_search=web_search,
+        stage="post",
+    )
+    analytical = analytical_answer_score(messages, route, answer, web_search=web_search)
+    gaps = []
+    for gap in supervisor.get("gaps", [])[:4]:
+        gaps.append({"kind": gap.get("kind", "gap"), "severity": gap.get("severity", "medium"), "reason": compact(gap.get("reason") or "", 220)})
+    for gap in analytical.get("gaps", [])[:4]:
+        if not any(existing.get("kind") == gap.get("kind") for existing in gaps):
+            gaps.append({"kind": gap.get("kind", "gap"), "severity": gap.get("severity", "medium"), "reason": compact(gap.get("reason") or "", 220)})
+
+    failure_kind = "wrong-objective"
+    if contract.get("kind") == "CAD reference" and answer_has_cad_artifact(answer):
+        failure_kind = "wrong-artifact-route"
+    elif any(gap.get("kind") == "missing-tool" for gap in gaps):
+        failure_kind = "missing-tool"
+    elif any(gap.get("kind") in {"cad-artifact-missing", "cad-research-misrouted"} for gap in gaps):
+        failure_kind = "wrong-artifact-route"
+    elif any(gap.get("kind") in {"web-disabled", "web-evidence-missing", "missing-source-evidence"} for gap in gaps):
+        failure_kind = "missing-source-evidence"
+    elif any(gap.get("kind") == "unfinished-runtime" for gap in gaps) or text_has_any(answer.lower(), ("load failed", "no final response", "no final message")):
+        failure_kind = "unfinished-runtime"
+    elif contract.get("hardGate") and text_has_any(answer.lower(), ("i staged", "first-pass", "prepared")) and not answer_has_source_url(answer):
+        failure_kind = "missing-proof"
+    elif text_has_any(correction, ("cold", "technical", "plain language", "####", "format", "tone")):
+        failure_kind = "tone-format"
+    elif contract.get("kind") == "Direct answer" and not build_direct_answer_context(messages, route):
+        failure_kind = "direct-answer-shape"
+
+    patch_targets = {
+        "missing-tool": "capability manager or tool recovery",
+        "wrong-artifact-route": "route classifier, task contract gate, or direct-answer veto",
+        "missing-source-evidence": "research routing, web evidence gate, or source citation requirement",
+        "unfinished-runtime": "local runtime fallback, model budget, or recovery answer path",
+        "missing-proof": "task contract proof gate or artifact/solver validation path",
+        "tone-format": "response coach, answer style prompt, or final polish rubric",
+        "direct-answer-shape": "direct answer classifier and response coach",
+        "wrong-objective": "route manager, analytical core, or project playbook",
+    }
+    patch_target = patch_targets.get(failure_kind, "route, prompt, rubric, tool, or regression path")
+    recommendation = (
+        f"Repair `{failure_kind}` by updating the smallest responsible {patch_target} path, "
+        "then rerun the generated regression and package health."
+    )
+    next_action = (
+        "Use the saved golden test as the guardrail; patch only after reproducing the failure and proving the fix with package health."
+    )
+    safe_patch = failure_kind in {
+        "wrong-artifact-route",
+        "direct-answer-shape",
+        "tone-format",
+        "missing-source-evidence",
+        "unfinished-runtime",
+    }
+    return {
+        "failureKind": failure_kind,
+        "patchTarget": patch_target,
+        "recommendation": recommendation,
+        "nextAction": next_action,
+        "safePatch": safe_patch,
+        "contractKind": contract.get("kind"),
+        "analyticalScore": analytical.get("score"),
+        "analyticalStatus": analytical.get("status"),
+        "gaps": gaps[:6],
+    }
+
+
+def run_wrong_answer_repair_loop(payload, source="fix-this-feedback", record=True):
+    route = payload.get("route") if isinstance(payload.get("route"), dict) else {}
+    messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+    prompt = str(payload.get("prompt") or latest_user_text(messages) or "")
+    answer = str(payload.get("answer") or payload.get("answerText") or "")
+    correction = str(payload.get("note") or payload.get("correction") or "")
+    if not messages and prompt:
+        messages = [{"role": "user", "text": prompt}]
+    if not route:
+        route = route_manager(messages, requested_profile="manager", web_search=payload.get("webSearch") or DEFAULT_WEB_SEARCH)
+    diagnosis = diagnose_answer_failure(
+        messages,
+        route=route,
+        answer_text=answer,
+        correction_text=correction,
+        web_search=payload.get("webSearch") or DEFAULT_WEB_SEARCH,
+    )
+    feedback_payload = {
+        **payload,
+        "rating": "fix",
+        "note": correction,
+        "prompt": prompt,
+        "answer": answer,
+        "messages": messages,
+        "route": route,
+        "diagnosis": diagnosis,
+    }
+    feedback_record = record_quality_feedback(feedback_payload) if record else {
+        "id": "synthetic-repair",
+        "rating": "fix",
+        "note": correction,
+        "prompt": prompt,
+        "answer": answer,
+        "projectId": route.get("projectId", "general"),
+        "project": route.get("project", "General Helper"),
+        "diagnosis": diagnosis,
+    }
+    improvement = record_improvement_from_feedback(feedback_record) if record else quality_feedback_improvement_item(feedback_record)
+    golden_test = golden_test_from_feedback_improvement(feedback_record, improvement) if record else generated_golden_test_from_improvement(improvement)
+    self_healing = self_healing_supervise(
+        {
+            "trigger": source,
+            "messages": messages,
+            "answerText": answer,
+            "cwd": payload.get("cwd") or "",
+            "route": route,
+            "webSearch": payload.get("webSearch") or DEFAULT_WEB_SEARCH,
+            "autoRecover": True,
+            "autoInstall": True,
+        },
+        record=record,
+    )
+    signature = self_healing_signature(
+        f"{source}:{diagnosis.get('failureKind')}",
+        messages,
+        answer_text=answer or correction,
+    )
+    patch_item = queue_self_patch_candidate(
+        signature,
+        title=f"Self-repair candidate: {diagnosis.get('failureKind')}",
+        evidence=correction or answer,
+        recommendation=diagnosis.get("recommendation") or "",
+        severity="high" if diagnosis.get("safePatch") else "medium",
+        next_action=diagnosis.get("nextAction") or "",
+    ) if record else {
+        "id": "synthetic-self-patch",
+        "signature": signature,
+        "title": f"Self-repair candidate: {diagnosis.get('failureKind')}",
+    }
+    if self_healing and isinstance(self_healing, dict):
+        self_healing.setdefault("event", {})["patchQueued"] = patch_item
+        self_healing["queue"] = self_patch_queue_summary() if record else {"openCount": 1, "items": [patch_item]}
+    return {
+        "ok": True,
+        "record": feedback_record,
+        "improvement": improvement,
+        "goldenTest": golden_test,
+        "diagnosis": diagnosis,
+        "selfHealing": self_healing,
+        "patchItem": patch_item,
+    }
+
+
+def record_natural_correction_repair(messages, cwd="", web_search="live"):
+    context = previous_failed_answer_context(messages)
+    if not context:
+        return None
+    repair_messages = [{"role": "user", "text": context["prompt"]}]
+    repair_route = route_manager(repair_messages, requested_profile="manager", web_search=web_search)
+    return run_wrong_answer_repair_loop(
+        {
+            "prompt": context["prompt"],
+            "answer": context["answer"],
+            "note": context["correction"],
+            "messages": repair_messages,
+            "cwd": cwd,
+            "webSearch": web_search,
+            "route": repair_route,
+        },
+        source="natural-correction",
+        record=True,
+    )
+
+
+def wrong_answer_repair_loop_synthetic_check():
+    messages = [{"role": "user", "text": "What file type from Fusion preserves component names?"}]
+    route = route_manager(messages, requested_profile="manager", web_search="disabled")
+    loop = run_wrong_answer_repair_loop(
+        {
+            "prompt": messages[0]["text"],
+            "answer": "Fusion 360 script: /tmp/generated.py\nOpenSCAD model: /tmp/model.scad",
+            "note": "That is wrong. I wanted the direct file type answer, not generated CAD files.",
+            "messages": messages,
+            "route": route,
+            "webSearch": "disabled",
+        },
+        source="synthetic-wrong-answer",
+        record=False,
+    )
+    natural = previous_failed_answer_context(
+        [
+            {"role": "user", "text": "What is the best temp for this PCTG image?"},
+            {"role": "assistant", "text": "Fusion 360 script: stale.py"},
+            {"role": "user", "text": "This is wrong and not acceptable."},
+        ]
+    )
+    diagnosis = loop.get("diagnosis") or {}
+    golden = loop.get("goldenTest") or {}
+    return (
+        loop.get("ok")
+        and diagnosis.get("failureKind") in {"wrong-artifact-route", "wrong-objective"}
+        and bool(loop.get("patchItem"))
+        and golden.get("source") == "improvement-lab"
+        and natural
+        and natural.get("prompt", "").startswith("What is the best temp")
+    )
+
+
+def self_repair_receipt_note(repair):
+    if not repair:
+        return ""
+    diagnosis = repair.get("diagnosis") or {}
+    golden = repair.get("goldenTest") or {}
+    patch = repair.get("patchItem") or (repair.get("selfHealing") or {}).get("event", {}).get("patchQueued") or {}
+    parts = [f"Self-repair captured this correction as `{diagnosis.get('failureKind', 'answer-quality')}`"]
+    if golden.get("id"):
+        parts.append(f"saved regression `{golden.get('id')}`")
+    if patch.get("id"):
+        parts.append(f"queued patch `{patch.get('id')}`")
+    target = diagnosis.get("patchTarget")
+    if target:
+        parts.append(f"target: {target}")
+    return "; ".join(parts) + "."
 
 
 def capability_result_improvement_item(result):
@@ -2495,7 +3744,7 @@ def is_printer_machine(machine):
     name = str(machine.get("name", "")).lower()
     notes = str(machine.get("notes", "")).lower()
     text = f"{name} {notes}"
-    if any(term in name for term in ("router", "vpn gateway", "netgear")):
+    if any(term in name for term in ("router", "makersvpn", "netgear")):
         return False
     printer_terms = (
         "qidi",
@@ -2732,6 +3981,7 @@ def is_cad_design_request(messages):
         or is_cad_reference_question(messages)
         or is_orca_calibration_image_question(messages)
         or is_temperature_tower_image_question(messages)
+        or is_embedded_linux_image_request(messages)
     ):
         return False
     latest = latest_user_text(messages).lower()
@@ -2978,18 +4228,12 @@ def sanitize_filename(value, fallback="attachment.bin"):
     return name[:180] or fallback
 
 
-def save_uploaded_file(payload):
-    name = sanitize_filename(payload.get("name"), fallback="attachment.bin")
-    raw_size = int(payload.get("size") or 0)
-    data_text = str(payload.get("dataBase64") or "")
-    if "," in data_text and data_text.lower().startswith("data:"):
-        data_text = data_text.split(",", 1)[1]
+def save_uploaded_bytes(name, data, content_type="application/octet-stream", raw_size=0):
+    name = sanitize_filename(name, fallback="attachment.bin")
+    data = data or b""
+    raw_size = int(raw_size or 0)
     if raw_size > MAX_UPLOAD_BYTES:
         raise ValueError(f"Upload is too large: {human_bytes(raw_size)} > {human_bytes(MAX_UPLOAD_BYTES)}")
-    try:
-        data = base64.b64decode(data_text, validate=True)
-    except Exception as exc:
-        raise ValueError(f"Attachment data is not valid base64: {exc}") from exc
     if len(data) > MAX_UPLOAD_BYTES:
         raise ValueError(f"Upload is too large: {human_bytes(len(data))} > {human_bytes(MAX_UPLOAD_BYTES)}")
     if raw_size and abs(raw_size - len(data)) > 1:
@@ -3008,8 +4252,54 @@ def save_uploaded_file(payload):
         "name": name,
         "path": str(target),
         "size": len(data),
-        "contentType": str(payload.get("type") or "application/octet-stream"),
+        "contentType": str(content_type or "application/octet-stream"),
     }
+
+
+def save_uploaded_file(payload):
+    name = sanitize_filename(payload.get("name"), fallback="attachment.bin")
+    raw_size = int(payload.get("size") or 0)
+    data_text = str(payload.get("dataBase64") or "")
+    if "," in data_text and data_text.lower().startswith("data:"):
+        data_text = data_text.split(",", 1)[1]
+    if raw_size > MAX_UPLOAD_BYTES:
+        raise ValueError(f"Upload is too large: {human_bytes(raw_size)} > {human_bytes(MAX_UPLOAD_BYTES)}")
+    try:
+        data = base64.b64decode(data_text, validate=True)
+    except Exception as exc:
+        raise ValueError(f"Attachment data is not valid base64: {exc}") from exc
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise ValueError(f"Upload is too large: {human_bytes(len(data))} > {human_bytes(MAX_UPLOAD_BYTES)}")
+    if raw_size and abs(raw_size - len(data)) > 1:
+        raise ValueError("Attachment size did not match the uploaded data.")
+    return save_uploaded_bytes(name, data, str(payload.get("type") or "application/octet-stream"), raw_size=raw_size)
+
+
+def save_uploaded_multipart(handler):
+    length = int(handler.headers.get("Content-Length", "0") or "0")
+    if length > MAX_UPLOAD_BYTES + 8192:
+        raise ValueError(f"Upload is too large: {human_bytes(length)} > {human_bytes(MAX_UPLOAD_BYTES)}")
+    environ = {
+        "REQUEST_METHOD": "POST",
+        "CONTENT_TYPE": handler.headers.get("Content-Type", ""),
+        "CONTENT_LENGTH": str(length),
+    }
+    form = cgi.FieldStorage(
+        fp=handler.rfile,
+        headers=handler.headers,
+        environ=environ,
+        keep_blank_values=True,
+    )
+    if "file" not in form:
+        raise ValueError("Multipart upload did not include a file field.")
+    file_item = form["file"]
+    if isinstance(file_item, list):
+        file_item = file_item[0]
+    filename = form.getfirst("name") or getattr(file_item, "filename", "") or "attachment.bin"
+    content_type = form.getfirst("type") or getattr(file_item, "type", "") or "application/octet-stream"
+    raw_size = int(form.getfirst("size") or 0)
+    data = file_item.file.read() if getattr(file_item, "file", None) else b""
+    return save_uploaded_bytes(filename, data, content_type, raw_size=raw_size)
 
 
 def default_admin_state():
@@ -3161,6 +4451,9 @@ def route_admin_topic(messages, route=None):
         project_boosts["3d-printers"] = project_boosts.get("3d-printers", 0) + 50
         folder_id = "filament" if text_has_any(context_query, ("pctg", "filament", "spool", "pla", "petg", "asa", "abs")) else "processes"
         folder_boosts[("3d-printers", folder_id)] = folder_boosts.get(("3d-printers", folder_id), 0) + 50
+    if isinstance(route, dict) and route.get("projectId") == "embedded-linux-images":
+        project_boosts["embedded-linux"] = project_boosts.get("embedded-linux", 0) + 60
+        folder_boosts[("embedded-linux", "os-images")] = folder_boosts.get(("embedded-linux", "os-images"), 0) + 60
     scored = []
     for project_id, project in ADMIN_TAXONOMY.items():
         score, matched = admin_project_score(project_id, project, query, route or {})
@@ -4269,7 +5562,6 @@ def is_cad_reference_question(messages):
         "body",
         "assembly",
         "mesh",
-        "slicer",
     )
     reference_terms = (
         "file type",
@@ -4342,6 +5634,26 @@ def route_query_text(messages, cwd=""):
     return "\n".join(recent).lower()
 
 
+def domain_sample_project_override(text):
+    text = str(text or "").lower().strip()
+    prefix_map = (
+        ("3d printing:", "tinmanx-slicer-research"),
+        ("3d-printing:", "tinmanx-slicer-research"),
+        ("cad:", "cad-modeling-projects"),
+        ("cnc machining:", "cnc-machining"),
+        ("solar and wind technology:", "energy-power-research"),
+        ("solar/wind technology:", "energy-power-research"),
+        ("aerodynamics:", "cad-modeling-projects"),
+        ("cfd analysis:", "cad-modeling-projects"),
+        ("engineering:", "cad-modeling-projects"),
+        ("aviation:", "aviation-engineering"),
+    )
+    for prefix, project_id in prefix_map:
+        if text.startswith(prefix):
+            return project_id
+    return ""
+
+
 def project_from_thread(messages):
     for message in reversed(messages or []):
         route = message.get("route") if isinstance(message, dict) else None
@@ -4398,20 +5710,45 @@ def is_engineering_diagram_request(messages):
     return False
 
 
+def is_codex_ui_workflow_scenario_request(messages):
+    query = latest_user_text(messages).lower()
+    if not query:
+        return False
+    ui_terms = ("steer", "edit question", "fix this", "self-healing", "self healing", "github", "zip", "test bank")
+    return (
+        text_has_any(query, ("codex cli ui", "codex ui", "your son", "him", "tinmanx1"))
+        and text_has_any(query, ("steer", "edit question"))
+        and text_has_any(query, ("self-healing", "self healing", "fix his own code", "figure out why"))
+        and text_has_any(query, ("github", "zip", "package"))
+        and sum(1 for term in ui_terms if term in query) >= 4
+    )
+
+
 def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_search="live"):
     text = route_query_text(messages, cwd)
+    domain_override = domain_sample_project_override(text)
     previous_project = project_from_thread(messages)
+    research_apply = is_research_apply_request(messages) or requested_profile in RESEARCH_APPLY_PROFILES
     cpap_hose_spec = is_cpap_hose_spec_question(messages)
     cooling_duct_research = is_cooling_duct_research_request(messages)
     cad_reference = is_cad_reference_question(messages)
     cad_design = is_cad_design_request(messages)
+    fusion_cam = is_fusion_cam_question(messages)
     stl_cfd_design = is_stl_cfd_duct_design_request(messages)
     engineering_diagram = is_engineering_diagram_request(messages)
+    embedded_image = is_embedded_linux_image_request(messages)
+    codex_ui_workflow_scenario = is_codex_ui_workflow_scenario_request(messages)
+    orca_profile_creation = is_orca_profile_creation_request(messages)
+    orca_nozzle_visibility = is_orca_nozzle_visibility_question(messages)
+    orca_slicer_workflow = is_orca_slicer_workflow_question(messages)
     printing_calibration_or_profile = (
         is_filament_profile_pull_request(messages)
+        or orca_profile_creation
+        or orca_slicer_workflow
         or is_temperature_tower_image_question(messages)
         or is_temperature_tower_pressure_advance_followup(messages)
         or is_orca_calibration_image_question(messages)
+        or orca_nozzle_visibility
     )
     public_printer_research = wants_public_printer_research(messages) and not (cad_design or stl_cfd_design)
     scores = []
@@ -4447,10 +5784,26 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
     else:
         score, project_id, matched = 0, "general", []
 
-    if engineering_diagram:
+    if domain_override:
+        project_id = domain_override
+        score = max(score, 40)
+        matched = ["domain-sample"] + [item for item in matched if item != "domain-sample"]
+    elif codex_ui_workflow_scenario:
+        project_id = "codex-cli-ui-local-agent"
+        score = max(score, 42)
+        matched = ["codex-ui-workflow-scenario"] + [item for item in matched if item != "codex-ui-workflow-scenario"]
+    elif fusion_cam:
+        project_id = "cad-modeling-projects"
+        score = max(score, 34)
+        matched = ["fusion-cam"] + [item for item in matched if item != "fusion-cam"]
+    elif engineering_diagram:
         project_id = "engineering-diagrams"
         score = max(score, 36)
         matched = ["engineering-diagram"] + [item for item in matched if item != "engineering-diagram"]
+    elif embedded_image:
+        project_id = "embedded-linux-images"
+        score = max(score, 42)
+        matched = ["embedded-linux-image"] + [item for item in matched if item != "embedded-linux-image"]
     elif stl_cfd_design:
         project_id = "cad-modeling-projects"
         score = max(score, 36)
@@ -4471,6 +5824,18 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
         project_id = "cad-modeling-projects"
         score = max(score, 32)
         matched = ["cad-design"] + [item for item in matched if item != "cad-design"]
+    elif orca_profile_creation:
+        project_id = "tinmanx-slicer-research"
+        score = max(score, 34)
+        matched = ["orca-profile-creation"] + [item for item in matched if item != "orca-profile-creation"]
+    elif orca_nozzle_visibility:
+        project_id = "tinmanx-slicer-research"
+        score = max(score, 34)
+        matched = ["orca-nozzle-visibility"] + [item for item in matched if item != "orca-nozzle-visibility"]
+    elif orca_slicer_workflow:
+        project_id = "tinmanx-slicer-research"
+        score = max(score, 34)
+        matched = ["orca-slicer-workflow"] + [item for item in matched if item != "orca-slicer-workflow"]
     elif printing_calibration_or_profile:
         project_id = "tinmanx-slicer-research"
         score = max(score, 32)
@@ -4478,6 +5843,8 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
 
     playbook = PROJECT_PLAYBOOKS[project_id]
     public_research = (
+        research_apply
+        or
         wants_research_quality_context(messages)
         or wants_web_context(messages)
         or public_printer_research
@@ -4491,7 +5858,7 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
         "upload", "restart", "deploy", "production", "flightops",
     )
     needs_local = (
-        (any(term in text for term in local_need_terms) or cad_design or stl_cfd_design)
+        (any(term in text for term in local_need_terms) or cad_design or stl_cfd_design or embedded_image)
         and not public_printer_research
         and not cooling_duct_research
     )
@@ -4510,6 +5877,8 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
         or public_printer_research
     ):
         engine = "local-research"
+    if research_apply:
+        engine = "research-apply" if web_search == "live" else "local"
     if web_search == "disabled" and engine in {"cloud", "local-research"}:
         engine = "local"
     if engine == "cloud" and not openai_key_available():
@@ -4520,6 +5889,8 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
     local_profile = playbook.get("local_profile", "local-fast")
     if engine == "cloud":
         effective_profile = "cloud-research"
+    elif engine == "research-apply":
+        effective_profile = "research-apply"
     elif engine == "local-research":
         effective_profile = "local-research"
     else:
@@ -4532,7 +5903,7 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
         "specialist": playbook["specialist"],
         "engine": engine,
         "effectiveProfile": effective_profile,
-        "reasoningLevel": playbook.get("reasoning", "medium"),
+        "reasoningLevel": "high" if research_apply else playbook.get("reasoning", "medium"),
         "confidence": confidence,
         "score": score,
         "matched": matched,
@@ -4554,6 +5925,11 @@ def format_manager_context(route):
         "",
         "Specialist playbook:",
     ]
+    if isinstance(route.get("selfRepair"), dict):
+        diagnosis = route["selfRepair"].get("diagnosis") or {}
+        lines.append(
+            f"- Self-repair active: prior answer was classified as `{diagnosis.get('failureKind', 'answer-quality')}`; use this response to correct the failure, not repeat it."
+        )
     lines.extend(f"- {rule}" for rule in playbook.get("rules", ()))
     lines.extend(
         [
@@ -4781,6 +6157,41 @@ def wants_material_shopping_context(messages):
     )
 
 
+def is_research_apply_request(messages):
+    text = "\n".join(str(message.get("text", "")) for message in messages[-4:]).lower()
+    research_terms = (
+        "research",
+        "search the web",
+        "look up",
+        "find sources",
+        "from the web",
+        "learn from",
+        "what you learn",
+        "what he learns",
+        "industry",
+        "source-backed",
+    )
+    apply_terms = (
+        "apply",
+        "applied",
+        "apply what",
+        "use what",
+        "use that",
+        "incorporate",
+        "fold that",
+        "turn that into",
+        "implement",
+        "update",
+        "patch",
+        "change the project",
+        "project we are working on",
+        "our project",
+        "to the project",
+        "to this project",
+    )
+    return any(term in text for term in research_terms) and any(term in text for term in apply_terms)
+
+
 def build_research_quality_context(messages):
     if not wants_research_quality_context(messages):
         return ""
@@ -4795,6 +6206,23 @@ def build_research_quality_context(messages):
             "- Do not say an item `meets the requirement` unless the relevant RPM, voltage, phase/output type, and price are explicitly supported.",
             "- If the evidence is seller-only or incomplete, make a practical pick but tell Tinman exactly what to ask the seller before buying.",
             "- Use concise source links at the end or inline with each item.",
+            "",
+        ]
+    )
+
+
+def build_research_apply_context(messages, route=None):
+    if not is_research_apply_request(messages) and (route or {}).get("engine") != "research-apply":
+        return ""
+    return "\n".join(
+        [
+            "Research + Apply workflow:",
+            "- Do not stop at a research summary. Convert source evidence into project action.",
+            "- Workflow: research brief -> distilled lessons -> project impact map -> applied output/change or explicit blocker -> verification -> durable lesson pointer.",
+            "- For project edits, profile updates, presets, or workflow changes, use the Project Apply executor (`POST /api/tools/project-apply`) to create a target inventory, apply plan, and manifest before claiming live files were changed.",
+            "- The final answer must include source URLs, what was learned, how it applies to the active project, what file/artifact/profile/design note was created or changed, and how it was verified.",
+            "- If a real project change is unsafe, ambiguous, or blocked, stage a local research/apply receipt and state the exact blocker before claiming the project was updated.",
+            "- Store only stable lessons and source pointers. Do not store raw source text, secrets, credentials, volatile prices, or current availability as stable knowledge.",
             "",
         ]
     )
@@ -4836,6 +6264,35 @@ def build_web_disabled_context(messages):
             "",
         ]
     )
+
+
+def build_attachment_context(messages):
+    attachments = message_attachments(messages)
+    if not attachments:
+        return ""
+
+    lines = [
+        "Attachment context:",
+        "- Treat attached local paths as readable files on this Mac when they exist.",
+        "- For very large files, inspect metadata first and avoid copying them unless Tinman explicitly asks.",
+    ]
+    for index, attachment in enumerate(attachments[-8:], start=1):
+        name = str(attachment.get("name") or "attached file")
+        path = str(attachment.get("path") or "")
+        content_type = str(attachment.get("type") or attachment.get("contentType") or "application/octet-stream")
+        try:
+            size = int(float(attachment.get("size") or 0))
+        except (TypeError, ValueError):
+            size = 0
+        source = str(attachment.get("source") or "upload")
+        exists = Path(path).expanduser().is_file() if path else False
+        size_label = human_bytes(size) if size else "unknown size"
+        lines.append(
+            f"- Attachment {index}: {name}; type={content_type}; size={size_label}; "
+            f"source={source}; exists={str(exists).lower()}; path={path or '(no path)'}"
+        )
+    lines.append("")
+    return "\n".join(lines)
 
 
 def moonraker_get(path, timeout=4, base_url=None):
@@ -4954,6 +6411,20 @@ def detected_domain_profile(messages, route=None):
         "volatility": "volatile/current" if is_volatile_query_text(query) or wants_web_context(messages) else "mostly stable",
         "risk": "normal",
     }
+    if route_id == "embedded-linux-images" or is_embedded_linux_image_request(messages):
+        profile.update(
+            {
+                "domain": "embedded Linux OS-image compatibility",
+                "platform": "Raspberry Pi / RatOS boot image workflow",
+                "platformConfidence": "high",
+                "toolFamily": "compressed image inspection, boot partition read-only mount, Raspberry Pi firmware/DTB/kernel checks, service verification after boot",
+                "firstChecks": ["source .img.xz path", "compressed/uncompressed size", "boot partition firmware", "Pi 5 DTB", "kernel/modules", "RatOS services"],
+                "avoid": "Do not route to CAD/CFD/FEA, do not expand or flash multi-gigabyte images without storage/media confirmation, and do not claim Pi 5 bootability without inspection or boot testing.",
+                "evidenceNeed": "Use local file inspection first, then official RatOS/Raspberry Pi sources if packages or current Pi 5 support status must be confirmed.",
+                "risk": "system image / boot media",
+            }
+        )
+        return profile
     if route_id == "cad-modeling-projects" or is_cad_design_request(messages):
         profile.update(
             {
@@ -5022,6 +6493,7 @@ def build_analytical_context(messages, route=None, web_search="live", local_tool
         return ""
     profile = detected_domain_profile(messages, route or {})
     core = analytical_core_profile(messages, route or {}, web_search=web_search, local_tools=local_tools)
+    contract = task_contract(messages, route or {})
     decision = core.get("decisionFrame") or {}
     lines = [
         "Analytical operating system:",
@@ -5044,7 +6516,18 @@ def build_analytical_context(messages, route=None, web_search="live", local_tool
         f"- Analytical mode: {core.get('mode')} ({core.get('complexity')} complexity, {core.get('riskLevel')} risk).",
         f"- Actual objective: {core.get('objective')}.",
         f"- Done means: {core.get('doneMeans')}.",
+        "",
+        "Task contract gate:",
+        f"- Task type: {contract.get('kind')}.",
+        f"- Done means: {contract.get('doneMeans')}.",
     ]
+    if contract.get("mustDo"):
+        lines.append(f"- Must do before final: {', '.join(contract.get('mustDo')[:8])}.")
+    if contract.get("requiredProof"):
+        lines.append(f"- Required proof: {', '.join(contract.get('requiredProof')[:8])}.")
+    if contract.get("rejectIf"):
+        lines.append(f"- Reject the answer if: {', '.join(contract.get('rejectIf')[:8])}.")
+    lines.append("")
     if core.get("explicitConstraints"):
         lines.append(f"- Explicit constraints to preserve: {', '.join(core.get('explicitConstraints')[:8])}.")
     if decision.get("criteria"):
@@ -5074,8 +6557,28 @@ def build_analytical_context(messages, route=None, web_search="live", local_tool
 def analytical_core_mode(messages, route=None):
     query = latest_user_text(messages).lower()
     route_id = (route or {}).get("projectId", "")
+    route_engine = (route or {}).get("engine", "")
+    if route_engine == "research-apply" or is_research_apply_request(messages):
+        return "research-apply"
+    if "ai" in query and "print" in query and "failure" in query and text_has_any(query, ("monitor", "detection", "detect")):
+        return "decision"
+    if text_has_any(query, ("tinmanx", "orca", "rocket slicer", "bambu slicer")) and text_has_any(query, ("facelift", "new look", "colors", "opening tile", "branding", "theme")):
+        return "implementation"
+    if is_orca_profile_creation_request(messages):
+        return "implementation"
+    if is_fusion_cam_question(messages):
+        return "diagnostics"
+    if is_orca_slicer_workflow_question(messages):
+        query_for_mode = latest_user_text(messages).lower()
+        if text_has_any(query_for_mode, ("facelift", "new look", "colors", "opening tile", "branding", "theme")):
+            return "implementation"
+        if text_has_any(query_for_mode, ("is there any way", "options", "more control", "device tab", "devive tab")):
+            return "decision"
+        return "diagnostics"
     if is_cpap_hose_spec_question(messages) or is_fusion_component_export_question(messages) or is_filament_profile_pull_request(messages):
         return "direct-answer"
+    if is_orca_nozzle_visibility_question(messages):
+        return "decision"
     if is_temperature_tower_image_question(messages) or is_temperature_tower_pressure_advance_followup(messages) or is_orca_calibration_image_question(messages):
         return "decision"
     if is_engineering_diagram_request(messages):
@@ -5087,6 +6590,8 @@ def analytical_core_mode(messages, route=None):
     if wants_research_quality_context(messages) or wants_web_context(messages) or route_id in {"energy-power-research", "research-parts-reference", "tinmanx-slicer-research"}:
         return "evidence-research"
     if text_has_any(query, ("compare", "best", "choose", "recommend", "which", "should i", "price", "availability")):
+        return "decision"
+    if text_has_any(query, ("what action should", "how do i stop", "what should i do")):
         return "decision"
     if text_has_any(query, ("write", "code", "script", "macro", "config", "fix", "implement", "build", "app", "github", "repo")):
         return "implementation"
@@ -5118,6 +6623,12 @@ def analytical_core_complexity(messages):
 
 def analytical_core_risk(messages, route=None):
     query = latest_user_text(messages).lower()
+    if is_orca_profile_creation_request(messages):
+        return "normal"
+    if is_fusion_cam_question(messages) or is_orca_slicer_workflow_question(messages):
+        return "normal"
+    if is_orca_nozzle_visibility_question(messages):
+        return "normal"
     if text_has_any(query, ("live printer", "restart", "upload", "heater", "nozzle", "bed", "moonraker", "ssh", "password", "credential", "delete", "reset", "sudo")):
         return "live-system"
     if text_has_any(query, ("wire", "wiring", "electrical", "solar", "battery", "grid", "vfd", "mains", "240", "120", "vac", "breaker", "fuse", "e-stop", "estop")):
@@ -5160,6 +6671,10 @@ def analytical_decision_frame(mode, risk_level, route=None):
         criteria.extend(["source quality", "currentness", "exact spec match", "reject weak matches"])
         checks.extend(["primary/official sources", "date/availability", "operating point", "price/spec caveats"])
         reject.extend(["marketplace label treated as proof", "stale or uncited current claim"])
+    if mode == "research-apply":
+        criteria.extend(["source quality", "project fit", "implementation proof", "verification"])
+        checks.extend(["primary/official sources", "distilled lesson", "project impact map", "applied output or blocker", "validation receipt"])
+        reject.extend(["research summary with no project application", "uncited lesson", "claims project changes without a path or verification"])
     if mode == "implementation":
         criteria.extend(["minimal scoped change", "tests/verifications", "no unrelated churn"])
         checks.extend(["repo patterns", "syntax/test command", "git status", "release/privacy checks when publishing"])
@@ -5184,6 +6699,10 @@ def analytical_missing_inputs(mode, risk_level, messages):
         missing.extend(["exact error/symptom", "current state", "recent changes"])
     if mode == "evidence-research" and not text_has_any(query, ("current", "latest", "today", "price", "availability", "source", "manual", "datasheet")):
         missing.append("source freshness requirement")
+    if mode == "research-apply":
+        if not text_has_any(query, ("project", "profile", "preset", "cad", "repo", "app", "workflow", "design", "file", "code")):
+            missing.append("target project artifact or workflow")
+        missing.append("verification acceptance criteria")
     if risk_level == "safety-critical":
         missing.extend(["applicable code/manual", "protective device ratings"])
     return list(dict.fromkeys(missing))[:8]
@@ -5195,6 +6714,7 @@ def analytical_done_means(mode):
         "engineering-design": "artifact or concrete design basis with assumptions, math, and validation limits",
         "diagnostics": "ranked root-cause hypothesis with safe next test and stop conditions",
         "evidence-research": "source-backed recommendation with exact-match reasoning and rejects",
+        "research-apply": "source-backed research plus a project-specific applied output, verification, and durable lesson pointer",
         "decision": "clear pick or ranked options with criteria and tradeoffs",
         "implementation": "scoped change, verification, and GitHub/package state when applicable",
         "calculation": "formula, inputs, units, result, and sanity check",
@@ -5251,6 +6771,13 @@ def analytical_answer_gaps(messages, route=None, answer_text="", web_search="liv
     )
     if mode in {"decision", "evidence-research"} and not missing_geometry_blocker and not text_has_any(lower, ("recommend", "pick", "best", "choose", "would use", "buy", "skip", "reject")):
         gaps.append({"kind": "no-decision", "severity": "high", "reason": "The answer does not make a clear recommendation or ranked decision."})
+    if mode == "research-apply":
+        if not answer_has_source_url(answer):
+            gaps.append({"kind": "missing-research-sources", "severity": "high", "reason": "Research + Apply needs source URLs."})
+        if not text_has_any(lower, ("applied to project", "project application", "applied output", "changed file", "created file", "updated", "blocked")):
+            gaps.append({"kind": "missing-project-application", "severity": "high", "reason": "Research + Apply stopped before mapping evidence to project action."})
+        if not text_has_any(lower, ("verified", "validation", "receipt", "test", "package health", "blocked because")):
+            gaps.append({"kind": "missing-application-proof", "severity": "medium", "reason": "Research + Apply needs a verification note or honest blocker."})
     if mode == "diagnostics" and not text_has_any(lower, ("first", "check", "test", "likely", "root", "cause", "because")):
         gaps.append({"kind": "no-diagnostic-path", "severity": "high", "reason": "The answer does not give a ranked diagnostic path."})
     if mode in {"engineering-design", "systems-design", "calculation"} and not text_has_any(lower, ("assumption", "verify", "validate", "check", "safety", "constraint", "rating")):
@@ -5339,8 +6866,10 @@ def build_direct_answer_context(messages, route):
         "what is",
         "what are",
         "what is the best",
+        "what information",
         "what file",
         "what format",
+        "what do",
         "best all around",
         "best first step",
         "can you tell me",
@@ -5348,6 +6877,15 @@ def build_direct_answer_context(messages, route):
         "how much",
         "how many",
         "which",
+        "how do i",
+        "how should i",
+        "how do i stop",
+        "what action should",
+        "what should i do",
+        "when should i",
+        "why does",
+        "why did",
+        "why is",
         "do you know",
     )
     if not any(trigger in lower for trigger in direct_triggers):
@@ -5757,69 +7295,81 @@ PRINTING_COMPONENT_LIBRARY = {
 
 PRINTING_PROFILE_PARAMETER_STARTS = {
     "pla": {
-        "nozzleTemp": "200-220 C",
-        "bedTemp": "45-60 C",
-        "fan": "80-100%",
-        "flowRatio": "0.98-1.02 starting point",
+        "nozzleTemp": "205-220 C",
+        "bedTemp": "50-60 C",
+        "chamber": "open or cool enclosure",
+        "fan": "80-100% after first layers",
+        "flowRatio": "0.96-1.00 starting point",
         "pressureAdvance": "0.015-0.040 starting range for direct drive",
-        "maxVolumetric": "12-22 mm3/s depending on hotend",
-        "notes": "Tune temperature first, then flow, then pressure advance.",
+        "maxVolumetric": "12-20 mm3/s until tested",
+        "retraction": "direct drive 0.4-0.8 mm at 25-40 mm/s",
+        "notes": "Use strong part cooling; tune temp and flow before chasing stringing.",
     },
     "petg": {
-        "nozzleTemp": "230-255 C",
+        "nozzleTemp": "235-255 C",
         "bedTemp": "70-85 C",
-        "fan": "20-60%",
-        "flowRatio": "0.96-1.00 starting point",
-        "pressureAdvance": "0.020-0.060 starting range for direct drive",
-        "maxVolumetric": "8-16 mm3/s until tested",
-        "notes": "Reduce overcooling and avoid over-squish.",
-    },
-    "pctg": {
-        "nozzleTemp": "245-270 C",
-        "bedTemp": "70-90 C",
-        "fan": "20-60%",
-        "flowRatio": "0.96-1.00 starting point",
+        "chamber": "open or mild enclosure",
+        "fan": "20-50%, more for bridges",
+        "flowRatio": "0.95-1.00 starting point",
         "pressureAdvance": "0.020-0.060 starting range for direct drive",
         "maxVolumetric": "8-14 mm3/s until tested",
-        "notes": "Treat as a tough PETG-family material and tune stringing carefully.",
+        "retraction": "direct drive 0.5-1.0 mm at 25-35 mm/s",
+        "notes": "Avoid over-squish and excessive fan; dry before stringing tests.",
+    },
+    "pctg": {
+        "nozzleTemp": "250-270 C",
+        "bedTemp": "75-90 C",
+        "chamber": "mild enclosure if available",
+        "fan": "20-45%, more only for bridges/details",
+        "flowRatio": "0.95-1.00 starting point",
+        "pressureAdvance": "0.020-0.060 starting range for direct drive",
+        "maxVolumetric": "7-12 mm3/s until tested",
+        "retraction": "direct drive 0.5-1.0 mm at 25-35 mm/s",
+        "notes": "Treat it like a tougher PETG family material: dry, moderate fan, tune flow carefully.",
     },
     "abs": {
         "nozzleTemp": "245-270 C",
-        "bedTemp": "90-110 C",
-        "chamber": "45-60 C enclosed",
-        "fan": "0-25% except bridges/details",
-        "flowRatio": "0.98-1.02 starting point",
-        "pressureAdvance": "0.020-0.060 starting range",
-        "maxVolumetric": "8-16 mm3/s until tested",
-        "notes": "Heat soak and enclosure stability matter more than fan speed.",
+        "bedTemp": "95-110 C",
+        "chamber": "45-60 C enclosed if possible",
+        "fan": "0-20%, bridge/detail assist only",
+        "flowRatio": "0.96-1.00 starting point",
+        "pressureAdvance": "0.015-0.050 starting range for direct drive",
+        "maxVolumetric": "8-14 mm3/s until tested",
+        "retraction": "direct drive 0.4-0.8 mm at 25-40 mm/s",
+        "notes": "Heat soak the chamber and keep airflow low to avoid warping.",
     },
     "asa": {
         "nozzleTemp": "250-275 C",
-        "bedTemp": "90-110 C",
-        "chamber": "45-60 C enclosed",
-        "fan": "0-30% except bridges/details",
-        "flowRatio": "0.98-1.02 starting point",
-        "pressureAdvance": "0.020-0.060 starting range",
-        "maxVolumetric": "8-16 mm3/s until tested",
-        "notes": "Best default choice for outdoor sun/weather parts.",
+        "bedTemp": "95-110 C",
+        "chamber": "45-60 C enclosed if possible",
+        "fan": "0-25%, bridge/detail assist only",
+        "flowRatio": "0.96-1.00 starting point",
+        "pressureAdvance": "0.015-0.050 starting range for direct drive",
+        "maxVolumetric": "8-14 mm3/s until tested",
+        "retraction": "direct drive 0.4-0.8 mm at 25-40 mm/s",
+        "notes": "Best outdoor default; tune with enclosure heat stable before flow and PA.",
     },
     "pa": {
-        "nozzleTemp": "255-290 C",
-        "bedTemp": "70-100 C",
-        "fan": "0-35%",
-        "flowRatio": "0.96-1.00 starting point",
-        "pressureAdvance": "0.020-0.070 starting range",
-        "maxVolumetric": "6-12 mm3/s until tested",
-        "notes": "Dry hard and print from a drybox.",
+        "nozzleTemp": "260-290 C",
+        "bedTemp": "70-90 C",
+        "chamber": "enclosure helpful, not always hot",
+        "fan": "0-30%, bridge/detail assist only",
+        "flowRatio": "0.95-1.00 starting point",
+        "pressureAdvance": "0.020-0.070 starting range for direct drive",
+        "maxVolumetric": "5-10 mm3/s until tested",
+        "retraction": "direct drive 0.5-1.0 mm at 20-35 mm/s",
+        "notes": "Print from drybox; moisture ruins profile tuning quickly.",
     },
     "pa-cf": {
-        "nozzleTemp": "275-310 C",
-        "bedTemp": "80-110 C",
-        "fan": "0-35%",
-        "flowRatio": "0.94-0.99 starting point",
-        "pressureAdvance": "0.020-0.070 starting range",
-        "maxVolumetric": "5-11 mm3/s until tested",
-        "notes": "Use hardened nozzle, drybox, and design for anisotropic strength.",
+        "nozzleTemp": "280-310 C",
+        "bedTemp": "80-100 C",
+        "chamber": "45-60 C enclosed if available",
+        "fan": "0-30%, bridge/detail assist only",
+        "flowRatio": "0.95-1.00 starting point",
+        "pressureAdvance": "0.020-0.070 starting range for direct drive",
+        "maxVolumetric": "5-10 mm3/s until tested",
+        "retraction": "direct drive 0.4-0.8 mm at 20-35 mm/s",
+        "notes": "Use hardened nozzle and drybox; prioritize layer strength over glossy finish.",
     },
     "pet-cf": {
         "nozzleTemp": "270-300 C",
@@ -5833,24 +7383,26 @@ PRINTING_PROFILE_PARAMETER_STARTS = {
         "notes": "Use hardened nozzle, dry the spool, and do not substitute PETG-CF values.",
     },
     "pc": {
-        "nozzleTemp": "275-310 C",
-        "bedTemp": "100-120 C",
-        "chamber": "50-70 C enclosed",
-        "fan": "0-25%",
+        "nozzleTemp": "280-320 C",
+        "bedTemp": "100-115 C",
+        "chamber": "50-70 C enclosed if available",
+        "fan": "0-20%, bridge/detail assist only",
         "flowRatio": "0.96-1.00 starting point",
-        "pressureAdvance": "0.020-0.060 starting range",
-        "maxVolumetric": "5-12 mm3/s until tested",
-        "notes": "Needs enclosure, bed adhesion, and controlled cooling.",
+        "pressureAdvance": "0.015-0.050 starting range for direct drive",
+        "maxVolumetric": "5-10 mm3/s until tested",
+        "retraction": "direct drive 0.4-0.8 mm at 20-35 mm/s",
+        "notes": "Bed adhesion and warp control dominate; dry thoroughly.",
     },
     "tpu": {
         "nozzleTemp": "220-245 C",
         "bedTemp": "35-60 C",
-        "fan": "30-80%",
-        "flowRatio": "1.00 starting point",
-        "pressureAdvance": "often off or very low until tested",
+        "chamber": "open or cool enclosure",
+        "fan": "30-70% depending on bridges and hardness",
+        "flowRatio": "0.98-1.03 starting point",
+        "pressureAdvance": "0.020-0.080 starting range; tune gently",
         "maxVolumetric": "2-6 mm3/s until tested",
-        "retraction": "minimal; slow direct-drive extrusion",
-        "notes": "Slow down and avoid long Bowden-style paths.",
+        "retraction": "direct drive 0.2-0.8 mm, slow; reduce if jams appear",
+        "notes": "Slow down and avoid high path friction through AMS/CFS-style systems.",
     },
 }
 
@@ -5860,6 +7412,22 @@ PRINTING_SOURCE_SEEDS = [
         "label": "OrcaSlicer calibration guide",
         "url": "https://www.orcaslicer.com/wiki/calibration/calibration_guide.html",
         "kind": "calibration",
+    },
+    {
+        "id": "ellis-print-tuning-guide",
+        "label": "Ellis' Print Tuning Guide",
+        "url": "https://ellis3dp.com/Print-Tuning-Guide/",
+        "kind": "calibration",
+        "tags": [
+            "filament-tuning",
+            "first-layer",
+            "pressure-advance",
+            "extrusion-multiplier",
+            "cooling",
+            "retraction",
+            "max-volumetric-flow",
+            "troubleshooting",
+        ],
     },
     {"id": "orca-wiki", "label": "OrcaSlicer Wiki", "url": "https://github.com/OrcaSlicer/OrcaSlicer/wiki", "kind": "slicer"},
     {"id": "bambu-h2d-tech-specs", "label": "Bambu Lab H2D tech specs", "url": "https://bambulab.com/en/h2d/tech-specs", "kind": "printer"},
@@ -6135,6 +7703,30 @@ PROFILE_PULL_TERMS = (
 )
 
 
+PROFILE_CREATION_TERMS = (
+    "create",
+    "make",
+    "generate",
+    "build",
+    "write",
+)
+
+
+PROFILE_PULL_INTENT_TERMS = (
+    "pull",
+    "current",
+    "existing",
+    "read",
+    "show",
+    "settings",
+    "parameters",
+    "peramiter",
+    "peramiters",
+    "perameter",
+    "perameters",
+)
+
+
 PROFILE_MATERIAL_ALIASES = {
     "pet-cf": ("pet-cf", "pet cf", "petcf"),
     "petg-cf": ("petg-cf", "petg cf", "petgcf"),
@@ -6227,6 +7819,90 @@ def is_filament_profile_pull_request(messages):
     text = query.lower()
     if not query or not text_has_any(text, PROFILE_PULL_TERMS):
         return False
+    if text_has_any(text, ("fusion 360", "fusion", "cad", "sketch", "user parameter", "user parameters")) and not text_has_any(
+        text,
+        (
+            "orca",
+            "orcaslicer",
+            "tinmanx",
+            "tinmanx1",
+            "filament profile",
+            "process profile",
+            "machine profile",
+            "printer profile",
+            "current profile",
+            "current settings",
+            "pull",
+        ),
+    ):
+        return False
+    if text_has_any(text, PROFILE_CREATION_TERMS) and not text_has_any(text, PROFILE_PULL_INTENT_TERMS):
+        return False
+    specific_profile_target = bool(
+        matching_printer_profiles(text)
+        or matching_materials(text)
+        or text_has_any(
+            text,
+            (
+                "qidi",
+                "bambu",
+                "creality",
+                "sovol",
+                "rat rig",
+                "ratrig",
+                "snapmaker",
+                "centauri",
+                "x1c",
+                "h2d",
+                "k2 plus",
+                "plus 4",
+                "sv08",
+            ),
+        )
+    )
+    strong_pull_intent = text_has_any(
+        text,
+        (
+            "pull",
+            "current",
+            "existing",
+            "actual local",
+            "local slicer profile",
+            "profile data",
+            "read the profile",
+            "show me the profile",
+        ),
+    )
+    explicit_specific_parameters = specific_profile_target and text_has_any(
+        text,
+        (
+            "filament profile parameters",
+            "filament profile settings",
+            "filament settings",
+            "profile parameters",
+            "profile settings",
+        ),
+    )
+    conceptual_profile_question = text_has_any(
+        text,
+        (
+            "how do i tell whether",
+            "how do i decide whether",
+            "what do machine",
+            "what do filament",
+            "what do process",
+            "what controls",
+            "which profile controls",
+            "what settings matter",
+            "settings matter most",
+            "what filament settings matter",
+            "bad print is caused by",
+        ),
+    )
+    if conceptual_profile_question and not strong_pull_intent:
+        return False
+    if not specific_profile_target and not strong_pull_intent and not explicit_specific_parameters:
+        return False
     profile_context = (
         "orca",
         "orcaslicer",
@@ -6249,6 +7925,93 @@ def is_filament_profile_pull_request(messages):
     if text_has_any(text, profile_context):
         return True
     return bool(matching_printer_profiles(text) or matching_materials(text))
+
+
+def is_orca_nozzle_visibility_question(messages):
+    query = latest_user_text(messages).strip()
+    text = query.lower()
+    if not query or "nozzle" not in text:
+        return False
+    slicer_context = (
+        "orca",
+        "orcaslicer",
+        "orca slicer",
+        "prepare tab",
+        "tinmanx",
+        "tinmanx1",
+        "filament type",
+        "filament color",
+    )
+    visibility_terms = (
+        "installed",
+        "see",
+        "show",
+        "display",
+        "visible",
+        "visibility",
+        "sync",
+        "options",
+        "what are my options",
+        "what type",
+        "which type",
+    )
+    return text_has_any(text, slicer_context) and text_has_any(text, visibility_terms)
+
+
+def is_orca_slicer_workflow_question(messages):
+    query = latest_user_text(messages).strip()
+    text = query.lower()
+    if not query or not text_has_any(text, ("orca", "orcaslicer", "tinmanx", "slicer")):
+        return False
+    workflow_terms = (
+        "http 405",
+        "405 not allowed",
+        "405",
+        "device tab",
+        "devive tab",
+        "white screen",
+        "slice hits",
+        "slice hit",
+        "slice stalls",
+        "slice stall",
+        "stalls",
+        "network printing",
+        "print to my",
+        "printer connection",
+        "prepare tab",
+        "facelift",
+        "new look",
+        "theme",
+        "branding",
+        "opening tile",
+        "colors",
+        "black",
+        "green",
+        "workflow of orca",
+    )
+    return text_has_any(text, workflow_terms)
+
+
+def is_fusion_cam_question(messages):
+    query = latest_user_text(messages).strip()
+    text = query.lower()
+    if not query or not text_has_any(text, ("fusion", "autodesk fusion")):
+        return False
+    return text_has_any(
+        text,
+        (
+            "manufacture workspace",
+            "2d contour",
+            "2d adaptive",
+            "toolpath",
+            "stock + shoulder",
+            "stock shoulder",
+            "simulate",
+            "simulation",
+            "cnc run",
+            "cam",
+        ),
+    )
 
 
 def profile_query_material_key(text):
@@ -6294,6 +8057,609 @@ def profile_query_printer_aliases(text):
     return tuple(dict.fromkeys(aliases))
 
 
+def is_orca_profile_creation_request(messages):
+    query = latest_user_text(messages).strip()
+    text = query.lower()
+    if not query or not text_has_any(text, PROFILE_CREATION_TERMS):
+        return False
+    if not text_has_any(text, ("orca", "orcaslicer", "tinmanx1", "slicer")):
+        return False
+    return text_has_any(text, ("filament profile", "material profile", "profile", "profiles")) and (
+        "filament" in text or bool(profile_query_material_key(text))
+    )
+
+
+def orca_profile_creation_material_key(text):
+    material_key = profile_query_material_key(text)
+    if material_key:
+        return material_key
+    if "filament" in text.lower():
+        return "petg"
+    return ""
+
+
+def orca_profile_creation_nozzles(text):
+    nozzle = profile_query_nozzle(text)
+    if nozzle:
+        return [nozzle]
+    lower = text.lower()
+    if text_has_any(lower, ("all nozzle", "all nozzles", "all nozzle sizes", "every nozzle")):
+        return ["0.4", "0.6", "0.8"]
+    return ["0.4", "0.6"]
+
+
+def orca_profile_creation_printers(text):
+    lower = text.lower()
+    if text_has_any(lower, ("all printer", "all printers", "every printer", "my printers")):
+        return list(PRINTING_PRINTER_PROFILES)
+    profiles = matching_printer_profiles(lower)
+    return profiles or list(PRINTING_PRINTER_PROFILES)
+
+
+def numeric_range_values(value):
+    return [float(item) for item in re.findall(r"\d+(?:\.\d+)?", str(value or ""))]
+
+
+def choose_profile_number(value, fallback, decimals=2):
+    numbers = numeric_range_values(value)
+    if len(numbers) >= 2:
+        result = (numbers[0] + numbers[1]) / 2.0
+    elif len(numbers) == 1:
+        result = numbers[0]
+    else:
+        result = float(fallback)
+    if decimals == 0:
+        return str(int(round(result)))
+    return f"{result:.{decimals}f}".rstrip("0").rstrip(".")
+
+
+def orca_starter_values(material_key, nozzle):
+    starter = PRINTING_PROFILE_PARAMETER_STARTS.get(material_key) or PRINTING_PROFILE_PARAMETER_STARTS["petg"]
+    nozzle_temp = int(float(choose_profile_number(starter.get("nozzleTemp"), 245, decimals=0)))
+    bed_temp = int(float(choose_profile_number(starter.get("bedTemp"), 80, decimals=0)))
+    fan_numbers = numeric_range_values(starter.get("fan"))
+    fan_min = int(round(fan_numbers[0])) if fan_numbers else 20
+    fan_max = int(round(fan_numbers[1])) if len(fan_numbers) >= 2 else max(fan_min, 45)
+    max_volumetric = float(choose_profile_number(starter.get("maxVolumetric"), 10, decimals=2))
+    try:
+        nozzle_float = float(nozzle)
+    except Exception:
+        nozzle_float = 0.4
+    if nozzle_float >= 0.8:
+        max_volumetric *= 1.35
+    elif nozzle_float >= 0.6:
+        max_volumetric *= 1.18
+    pressure_advance = choose_profile_number(starter.get("pressureAdvance"), 0.04, decimals=3)
+    retraction = choose_profile_number(starter.get("retraction"), 0.7, decimals=2)
+    flow_ratio = choose_profile_number(starter.get("flowRatio"), 0.98, decimals=3)
+    return {
+        "nozzleTemp": str(nozzle_temp),
+        "initialNozzleTemp": str(nozzle_temp + 5),
+        "bedTemp": str(bed_temp),
+        "fanMin": str(fan_min),
+        "fanMax": str(fan_max),
+        "maxVolumetric": f"{max_volumetric:.2f}".rstrip("0").rstrip("."),
+        "pressureAdvance": pressure_advance,
+        "flowRatio": flow_ratio,
+        "retraction": retraction,
+        "notes": starter.get("notes", ""),
+    }
+
+
+def stage_orca_profile_pack(messages, target_path=None):
+    query = latest_user_text(messages).strip()
+    text = query.lower()
+    material_key = orca_profile_creation_material_key(text)
+    if not material_key:
+        raise ValueError("No filament material was detected for the Orca profile pack.")
+    material = PRINTING_MATERIAL_LIBRARY.get(material_key, {})
+    material_name = material.get("name") or material_key.upper()
+    printers = orca_profile_creation_printers(text)
+    nozzles = orca_profile_creation_nozzles(text)
+    slug = slugify(f"orca-{material_key}-profile-pack", "orca-profile-pack")
+    target = Path(target_path).expanduser() if target_path else LOCAL_ORCA_PROFILE_OUTPUT_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}-{slug}"
+    target.mkdir(parents=True, exist_ok=True)
+    profiles_dir = target / "profiles"
+    profiles_dir.mkdir(parents=True, exist_ok=True)
+
+    created = []
+    matrix_rows = [["printer", "nozzle_mm", "profile_name", "path", "nozzle_temp_c", "bed_temp_c", "fan_min", "fan_max", "max_volumetric_mm3_s", "pressure_advance", "flow_ratio"]]
+    for printer in printers:
+        printer_name = printer.get("name") or "Printer"
+        for nozzle in nozzles:
+            values = orca_starter_values(material_key, nozzle)
+            profile_name = f"Codex {material_name} Starter @{printer_name} {nozzle} nozzle"
+            profile = {
+                "type": "filament",
+                "from": "User",
+                "name": profile_name,
+                "filament_settings_id": [profile_name],
+                "filament_type": [material_key.upper()],
+                "filament_vendor": ["Codex Starter"],
+                "filament_flow_ratio": [values["flowRatio"]],
+                "nozzle_temperature": [values["nozzleTemp"]],
+                "nozzle_temperature_initial_layer": [values["initialNozzleTemp"]],
+                "nozzle_temperature_range_low": [values["nozzleTemp"]],
+                "nozzle_temperature_range_high": [values["initialNozzleTemp"]],
+                "textured_plate_temp": [values["bedTemp"]],
+                "textured_plate_temp_initial_layer": [values["bedTemp"]],
+                "hot_plate_temp": [values["bedTemp"]],
+                "hot_plate_temp_initial_layer": [values["bedTemp"]],
+                "fan_min_speed": [values["fanMin"]],
+                "fan_max_speed": [values["fanMax"]],
+                "close_fan_the_first_x_layers": ["3"],
+                "slow_down_layer_time": ["6"],
+                "enable_pressure_advance": ["1"],
+                "pressure_advance": [values["pressureAdvance"]],
+                "filament_max_volumetric_speed": [values["maxVolumetric"]],
+                "filament_retraction_length": [values["retraction"]],
+                "filament_retraction_speed": ["30"],
+                "compatible_printers": [f"{printer_name} {nozzle} nozzle"],
+                "compatible_printers_condition": "",
+                "notes": values["notes"],
+                "version": "2.3.1.10",
+            }
+            path = profiles_dir / f"{slugify(profile_name, 'orca-profile')}.json"
+            path.write_text(json.dumps(profile, indent=2), encoding="utf-8")
+            created.append({"printer": printer_name, "nozzle": nozzle, "name": profile_name, "path": str(path), "values": values})
+            matrix_rows.append(
+                [
+                    printer_name,
+                    nozzle,
+                    profile_name,
+                    str(path),
+                    values["nozzleTemp"],
+                    values["bedTemp"],
+                    values["fanMin"],
+                    values["fanMax"],
+                    values["maxVolumetric"],
+                    values["pressureAdvance"],
+                    values["flowRatio"],
+                ]
+            )
+
+    def csv_cell(value):
+        return '"' + str(value).replace('"', '""') + '"'
+
+    matrix_path = target / "profile_matrix.csv"
+    matrix_path.write_text("\n".join(",".join(csv_cell(cell) for cell in row) for row in matrix_rows) + "\n", encoding="utf-8")
+    readme_path = target / "README.md"
+    readme_path.write_text(
+        "\n".join(
+            [
+                f"# Orca {material_name} Starter Profile Pack",
+                "",
+                f"Created from prompt: {query}",
+                "",
+                "These are starter filament profiles, not final tuned profiles.",
+                "Run Orca calibrations in this order before treating them as production: temperature, max volumetric speed, pressure advance, flow, retraction, then tolerance if fit matters.",
+                "",
+                f"Profiles created: {len(created)}",
+                f"Printers: {', '.join(dict.fromkeys(item['printer'] for item in created))}",
+                f"Nozzles: {', '.join(nozzles)} mm",
+                "",
+                "Files:",
+                f"- Matrix: {matrix_path}",
+                f"- Profiles folder: {profiles_dir}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return {
+        "ok": True,
+        "targetDir": str(target),
+        "profilesDir": str(profiles_dir),
+        "readmePath": str(readme_path),
+        "matrixPath": str(matrix_path),
+        "materialKey": material_key,
+        "materialName": material_name,
+        "printerCount": len(printers),
+        "nozzles": nozzles,
+        "profileCount": len(created),
+        "profiles": created,
+    }
+
+
+def is_project_apply_request(messages):
+    text = "\n".join(str(message.get("text", "")) for message in messages[-4:]).lower()
+    return text_has_any(
+        text,
+        (
+            "apply to the project",
+            "apply it to the project",
+            "apply what",
+            "use what you learned",
+            "update the project",
+            "update tinmanx1",
+            "write the preset",
+            "write the profile",
+            "install the profile",
+            "make the project change",
+            "project apply",
+        ),
+    )
+
+
+def project_apply_kind(messages, route=None):
+    text = "\n".join(str(message.get("text", "")) for message in messages[-4:]).lower()
+    route = route or {}
+    orca_context = (
+        text_has_any(text, ("orca", "orcaslicer", "tinmanx1", "slicer"))
+        or route.get("projectId") == "tinmanx-slicer-research"
+    )
+    profile_context = text_has_any(
+        text,
+        (
+            "filament",
+            "material profile",
+            "filament profile",
+            "filament preset",
+            "system preset",
+            "polymaker",
+            "fiberon",
+            "profile pack",
+            "preset",
+        ),
+    )
+    if orca_context and profile_context:
+        return "orca-filament-profile"
+    if is_research_apply_request(messages) or is_project_apply_request(messages):
+        return "project-action-plan"
+    return ""
+
+
+def summarize_file_count(path, suffix):
+    try:
+        return len(list(Path(path).glob(f"*{suffix}"))) if Path(path).is_dir() else 0
+    except OSError:
+        return 0
+
+
+def discover_orca_codex_profile_targets():
+    root = Path.home() / "Library" / "Application Support" / "OrcaSlicer-Codex"
+    conf_path = root / "OrcaSlicer.conf"
+    system_codex = root / "system" / "Codex"
+    system_filament = system_codex / "filament"
+    conf_summary = {
+        "path": str(conf_path),
+        "exists": conf_path.exists(),
+        "jsonReadable": False,
+        "hasFilamentsList": False,
+        "filamentCount": 0,
+        "presetCount": 0,
+        "error": "",
+    }
+    if conf_path.exists():
+        try:
+            conf = json.loads(conf_path.read_text(encoding="utf-8"))
+            filaments = conf.get("filaments") if isinstance(conf, dict) else None
+            presets = conf.get("orca_presets") if isinstance(conf, dict) else None
+            conf_summary.update(
+                {
+                    "jsonReadable": isinstance(conf, dict),
+                    "hasFilamentsList": isinstance(filaments, list),
+                    "filamentCount": len(filaments) if isinstance(filaments, list) else 0,
+                    "presetCount": len(presets) if isinstance(presets, list) else 0,
+                }
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            conf_summary["error"] = str(exc)
+
+    user_filament_dirs = []
+    user_root = root / "user"
+    if user_root.is_dir():
+        try:
+            user_dirs = sorted(item for item in user_root.iterdir() if item.is_dir() and not item.name.startswith("_"))
+        except OSError:
+            user_dirs = []
+        for user_dir in user_dirs:
+            filament_dir = user_dir / "filament"
+            if not filament_dir.is_dir():
+                continue
+            user_filament_dirs.append(
+                {
+                    "userId": user_dir.name,
+                    "userDir": str(user_dir),
+                    "filamentDir": str(filament_dir),
+                    "jsonCount": summarize_file_count(filament_dir, ".json"),
+                    "infoCount": summarize_file_count(filament_dir, ".info"),
+                }
+            )
+
+    return {
+        "appSupportRoot": str(root),
+        "exists": root.exists(),
+        "orcaConfig": conf_summary,
+        "systemCodex": {
+            "path": str(system_codex),
+            "exists": system_codex.exists(),
+            "filamentDir": str(system_filament),
+            "filamentDirExists": system_filament.exists(),
+            "jsonCount": summarize_file_count(system_filament, ".json"),
+        },
+        "userFilamentDirs": user_filament_dirs,
+        "requiredLiveSurfaces": [
+            str(conf_path),
+            str(system_filament),
+            *[item["filamentDir"] for item in user_filament_dirs],
+        ],
+    }
+
+
+def project_apply_plan_markdown(result):
+    query = result.get("query") or ""
+    targets = result.get("targets") or {}
+    orca = result.get("orca") or {}
+    profile_pack = orca.get("profilePack") or {}
+    conf = targets.get("orcaConfig") or {}
+    system = targets.get("systemCodex") or {}
+    user_dirs = targets.get("userFilamentDirs") or []
+    lines = [
+        "# Project Apply Plan",
+        "",
+        f"Created: {result.get('createdAtText')}",
+        f"Kind: {result.get('kind')}",
+        f"Mode: {'live apply requested' if result.get('liveApplyRequested') else 'staged plan only'}",
+        f"Live files changed: {'yes' if result.get('applied') else 'no'}",
+        "",
+        "## Request",
+        "",
+        query or "No request text captured.",
+        "",
+        "## Target Inventory",
+        "",
+        f"- Orca app support root: `{targets.get('appSupportRoot', '')}` exists={targets.get('exists')}",
+        f"- OrcaSlicer.conf: `{conf.get('path', '')}` exists={conf.get('exists')} jsonReadable={conf.get('jsonReadable')} filaments={conf.get('filamentCount')}",
+        f"- system/Codex filament folder: `{system.get('filamentDir', '')}` exists={system.get('filamentDirExists')} jsonProfiles={system.get('jsonCount')}",
+        f"- Active user filament folders found: {len(user_dirs)}",
+    ]
+    for item in user_dirs[:10]:
+        lines.append(
+            f"  - `{item.get('filamentDir')}` json={item.get('jsonCount')} infoSidecars={item.get('infoCount')}"
+        )
+    if len(user_dirs) > 10:
+        lines.append(f"  - plus {len(user_dirs) - 10} more user folders")
+    lines.extend(
+        [
+            "",
+            "## Staged Output",
+            "",
+        ]
+    )
+    if profile_pack.get("ok"):
+        lines.extend(
+            [
+                f"- Staged Orca profile pack: `{profile_pack.get('targetDir')}`",
+                f"- Profile matrix: `{profile_pack.get('matrixPath')}`",
+                f"- Profile README: `{profile_pack.get('readmePath')}`",
+                f"- Profiles staged: {profile_pack.get('profileCount')} for {profile_pack.get('materialName')}",
+            ]
+        )
+    elif profile_pack.get("error"):
+        lines.append(f"- Orca profile pack blocked: {profile_pack.get('error')}")
+    else:
+        lines.append("- No profile pack was generated for this request; this plan captures the apply workflow and target inventory.")
+    receipt = result.get("researchReceipt") or {}
+    if receipt.get("reportPath"):
+        lines.append(f"- Research/apply receipt: `{receipt.get('reportPath')}`")
+    lines.extend(
+        [
+            "",
+            "## Apply Sequence",
+            "",
+            "1. Confirm the request still targets the active OrcaSlicer-Codex/TinManX1 app support folder.",
+            "2. Backup first: copy `OrcaSlicer.conf`, `system/Codex/filament`, and each active user `filament` folder before writing.",
+            "3. Write or regenerate the system profile JSONs under `system/Codex/filament`.",
+            "4. Write matching per-user filament preset JSONs and `.info` sidecars for each active user filament folder.",
+            "5. Update the enabled `filaments` list in `OrcaSlicer.conf` so the profile appears in the UI.",
+            "6. Verify JSON parses, profile names are enabled in `OrcaSlicer.conf`, matching `.info` sidecars exist, and the profile is visible in the installed app.",
+            "",
+            "## Verification Gates",
+            "",
+            "- Stage plan and manifest written locally.",
+            "- Target inventory captured without touching backup folders.",
+            "- Live apply is blocked unless the caller explicitly requests it and confirms the backup/apply intent.",
+        ]
+    )
+    blockers = result.get("blockers") or []
+    if blockers:
+        lines.extend(["", "## Blockers", ""])
+        lines.extend(f"- {blocker}" for blocker in blockers)
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def stage_project_apply_case(
+    messages,
+    route=None,
+    cwd="",
+    research_receipt=None,
+    target_path=None,
+    apply=False,
+    confirm_live_write="",
+):
+    query = latest_user_text(messages).strip()
+    kind = project_apply_kind(messages, route or {}) or "project-action-plan"
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    slug = slugify(query, "project-apply")[:54]
+    target = Path(target_path).expanduser() if target_path else LOCAL_PROJECT_APPLY_OUTPUT_DIR / f"{stamp}-{slug}"
+    target.mkdir(parents=True, exist_ok=True)
+    targets = discover_orca_codex_profile_targets() if kind == "orca-filament-profile" else {}
+    blockers = []
+    orca = {}
+    if kind == "orca-filament-profile":
+        pack_dir = target / "staged-orca-profile-pack"
+        try:
+            orca["profilePack"] = stage_orca_profile_pack(messages, target_path=pack_dir)
+        except Exception as exc:
+            orca["profilePack"] = {"ok": False, "targetDir": str(pack_dir), "error": str(exc)}
+            blockers.append(
+                "Profile generation needs a specific material/profile target before live Orca/TinmanX1 files can be changed."
+            )
+
+    live_apply_requested = bool(apply)
+    applied = False
+    if live_apply_requested and str(confirm_live_write or "") != "BACKUP_AND_APPLY":
+        blockers.append("Live apply requested but blocked: set confirmLiveWrite to BACKUP_AND_APPLY after reviewing this plan.")
+
+    result = {
+        "ok": True,
+        "kind": kind,
+        "createdAt": time.time(),
+        "createdAtText": stamp,
+        "query": query,
+        "cwd": cwd or DEFAULT_CWD,
+        "route": route or {},
+        "targetDir": str(target),
+        "targets": targets,
+        "orca": orca,
+        "researchReceipt": research_receipt or {},
+        "liveApplyRequested": live_apply_requested,
+        "applied": applied,
+        "blockers": blockers,
+    }
+    plan_path = target / "PROJECT_APPLY_PLAN.md"
+    manifest_path = target / "apply_manifest.json"
+    result["planPath"] = str(plan_path)
+    result["manifestPath"] = str(manifest_path)
+    plan_path.write_text(project_apply_plan_markdown(result), encoding="utf-8")
+    write_json_atomic(manifest_path, result)
+    result["text"] = format_project_apply_answer(result)
+    return result
+
+
+def attach_project_apply_receipt(answer_text, project_apply):
+    text = str(answer_text or "").strip()
+    if not project_apply or not project_apply.get("ok"):
+        return text
+    lower = text.lower()
+    additions = []
+    if "project apply plan" not in lower:
+        additions.append(
+            "Project Apply plan: I staged the target inventory and apply manifest instead of claiming live project files changed."
+        )
+    plan_path = project_apply.get("planPath")
+    manifest_path = project_apply.get("manifestPath")
+    if plan_path and plan_path not in text:
+        additions.append(f"Project Apply plan file: `{plan_path}`")
+    if manifest_path and manifest_path not in text:
+        additions.append(f"Apply manifest: `{manifest_path}`")
+    profile_pack = ((project_apply.get("orca") or {}).get("profilePack") or {})
+    if profile_pack.get("targetDir") and profile_pack.get("targetDir") not in text:
+        additions.append(f"Staged Orca profile pack: `{profile_pack.get('targetDir')}`")
+    if additions:
+        text = text.rstrip() + "\n\n" + "\n".join(additions)
+    return text.strip()
+
+
+def format_project_apply_answer(result):
+    kind = result.get("kind")
+    plan_path = result.get("planPath")
+    manifest_path = result.get("manifestPath")
+    blockers = result.get("blockers") or []
+    blocker_text = " ".join(blockers) if blockers else "No blocker for the staged planning pass."
+    if kind == "orca-filament-profile":
+        profile_pack = ((result.get("orca") or {}).get("profilePack") or {})
+        profile_line = (
+            f"Staged Orca profile pack: `{profile_pack.get('targetDir')}`"
+            if profile_pack.get("ok")
+            else f"Profile pack status: {profile_pack.get('error') or 'not generated'}"
+        )
+        return "\n\n".join(
+            [
+                "I staged the Project Apply plan for the Orca/TinManX1 filament-profile work.",
+                (
+                    "This is why: Orca visibility depends on more than profile JSON. The plan inventories "
+                    "`system/Codex`, active user filament folders, `.info` sidecars, and `OrcaSlicer.conf` before any live write."
+                ),
+                "\n".join(
+                    [
+                        f"Project Apply plan: `{plan_path}`",
+                        f"Apply manifest: `{manifest_path}`",
+                        profile_line,
+                    ]
+                ),
+                (
+                    "Verification: staged files were written locally and live apply remains blocked until backup/apply confirmation is explicit."
+                ),
+                f"You should also consider: {blocker_text}",
+            ]
+        )
+    return "\n\n".join(
+        [
+            "I staged a Project Apply plan for this research/apply request.",
+            "This is why: the project action now has a local plan, manifest, and verification gate instead of ending as a research summary.",
+            "\n".join([f"Project Apply plan: `{plan_path}`", f"Apply manifest: `{manifest_path}`"]),
+            "Verification: staged plan and manifest were written locally; no live project files were changed by default.",
+            f"You should also consider: {blocker_text}",
+        ]
+    )
+
+
+def project_apply_synthetic_check():
+    messages = [
+        {
+            "role": "user",
+            "text": "Research Ellis' Print Tuning Guide and apply what you learn to our Orca PCTG filament profile workflow.",
+        }
+    ]
+    route = {"projectId": "tinmanx-slicer-research", "project": "TinManX / OrcaSlicer", "engine": "research-apply"}
+    LOCAL_PROJECT_APPLY_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="health-project-apply-", dir=str(LOCAL_PROJECT_APPLY_OUTPUT_DIR)) as tmp_dir:
+        result = stage_project_apply_case(messages, route=route, cwd=str(APP_DIR), target_path=tmp_dir)
+        plan_path = Path(result.get("planPath") or "")
+        manifest_path = Path(result.get("manifestPath") or "")
+        profile_pack = ((result.get("orca") or {}).get("profilePack") or {})
+        plan_text = plan_path.read_text(encoding="utf-8") if plan_path.exists() else ""
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+        return (
+            result.get("ok")
+            and result.get("kind") == "orca-filament-profile"
+            and not result.get("applied")
+            and plan_path.exists()
+            and manifest_path.exists()
+            and manifest.get("kind") == "orca-filament-profile"
+            and profile_pack.get("ok")
+            and profile_pack.get("profileCount", 0) >= 1
+            and "OrcaSlicer.conf" in plan_text
+            and "system/Codex" in plan_text
+            and ".info" in plan_text
+            and "Backup first" in plan_text
+        )
+
+
+def orca_profile_creation_direct_answer(messages):
+    if not is_orca_profile_creation_request(messages):
+        return ""
+    result = stage_orca_profile_pack(messages)
+    sample = result.get("profiles", [])[:4]
+    sample_lines = "\n".join(f"- {item['name']}: `{item['path']}`" for item in sample)
+    more = result.get("profileCount", 0) - len(sample)
+    if more > 0:
+        sample_lines += f"\n- plus {more} more profiles in `{result.get('profilesDir')}`"
+    return "\n\n".join(
+        [
+            f"I created an Orca {result.get('materialName')} starter profile pack with {result.get('profileCount')} profiles.",
+            "\n".join(
+                [
+                    f"Profile pack: `{result.get('targetDir')}`",
+                    f"Matrix CSV: `{result.get('matrixPath')}`",
+                    f"README: `{result.get('readmePath')}`",
+                    "Sample profiles:",
+                    sample_lines,
+                ]
+            ),
+            (
+                "This is why: this was a create-profile request, not a pull-current-settings request. "
+                "I generated starter filament JSONs per printer/nozzle pair and kept the profile pack separate from installed Orca data so it can be inspected before import."
+            ),
+            (
+                "You should also consider: these are not perfect production profiles yet. Use Orca calibration to tune temperature, max volumetric speed, pressure advance, flow, retraction, and fit/tolerance for each real printer, nozzle, filament brand, and drying condition."
+            ),
+        ]
+    )
+
+
 def slicer_profile_roots():
     home = Path.home()
     return [
@@ -6302,6 +8668,7 @@ def slicer_profile_roots():
         ("TinManX1 user app profile library", home / "Applications/TinManX1.app/Contents/Resources/profiles", 106),
         ("OrcaSlicer", home / "Library/Application Support/OrcaSlicer/user", 95),
         ("Desktop 3D Printing profiles", home / "Desktop/3D Printing", 85),
+        ("Generated Orca profiles", home / "Applications/Flightops_Tracker/generated_orca_profiles", 75),
         ("PrusaSlicer", home / "Library/Application Support/PrusaSlicer", 45),
     ]
 
@@ -7171,6 +9538,431 @@ def orca_calibration_visual_direct_answer(messages):
     )
 
 
+def orca_nozzle_visibility_direct_answer(messages):
+    if not is_orca_nozzle_visibility_question(messages):
+        return ""
+    return "\n\n".join(
+        [
+            "Best path: show the configured nozzle from the Orca/TinmanX1 printer profile immediately, and show the installed physical nozzle as a separate verified field.",
+            (
+                "This is why: Orca always knows the selected/configured printer profile nozzle, but most printers do not automatically know what brass, hardened steel, ruby, or CHT-style nozzle is physically installed. "
+                "If we blend those together, the UI can confidently show the wrong nozzle and create bad filament/process choices."
+            ),
+            (
+                "Your practical options are: add printer variants per nozzle size and type in Orca; keep a local machine inventory with the last-confirmed installed nozzle and material; "
+                "for Klipper machines, optionally expose a custom saved variable or macro value that TinmanX1 can read; and mark the field as unverified whenever there is no trusted source."
+            ),
+            (
+                "You should also consider: use two labels in the UI: `Configured nozzle` from Orca and `Installed physical nozzle` from the local inventory or verified printer source. "
+                "That keeps the workflow honest while still giving you the nozzle visibility you want in the Prepare tab."
+            ),
+        ]
+    )
+
+
+def orca_http_405_direct_answer(messages):
+    query = latest_user_text(messages).lower()
+    if not ("405" in query and text_has_any(query, ("orca", "orcaslicer", "slicer"))):
+        return ""
+    return "\n\n".join(
+        [
+            "First check the Orca printer-host type and upload URL; HTTP 405 means Orca reached something, but used an endpoint or method that printer does not allow.",
+            (
+                "This is why: a 405 is different from offline or bad-password. It usually means the printer web service answered, but Orca is using the wrong host preset, port, path, or upload method for that firmware. "
+                "For a Creality K2 Plus, do not assume it behaves exactly like generic Klipper/Moonraker unless the firmware or Open API confirms that."
+            ),
+            (
+                "Fix path: in Orca, edit the physical printer connection, confirm the printer type/API mode, remove any guessed upload path, test the bare host/port first, then try the firmware-supported upload endpoint. "
+                "If Creality's LAN service rejects generic upload, use the Creality/Orca-supported host preset or export G-code locally until the correct endpoint is verified."
+            ),
+            (
+                "You should also consider: capture the exact URL, port, and Orca printer-host preset that produced the 405. "
+                "That gives the next step a real target instead of guessing at random Moonraker, OctoPrint, or Creality endpoints."
+            ),
+        ]
+    )
+
+
+def tinmanx_slice_stall_direct_answer(messages):
+    query = latest_user_text(messages).lower()
+    if not (text_has_any(query, ("tinmanx", "orca", "slicer")) and "slice" in query and text_has_any(query, ("80%", "80 percent", "stalls", "stall"))):
+        return ""
+    return "\n\n".join(
+        [
+            "First reproduce the 80% stall with logging on, then isolate whether it is the model, supports, profile, or system resources.",
+            (
+                "This is why: slicers often hit the heaviest geometry/support/toolpath work late in the progress bar. "
+                "An 80% stall is usually not one magic setting; it is commonly a bad mesh, pathological supports, excessive modifiers, disk/RAM pressure, or a slicer-engine crash hidden behind the progress UI."
+            ),
+            (
+                "Fix path: try the same model with a stock profile, then disable supports, then repair/simplify the mesh, then clear TinManX/Orca temp/cache files. "
+                "If it still stalls, collect the slicing log and the smallest model/profile pair that reproduces it so the fix can target the actual failure."
+            ),
+            (
+                "You should also consider: if only one model stalls, repair the STL/3MF first. If every model stalls around 80%, treat it as an app/cache/resource issue and run a clean-profile slice before changing print settings."
+            ),
+        ]
+    )
+
+
+def orca_device_tab_control_direct_answer(messages):
+    query = latest_user_text(messages).lower()
+    if not (text_has_any(query, ("orca", "orcaslicer", "slicer")) and text_has_any(query, ("device tab", "devive tab", "more control"))):
+        return ""
+    return "\n\n".join(
+        [
+            "Best answer: yes, you can add more control in Orca's Device tab only if the printer firmware exposes a compatible local control interface.",
+            (
+                "This is why: Orca is mostly a slicer plus a web/device panel. A standard Klipper printer feels powerful there because Moonraker/Mainsail/Fluidd expose rich controls. "
+                "Open Centauri may expose some controls, but it is not automatically the same as a full standard Klipper stack."
+            ),
+            (
+                "Your options are: use whatever Open Centauri web UI already exposes in the Device tab; add or embed a richer local web interface if the firmware supports it; "
+                "or keep advanced control in the printer's native/Open Centauri UI while Orca handles slicing and upload."
+            ),
+            (
+                "You should also consider: choose the control path based on the confirmed firmware API. If Open Centauri exposes Moonraker-compatible endpoints, we can integrate deeper. If it does not, forcing generic Klipper controls will create brittle buttons."
+            ),
+        ]
+    )
+
+
+def fusion_cam_stock_shoulder_direct_answer(messages):
+    if not is_fusion_cam_question(messages):
+        return ""
+    return "\n\n".join(
+        [
+            "First check the tool, stock boundary, and 2D Contour heights; `Stock + Shoulder` means Fusion thinks the cutter shoulder or holder will collide with the stock during simulation.",
+            (
+                "This is why: in Manufacture, Fusion is not only checking the cutting flute. It also checks the non-cutting shoulder/holder against the remaining stock and setup clearance. "
+                "A small contour, oversized tool, short flute length, tight stock boundary, or wrong top/bottom height can trigger it."
+            ),
+            (
+                "Fix path: verify the tool flute length and shoulder/holder dimensions, enlarge or correctly define the stock, set the contour boundary/offset so the tool has room, and check Heights so the top, retract, and clearance planes are sane. "
+                "Then simulate again with stock visibility and tool holder collision enabled."
+            ),
+            (
+                "You should also consider: if the geometry is correct but the warning remains, switch to a longer-flute tool, add a roughing pass, use multiple stepdowns, or move the contour away from the stock edge."
+            ),
+        ]
+    )
+
+
+def ai_print_failure_monitoring_direct_answer(messages):
+    query = latest_user_text(messages).strip()
+    text = query.lower()
+    if not query:
+        return ""
+    if not ("ai" in text and "print" in text and "failure" in text and text_has_any(text, ("monitor", "detection", "detect"))):
+        return ""
+    return "\n\n".join(
+        [
+            "Best free/local starting point: self-hosted Obico with a printer camera, then add better camera placement and alert tuning before buying anything.",
+            (
+                "This is why: Obico has the broadest open/self-hosted path for AI print-failure detection across OctoPrint and Klipper/Moonraker-style workflows. "
+                "It can watch the camera feed, flag spaghetti/adhesion failures, and notify you without depending on a paid cloud service if you host it yourself."
+            ),
+            (
+                "You should also consider: AI monitoring is only as good as the camera view and lighting. Put the full build plate in frame, avoid glare, tune sensitivity, and treat it as an early-warning system rather than a guaranteed stop button."
+            ),
+        ]
+    )
+
+
+def aircraft_wood_defect_direct_answer(messages):
+    query = latest_user_text(messages).strip()
+    text = query.lower()
+    if not query:
+        return ""
+    if not ("wood" in text and "aircraft" in text and "structural repair" in text and "mineral streak" in text):
+        return ""
+    return "\n\n".join(
+        [
+            "Pick C: mineral streaks are acceptable only when they are not accompanied by decay.",
+            (
+                "This is why: compression failures and splits are structural defects because they reduce load-carrying capacity and create failure paths. "
+                "A mineral streak by itself is a discoloration/appearance defect, not automatically a strength defect."
+            ),
+            (
+                "You should also consider: inspect for decay, moisture damage, checks, shakes, compression wrinkles, and grain problems before approving the wood. "
+                "If this is for a certificated aircraft repair, follow the applicable aircraft manual or accepted wood-repair guidance rather than treating the quiz answer as repair authorization."
+            ),
+        ]
+    )
+
+
+def flightops_service_charge_no_activity_direct_answer(messages):
+    query = latest_user_text(messages).strip()
+    text = query.lower()
+    if not query:
+        return ""
+    if not (text_has_any(text, ("service charge", "service fee", "services charge", "services charges")) and text_has_any(text, ("no flights", "no flight activity", "had no flights"))):
+        return ""
+    return "\n\n".join(
+        [
+            "Yes. The fix is to make monthly service charges render even when the customer has zero flight rows for that aircraft/month.",
+            (
+                "This is why: the report logic is probably anchored on flight activity, so a customer/month with no flights never gets a section where the standalone service fee can be attached. "
+                "For N411GC in February, WB Air 2021 still needs a billable line even though there are no Hobbs/flight entries."
+            ),
+            (
+                "Fix path: build the report's customer/month set from flights plus billable non-flight charges, then left-join or merge flight rows into that set. "
+                "Add a regression case for N411GC / February / WB Air 2021 with zero flights and one service charge, and verify the PDF/report total includes the charge."
+            ),
+            (
+                "You should also consider: keep the empty-flight section visually clear so it does not look like missing data. "
+                "A label like `No flight activity this period` plus the service-charge line keeps accounting honest."
+            ),
+        ]
+    )
+
+
+def tinmanx_ui_theme_direct_answer(messages):
+    query = latest_user_text(messages).strip()
+    text = query.lower()
+    if not query:
+        return ""
+    if not text_has_any(text, ("tinmanx", "orca", "rocket slicer", "bambu slicer")):
+        return ""
+    if not text_has_any(text, ("facelift", "new look", "colors", "black", "green", "opening tile", "branding", "theme")):
+        return ""
+    return "\n\n".join(
+        [
+            "Yes. Treat this as a TinManX source-level theme/branding change, not a user Orca config tweak.",
+            (
+                "This is why: changing black-to-blue, green-to-red, the launch tile name, and the overall Rocket/Bambu-style polish needs to happen in the app assets, styles, resources, and branding strings. "
+                "Editing a local Orca preference file would be fragile and would not travel cleanly with the TinManX app or installer."
+            ),
+            (
+                "Fix path: update the theme palette, logo/assets, splash/opening tile text, app display strings, and any bundled resources; then launch the installed app and screenshot the Prepare/Device/opening views. "
+                "Set the opening tile/app label to `TinManX 1.0.0` and keep the Orca workflow intact while only changing the visual layer and TinManX naming."
+            ),
+            (
+                "You should also consider: make the palette accessible, not just different. Blue/red should still have enough contrast in dark and light modes, and green-to-red should not be the only status cue for users with color-vision limitations."
+            ),
+        ]
+    )
+
+
+def codex_ui_workflow_scenario_direct_answer(messages):
+    query = latest_user_text(messages).strip()
+    text = query.lower()
+    required = ("tinmanx1", "polymaker", "fiberon", "steer", "edit", "github", "zip")
+    if not query or not all(term in text for term in required):
+        return ""
+    return "\n\n".join(
+        [
+            (
+                "Yes. I would handle this as one release-grade Codex CLI UI upgrade: add the Polymaker/Fiberon preset request as a regression scenario, "
+                "load the 100 CAD/CNC questions into the public test bank, wire Steer and Edit controls into the chat actions, connect `Fix this` to the self-healing queue, "
+                "then run package health and golden batches before the final GitHub zip."
+            ),
+            (
+                "This is why: the weak point is not one answer template; it is the loop. The app needs to capture real requests, classify the work, let Tinman steer or edit without starting over, "
+                "turn wrong answers into self-healing code/test candidates, and only publish a package after checks pass."
+            ),
+            (
+                "You should also consider: public zip packaging should include the app, scripts, fixtures, docs, and optional free-tool installer manifests, but not private chat history, machine credentials, "
+                "API keys, or third-party binaries unless their license and size make redistribution safe."
+            ),
+        ]
+    )
+
+
+def inverter_three_phase_direct_answer(messages):
+    query = latest_user_text(messages).strip()
+    text = query.lower()
+    if not query:
+        return ""
+    if not ("inverter" in text and "3 phase" in text and text_has_any(text, ("split phase", "120v/240v", "120/240", "120 v/240 v", "vevor"))):
+        return ""
+    return "\n\n".join(
+        [
+            "My recommendation: do not feed that VEVOR 120V/240V split-phase inverter directly from a 3-phase AC input.",
+            (
+                "This is why: `120V/240V split phase` is North American single/split-phase service, not three-phase service. "
+                "If the unit does not explicitly list 3-phase AC input, L1/L2/L3 input, or a compatible three-phase voltage range, treat it as not 3-phase compatible."
+            ),
+            (
+                "You should also consider: verify the exact manual label for AC input before wiring. "
+                "If your source is truly 3-phase, you need the correct transformer/converter or a hybrid inverter that explicitly supports your three-phase voltage and grounding system."
+            ),
+        ]
+    )
+
+
+def aero_tool_install_direct_answer(messages):
+    query = latest_user_text(messages).strip()
+    text = query.lower()
+    tool_terms = ("xfoil", "openvsp", "su2", "qblade")
+    if not query or not all(term in text for term in tool_terms):
+        return ""
+    if not text_has_any(text, ("how do we get", "how do i get", "install", "download", "set up", "setup")):
+        return ""
+    return "\n\n".join(
+        [
+            "My recommendation: install them in this order on macOS: OpenVSP, XFOIL, SU2, then QBlade through the cleanest Linux path if the native Mac build fights us.",
+            (
+                "This is why: OpenVSP gives geometry and aircraft layout fastest, XFOIL gives quick airfoil polars, SU2 gives serious CFD capability, and QBlade is useful but has the most packaging friction on macOS. "
+                "That order gives Tinman useful aero capability quickly without blocking on the hardest installer first."
+            ),
+            (
+                "You should also consider: keep each install visible in the tool inventory with command paths and a tiny smoke test. "
+                "For example: launch OpenVSP, run an XFOIL polar, verify `SU2_CFD --help`, and keep QBlade isolated if it needs Linux or a VM/container."
+            ),
+        ]
+    )
+
+
+def vague_failure_diagnostic_direct_answer(messages):
+    query = latest_user_text(messages).strip()
+    text = query.lower()
+    if not query:
+        return ""
+    if not ("failure" in text and text_has_any(text, ("can you see", "what failure", "what failed", "had a failure", "believe i had"))):
+        return ""
+    return "\n\n".join(
+        [
+            "My recommendation: start with the most recent local app/log failure around the time you saw the issue, then work backward through the active project logs instead of guessing.",
+            (
+                "This is why: a vague failure report can come from the UI, local worker, slicer, printer endpoint, build script, or test runner. "
+                "The fastest safe diagnostic path is read-only: check the newest app log, crash log, golden-batch result, and any printer/slicer log tied to that project before changing settings."
+            ),
+            (
+                "You should also consider: if the name is misspelled, treat `cantauri Tinman` as likely Centauri/Tinman context, then verify the exact app/project from logs. "
+                "First checks: latest timestamp, exact error line, route/project, command that ran, and whether a final answer or artifact was produced."
+            ),
+        ]
+    )
+
+
+def domain_sample_direct_answer(messages, route=None):
+    query = latest_user_text(messages).strip()
+    text = query.lower()
+    if not query:
+        return ""
+    category = ""
+    question = query
+    for prefix in (
+        "3D Printing",
+        "CAD",
+        "CNC Machining",
+        "Solar And Wind Technology",
+        "Aerodynamics",
+        "CFD Analysis",
+        "Engineering",
+        "Aviation",
+    ):
+        marker = prefix + ":"
+        if query.lower().startswith(marker.lower()):
+            category = prefix
+            question = query[len(marker):].strip()
+            break
+    if not category:
+        return ""
+
+    lower_question = question.lower()
+    if category == "3D Printing":
+        if text_has_any(lower_question, ("material", "pla", "petg", "asa", "nylon", "carbon")):
+            lead = "Pick the filament from the job first: PLA for easy indoor prototypes, PETG for general utility, ASA for outdoor UV/weather, ABS/ASA for heat, nylon for toughness, and CF-filled materials for stiffness when abrasion and cost are acceptable."
+        elif text_has_any(lower_question, ("warping", "stringing", "under-extruding", "layer-shifting", "fail")):
+            lead = "Start with the failure mode: warping is usually heat/adhesion/cooling, stringing is temperature/retraction/moisture, under-extrusion is flow/path restriction, and layer shifting is usually mechanical or acceleration related."
+        elif text_has_any(lower_question, ("orient", "supports", "redesigned", "tolerances", "strong enough", "strength")):
+            lead = "Start from load direction and manufacturing limits: orient layers so the main tensile load does not peel along layer lines, then redesign support-heavy features into chamfers, bridges, split parts, or bolt-on features."
+        else:
+            lead = "Start with material, printer capability, part load, heat, UV, tolerance, and surface-finish requirements before choosing settings."
+        why = "This is why: 3D printing failures and material choices are coupled. Material, drying, nozzle size, layer orientation, wall count, chamber temperature, cooling, and slicer calibration all change strength and finish."
+        consider = "You should also consider: give me the part use, dimensions, load direction, environment, printer, nozzle, and filament brand when you want a final setting or design call."
+    elif category == "CAD":
+        if text_has_any(lower_question, ("drawing from a 3d model", "technical drawing package", "exploded views", "assembly drawings")):
+            lead = "Start from the 3D model, then create only the drawing views needed to manufacture and inspect the part: base view, projected/section/detail views, critical dimensions, datums, tolerances, notes, material, finish, revision, and BOM when it is an assembly."
+        elif text_has_any(lower_question, ("datum", "gd&t", "tolerance", "dimension", "drawing")):
+            lead = "Start the CAD answer from function: choose datums from the surfaces that locate the part in the real assembly, then dimension only what controls fit, motion, sealing, inspection, or manufacturing."
+        elif text_has_any(lower_question, ("cnc", "machining", "manufacture", "manufacturable", "fillets", "chamfers", "holes", "thread", "sheet metal", "bend", "draft", "molding", "casting")):
+            lead = "Model the part around the process: tool access, minimum radii, stock shape, setup direction, wall thickness, fasteners, inspection surfaces, and realistic tolerances should drive the CAD."
+        elif text_has_any(lower_question, ("fea", "simulation", "strength", "load", "stiffness", "weight", "ribs", "gussets", "brackets")):
+            lead = "Build the model so the load path is visible: keep critical geometry accurate, simplify cosmetic detail for analysis, and define loads, constraints, material, and safety factor before trusting a strength call."
+        elif text_has_any(lower_question, ("assembly", "interfer", "clearance", "mates", "reference", "rebuild", "design intent", "revision")):
+            lead = "Make the model stable before making it fancy: use clean origin references, named parameters, simple sketches, controlled mates, interference checks, and a file structure another engineer can follow."
+        elif text_has_any(lower_question, ("mesh", "step", "stl", "dxf", "iges", "export")):
+            lead = "Choose the export by the next operation: STEP for editable solid exchange, STL/3MF for printing meshes, DXF for flat cutting, and IGES only when the receiving tool needs older surface data."
+        else:
+            lead = "Start with design intent, manufacturing process, datums, load path, mating interfaces, tolerances, and inspection method before adding detail."
+        why = "This is why: CAD is not just shape creation. Good models preserve intent, make manufacturing possible, keep assemblies predictable, and leave a clean path for drawings, CAM, simulation, and revision."
+        consider = "You should also consider: tell me the process, material, critical dimensions, load direction, mating parts, quantity, and inspection method when you want a final design recommendation."
+    elif category == "CNC Machining":
+        if text_has_any(lower_question, ("feeds", "speeds")):
+            lead = "Use feeds and speeds from the material, cutter diameter/flutes, tool material, stickout, machine rigidity, and operation; do not use one universal RPM/feed."
+        elif text_has_any(lower_question, ("3-axis", "4-axis", "5-axis", "3 axis", "4 axis", "5 axis")):
+            lead = "Pick the simplest axis count that reaches the features and tolerance: use 3-axis for accessible prismatic parts, 4-axis when rotation reduces setups or keeps features concentric, and 5-axis only when tool access, undercuts, compound angles, or setup reduction justify the cost."
+        elif text_has_any(lower_question, ("dimensional error", "dimensional errors", "troubleshoot")):
+            lead = "Troubleshoot dimensional errors in order: confirm the measurement method, then check work offset, tool length/diameter offsets, stock movement, cutter wear/deflection, thermal growth, CAM compensation, and whether roughing left enough finishing stock."
+        elif text_has_any(lower_question, ("chatter", "surface finish")):
+            lead = "Fix chatter and poor finish by checking rigidity first: workholding, tool stickout, cutter sharpness, chip load, spindle speed, radial engagement, coolant, and toolpath."
+        elif text_has_any(lower_question, ("milled", "turned", "laser", "waterjet", "3d printed")):
+            lead = "Choose the process by geometry and tolerance: turn round parts, mill precise 3D features, laser/waterjet flat profiles, and 3D print shapes that are hard to machine or need fast iteration."
+        else:
+            lead = "Start with material, tolerance, geometry, machine capability, tool access, and fixturing before choosing the manufacturing path."
+        why = "This is why: CNC success is mostly chip formation plus rigidity. A perfect CAD shape can still chatter, move in the fixture, burn tools, or cost too much if the process plan is wrong."
+        consider = "You should also consider: share material, stock size, machine type, tool list, tolerance, quantity, and whether the part is prototype or production."
+    elif category == "Solar And Wind Technology":
+        lead = "Start with the load in watt-hours per day, then size panels, batteries, charge controller, inverter, and wiring from that energy budget."
+        if "wind" in lower_question and "location" in lower_question:
+            lead = "Wind is only practical if your measured average wind speed and tower height are good; otherwise solar usually wins for reliability, cost, and maintenance."
+        why = "This is why: off-grid power is an energy-balance problem. Loads, sun hours, wind resource, battery chemistry, depth of discharge, temperature, inverter surge, and reserve days control the system size."
+        consider = "You should also consider: use real measured loads and local solar/wind data before buying hardware, then derate for weather, battery temperature, wiring losses, and equipment surge."
+    elif category == "Aerodynamics":
+        lead = "Start with speed, characteristic length, Reynolds number, angle of attack, and shape; those determine whether lift, drag, separation, or turbulence is the main problem."
+        why = "This is why: aerodynamic behavior changes with scale and flow regime. A shape that works at one Reynolds number or angle of attack may stall, separate, or create excess drag somewhere else."
+        consider = "You should also consider: use hand estimates first, then XFOIL/OpenVSP/OpenFOAM or a smoke/tuft test when geometry, speed, and boundary conditions are known."
+    elif category == "CFD Analysis":
+        lead = "Start by defining the physics, domain, boundary conditions, mesh strategy, turbulence model, convergence criteria, and validation check before trusting any CFD result."
+        why = "This is why: CFD can produce polished-looking wrong answers when the mesh, boundary conditions, turbulence model, or residual targets do not match the real flow."
+        consider = "You should also consider: compare CFD against a hand calculation, published correlation, wind-tunnel/smoke test, or simple pressure/flow measurement before calling the result real."
+    elif category == "Engineering":
+        lead = "Start with the actual load case, constraints, material, process, geometry, safety factor, and failure modes, then choose thickness, fasteners, welds, or redesign changes from that."
+        why = "This is why: strong enough is not one number. Static strength, fatigue, deflection, heat, creep, corrosion, fastener bearing, weld quality, and manufacturability can each control the design."
+        consider = "You should also consider: define what failure means, what safety factor is appropriate, and whether the design needs hand calculations, FEA, prototype testing, or all three."
+    elif category == "Aviation":
+        lead = "Use the aircraft's POH/AFM for operational numbers, and use aerodynamic principles to understand why the aircraft behaves that way."
+        if text_has_any(lower_question, ("lift", "flaps", "slats", "spoilers", "control", "stall", "spin", "yaw")):
+            lead = "Start with angle of attack, airflow over the wing/control surface, and energy state; those explain lift, stalls, spins, adverse yaw, and control effectiveness."
+        why = "This is why: aviation performance depends on weight, balance, density altitude, configuration, power, drag, wind, and pilot technique. Conceptual rules help, but aircraft-specific data controls real decisions."
+        consider = "You should also consider: separate educational analysis from flight planning, and verify real-world operation against the POH/AFM, regulations, training, and current conditions."
+    else:
+        return ""
+    if "recommend" not in lead.lower():
+        lead = "My recommendation: " + lead[0].lower() + lead[1:]
+    return "\n\n".join([lead, why, consider])
+
+
+def general_direct_knowledge_answer(messages, route=None):
+    answer = (
+        domain_sample_direct_answer(messages, route)
+        or inverter_three_phase_direct_answer(messages)
+        or aero_tool_install_direct_answer(messages)
+        or vague_failure_diagnostic_direct_answer(messages)
+        or ai_print_failure_monitoring_direct_answer(messages)
+        or aircraft_wood_defect_direct_answer(messages)
+        or flightops_service_charge_no_activity_direct_answer(messages)
+        or tinmanx_ui_theme_direct_answer(messages)
+        or codex_ui_workflow_scenario_direct_answer(messages)
+    )
+    if not answer:
+        return None
+    route_id = (route or {}).get("projectId", "")
+    if route_id == "flightops-tracker":
+        mode = "flightops-direct-answer"
+        thought = "Recognized this as a FlightOps report/accounting logic issue and answering with the implementation target first."
+    elif route_id == "tinmanx-slicer-research":
+        mode = "tinmanx-ui-direct-answer"
+        thought = "Recognized this as a TinManX/Orca workflow or branding task, not a CAD/export question."
+    else:
+        mode = "direct-knowledge-answer"
+        thought = "Recognized this as a direct technical question, so I am answering first and keeping the reasoning compact."
+    return {"mode": mode, "thought": thought, "answer": answer}
+
+
 def wants_printing_expert_context(messages):
     text = printing_query_text(messages)
     terms = (
@@ -7284,6 +10076,32 @@ def component_manual_direct_answer(messages):
             "Local cached files:\n" + ("\n".join(paths) if paths else "- No local files were written."),
             "Source URLs:\n" + source_urls,
             "You should also consider: " + caveat,
+        ]
+    )
+
+
+def toolboard_upgrade_decision_direct_answer(messages):
+    query = latest_user_text(messages).strip()
+    text = query.lower()
+    if not query or not text_has_any(text, ("ebb42", "ebb 42", "toolboard", "toolhead mcu")):
+        return ""
+    if not text_has_any(text, ("advisable", "should", "upgrade", "worth", "m5p", "runout")):
+        return ""
+    return "\n\n".join(
+        [
+            "My recommendation: yes, upgrading to an EBB42 is worth considering if you are already adding an M5P and want the filament runout switch near the toolhead, but only if you are ready to manage CAN/USB toolhead wiring cleanly.",
+            (
+                "This is why: a toolhead board lets the runout switch, extruder, hotend, fans, LEDs, and sensors terminate close to the toolhead instead of dragging more wires through the cable chain. "
+                "That usually improves serviceability and reduces harness bulk, but it adds firmware, bootloader, CAN/USB, termination, and spare-current details that have to be right."
+            ),
+            (
+                "Lower-risk option: if the only new signal is one simple filament runout switch, wire it back to the M5P or another existing input and postpone the EBB42 until the motion system is stable. "
+                "Better upgrade path: use the EBB42 when you also want cleaner toolhead wiring, CAN/USB expansion, or future sensor/fan/LED growth."
+            ),
+            (
+                "You should also consider: confirm the exact EBB42 revision, input voltage, CAN or USB plan, termination, cable strain relief, and Klipper pin names before buying or rewiring. "
+                "Do not let a toolboard upgrade hide a basic motion-system or harness problem."
+            ),
         ]
     )
 
@@ -7545,7 +10363,7 @@ def evaluate_free_tool_install(tool_or_command, approved=False):
     estimated = int(manifest.get("estimatedBytes") or 0)
     free_bytes = disk_free_bytes(APP_DIR)
     brew = shutil.which("brew", path=PATH_FOR_CODEX)
-    python = shutil.which("python3", path=PATH_FOR_CODEX) or sys.executable
+    python = sys.executable or shutil.which("python3", path=PATH_FOR_CODEX)
     result = {
         "ok": True,
         "tool": tool_id,
@@ -7667,7 +10485,7 @@ def install_free_tool(tool_or_command, approved=False, dry_run=False, reason="")
     elif manifest.get("brew"):
         cmd = [shutil.which("brew", path=PATH_FOR_CODEX), "install", *manifest.get("brew", [])]
     else:
-        python = shutil.which("python3", path=PATH_FOR_CODEX) or sys.executable
+        python = sys.executable or shutil.which("python3", path=PATH_FOR_CODEX)
         cmd = [python, "-m", "pip", "install", "--user", *manifest.get("pip", []), "--upgrade-strategy", "only-if-needed"]
     started = time.time()
     try:
@@ -9354,6 +12172,14 @@ def local_tool_catalog():
             "check": "POST /api/tools/autonomy-supervisor",
             "description": "Check whether a draft answer needs help, web evidence, tools, artifacts, or a hard-boundary question before finalizing.",
         },
+        "taskContractGate": {
+            "check": "POST /api/tools/task-contract",
+            "description": "Classify what done means for a request, list required proof/reject conditions, and optionally score a draft answer against the contract.",
+        },
+        "projectApplyExecutor": {
+            "stage": "POST /api/tools/project-apply",
+            "description": "Stage a target inventory, apply plan, manifest, and project-specific artifacts before claiming profile, preset, workflow, or project edits are complete.",
+        },
         "klipperConfigDiscovery": {
             "list": "GET /api/tools/klipper-configs?hint=qidi",
             "legacyList": "GET /api/tools/printer-configs?hint=ratrig",
@@ -9394,7 +12220,9 @@ def build_local_tools_context():
             "- To install a free allowlisted missing tool, call `POST http://127.0.0.1:8765/api/tools/install-free-tool` with JSON like `{\"tool\":\"jq\",\"reason\":\"parse printer API JSON\"}`.",
             "- To recover from a failure, call `POST http://127.0.0.1:8765/api/tools/recover` with the original messages, cwd, and error text. Use its recovery status before giving up.",
             "- To check whether a draft answer needs help before finalizing, call `POST http://127.0.0.1:8765/api/tools/autonomy-supervisor` with the messages, route, answerText, cwd, and webSearch.",
+            "- To define done before acting or to grade a draft against done, call `POST http://127.0.0.1:8765/api/tools/task-contract` with messages, route, optional answerText, and webSearch.",
             "- To classify a hard task or score a draft answer, call `POST http://127.0.0.1:8765/api/tools/analytical-core` with messages, route, answerText, and webSearch. Use it to fix wrong-objective, missing-constraint, no-decision, no-validation, and weak-evidence failures.",
+            "- For project edits, TinManX1/Orca profile changes, presets, or workflow updates, call `POST http://127.0.0.1:8765/api/tools/project-apply` to stage a target inventory, Project Apply plan, manifest, and generated artifacts before claiming live files changed.",
             "- If the install response says `needsApproval`, ask Tinman before downloading. Do this for storage pressure, large installs, unknown tools, or anything not confirmed free.",
             "- After a successful install, retry the original task instead of stopping at `command not found`.",
             "- For local Klipper config discovery, call `GET http://127.0.0.1:8765/api/tools/klipper-configs?hint=qidi` or use another machine hint. Add `&scan=1` only when known paths are not enough.",
@@ -9573,9 +12401,15 @@ def candidate_matches_hint(candidate, hint):
 
 def discover_klipper_config_dirs(hint="", scan=False):
     known = [
-        (Path.home() / "Downloads" / "ratrig_config", "current-klipper-config-ratrig"),
-        (Path.home() / "Documents" / "Codex", "user-codex-documents"),
-        (Path.home() / "Applications", "user-applications"),
+        ("/Users/williamtinney/Downloads/ratrig_config", "current-klipper-config-ratrig"),
+        (
+            "/Users/williamtinney/Documents/Codex/2026-05-22/on-the-qidi-i-am-attempting/ratrig_audit/config",
+            "known-klipper-config-ratrig-audit",
+        ),
+        (
+            "/Users/williamtinney/Applications/Flightops_Tracker/docs/ratrig_baseline_20260314_190144/ratrig_config",
+            "known-klipper-config-ratrig-baseline",
+        ),
     ]
     candidates = []
     seen = set()
@@ -9587,9 +12421,9 @@ def discover_klipper_config_dirs(hint="", scan=False):
 
     if scan:
         scan_roots = [
-            Path.home() / "Downloads",
-            Path.home() / "Documents" / "Codex",
-            Path.home() / "Applications",
+            Path("/Users/williamtinney/Downloads"),
+            Path("/Users/williamtinney/Documents/Codex/2026-05-22/on-the-qidi-i-am-attempting"),
+            Path("/Users/williamtinney/Applications/Flightops_Tracker/docs"),
         ]
         for root in scan_roots:
             if not root.exists():
@@ -10556,9 +13390,363 @@ def resolve_geometry_file(messages, cwd="", extensions=GEOMETRY_FILE_EXTENSIONS)
     return {"path": None, "source": "", "name": refs[0] if refs else "", "searched": searched}
 
 
+EMBEDDED_IMAGE_EXTENSIONS = (".img.xz", ".img", ".xz", ".zip")
+
+
+def embedded_image_names_from_text(text):
+    ext_pattern = r"img\.xz|img|xz|zip"
+    pattern = re.compile(rf"([A-Za-z0-9_./~()#&+ -]{{1,220}}\.(?:{ext_pattern}))", re.IGNORECASE)
+    names = []
+    for match in pattern.finditer(str(text or "")):
+        name = match.group(1).strip().strip("`'\"")
+        if name:
+            names.append(name)
+    return names
+
+
+def is_embedded_linux_image_request(messages):
+    query = latest_user_text(messages).lower()
+    if not query:
+        return False
+    platform_terms = (
+        "ratos",
+        "rat os",
+        "raspberry pi",
+        "rasberry pi",
+        "raspberry",
+        "rasberry",
+        "rpi",
+        "pi 5",
+        "pi5",
+        "pi 4",
+        "pi4",
+        "bookworm",
+        "bullseye",
+        "arm64",
+        "aarch64",
+        "boot partition",
+        "device tree",
+        "dtb",
+        "kernel",
+        "firmware",
+        "rpi-eeprom",
+    )
+    image_terms = (
+        ".img.xz",
+        ".img",
+        "sd card image",
+        "boot image",
+        "os image",
+        "image file",
+        "downloaded file",
+        "downloads folder",
+    )
+    action_terms = (
+        "create",
+        "make",
+        "working version",
+        "works on",
+        "not work",
+        "not working",
+        "compatible",
+        "seamless",
+        "seemless",
+        "port",
+        "boot",
+        "flash",
+        "image",
+    )
+    has_image_ref = bool(embedded_image_names_from_text(query)) or any(
+        str(item.get("name") or item.get("path") or "").lower().endswith(EMBEDDED_IMAGE_EXTENSIONS)
+        for item in message_attachments(messages)
+    )
+    return (
+        (text_has_any(query, platform_terms) and (text_has_any(query, image_terms) or has_image_ref))
+        or (has_image_ref and text_has_any(query, action_terms) and text_has_any(query, platform_terms))
+    )
+
+
+def resolve_embedded_image_file(messages, cwd=""):
+    attachments = message_attachments(messages)
+    for attachment in reversed(attachments):
+        name = str(attachment.get("name") or "")
+        path = str(attachment.get("path") or "")
+        if name.lower().endswith(EMBEDDED_IMAGE_EXTENSIONS) or path.lower().endswith(EMBEDDED_IMAGE_EXTENSIONS):
+            candidate = Path(path).expanduser()
+            if candidate.exists() and candidate.is_file():
+                return {
+                    "path": candidate,
+                    "source": "attached upload",
+                    "name": name or candidate.name,
+                    "searched": [],
+                }
+
+    latest = latest_user_text(messages)
+    refs = embedded_image_names_from_text(latest)
+    searched = []
+    roots = [
+        Path(cwd or DEFAULT_CWD).expanduser(),
+        UPLOAD_DIR,
+        APP_DIR,
+        Path(DEFAULT_CWD).expanduser(),
+        Path.home() / "Downloads",
+        Path.home() / "Desktop",
+        Path.home() / "Documents",
+    ]
+    seen_roots = set()
+    for ref in refs:
+        ref_path = Path(ref).expanduser()
+        direct_candidates = []
+        if ref_path.is_absolute():
+            direct_candidates.append(ref_path)
+        else:
+            for root in roots:
+                direct_candidates.append(root / ref_path)
+        for candidate in direct_candidates:
+            searched.append(str(candidate))
+            if candidate.exists() and candidate.is_file():
+                return {
+                    "path": candidate,
+                    "source": "filename reference",
+                    "name": candidate.name,
+                    "searched": searched,
+                }
+        basename = ref_path.name
+        for root in roots:
+            root = Path(root)
+            if root in seen_roots:
+                continue
+            seen_roots.add(root)
+            for candidate in iter_named_file_matches(root, basename, max_depth=3, limit=8):
+                searched.append(str(candidate))
+                if candidate.exists() and candidate.is_file():
+                    return {
+                        "path": candidate,
+                        "source": "filename search",
+                        "name": candidate.name,
+                        "searched": searched,
+                    }
+    return {"path": None, "source": "", "name": refs[0] if refs else "", "searched": searched}
+
+
+def embedded_image_xz_listing(path):
+    if not path:
+        return {"ok": False, "error": "missing image path"}
+    xz_path = command_path("xz")
+    if not xz_path:
+        return {"ok": False, "error": "xz command is not available"}
+    try:
+        proc = subprocess.run(
+            [xz_path, "-l", str(path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=30,
+            env={**os.environ, "PATH": PATH_FOR_CODEX},
+        )
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    return {
+        "ok": proc.returncode == 0,
+        "stdout": compact(proc.stdout, 1200),
+        "stderr": compact(proc.stderr, 600),
+        "returnCode": proc.returncode,
+    }
+
+
+def stage_embedded_linux_image_preflight(messages, cwd="", target_path=None):
+    resolved = resolve_embedded_image_file(messages, cwd=cwd)
+    image_path = resolved.get("path")
+    slug = slugify(latest_user_text(messages), fallback="embedded-image")[:48]
+    target = Path(target_path).expanduser() if target_path else LOCAL_EMBEDDED_IMAGE_OUTPUT_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}-{slug}"
+    target.mkdir(parents=True, exist_ok=True)
+    source_found = bool(image_path and Path(image_path).exists())
+    image_size = int(Path(image_path).stat().st_size) if source_found else 0
+    xz_info = embedded_image_xz_listing(image_path) if source_found and str(image_path).lower().endswith(".xz") else {"ok": False, "error": "not an xz-compressed image or source missing"}
+    file_info = ""
+    if source_found and command_path("file"):
+        try:
+            proc = subprocess.run(
+                [command_path("file"), str(image_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=20,
+                env={**os.environ, "PATH": PATH_FOR_CODEX},
+            )
+            file_info = compact(proc.stdout or proc.stderr, 400)
+        except Exception as exc:
+            file_info = f"file command failed: {exc}"
+
+    setup = {
+        "task": "RatOS/Raspberry Pi 5 image compatibility preflight",
+        "sourceFound": source_found,
+        "sourcePath": str(image_path) if source_found else "",
+        "sourceName": resolved.get("name") or "",
+        "source": resolved.get("source") or "",
+        "sizeBytes": image_size,
+        "size": human_bytes(image_size) if image_size else "",
+        "searched": resolved.get("searched", [])[:30],
+        "targetDir": str(target),
+        "pi5MustCheck": [
+            "boot firmware files in the FAT boot partition",
+            "Raspberry Pi 5 DTB files such as bcm2712-rpi-5-b.dtb",
+            "kernel version/config with Pi 5 support",
+            "config.txt overlays and cmdline.txt rootfs references",
+            "32-bit versus 64-bit userland and RatOS service compatibility",
+            "Klipper/Moonraker/RatOS services after first boot",
+        ],
+        "safetyBoundary": "Do not expand, rewrite, or flash multi-gigabyte images without storage and removable-media confirmation.",
+    }
+    setup_path = target / "case_setup.json"
+    write_json_atomic(setup_path, setup)
+
+    report_path = target / "RATOS_PI5_IMAGE_PREFLIGHT.md"
+    searched_lines = "\n".join(f"- `{item}`" for item in resolved.get("searched", [])[:12]) or "- No candidate paths were searched."
+    xz_block = xz_info.get("stdout") or xz_info.get("stderr") or xz_info.get("error") or "not run"
+    report_path.write_text(
+        "\n".join(
+            [
+                "# RatOS Raspberry Pi 5 Image Preflight",
+                "",
+                "## Result",
+                (
+                    f"- Source image found: `{image_path}` ({human_bytes(image_size)})"
+                    if source_found
+                    else f"- Source image not found. Filename reference: `{resolved.get('name') or 'unknown'}`"
+                ),
+                f"- Resolver source: {resolved.get('source') or 'not resolved'}",
+                "- Classification: embedded Linux / Raspberry Pi OS-image port, not CAD, CFD, or structural FEA.",
+                "- Status: preflight staged only. This is not yet a boot-tested Raspberry Pi 5 image.",
+                "",
+                "## Quick File Inspection",
+                f"- `file`: {file_info.strip() or 'not run'}",
+                "- `xz -l`:",
+                "```text",
+                xz_block,
+                "```",
+                "",
+                "## Pi 5 Compatibility Checklist",
+                "- Confirm the boot partition has Pi 5 firmware and `bcm2712-rpi-5-b.dtb`.",
+                "- Confirm the kernel and modules support Raspberry Pi 5 hardware.",
+                "- Confirm `config.txt`, overlays, and `cmdline.txt` match the partition layout.",
+                "- Confirm the RatOS base is not pinned to Pi 4-only firmware or kernel packages.",
+                "- Confirm Klipper, Moonraker, CAN/USB printer interfaces, networking, and RatOS services start cleanly after first boot.",
+                "- Check storage before expanding the compressed image, then write only to a confirmed removable target.",
+                "",
+                "## Searched Paths",
+                searched_lines,
+                "",
+                "## Next Safe Step",
+                "Expand the image into this work folder only after storage is confirmed, mount it read-only, inspect the boot partition, then patch or rebuild against a Pi 5-capable Raspberry Pi OS/RatOS base.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    script_path = target / "inspect_ratos_pi5_image.sh"
+    script_path.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env bash",
+                "set -euo pipefail",
+                f"SOURCE_IMAGE=\"${{1:-{str(image_path) if source_found else '<path-to-ratos-img-xz>'}}}\"",
+                "WORKDIR=$(cd \"$(dirname \"$0\")\" && pwd)",
+                "echo \"Source: $SOURCE_IMAGE\"",
+                "test -f \"$SOURCE_IMAGE\"",
+                "file \"$SOURCE_IMAGE\" || true",
+                "xz -l \"$SOURCE_IMAGE\" || true",
+                "shasum -a 256 \"$SOURCE_IMAGE\"",
+                "cat <<'NOTE'",
+                "",
+                "This script intentionally stops before expansion/flash.",
+                "After Tinman confirms storage, expand to $WORKDIR/source.img, attach read-only, and inspect:",
+                "- boot firmware files",
+                "- bcm2712-rpi-5-b.dtb",
+                "- kernel/modules",
+                "- config.txt overlays",
+                "- cmdline.txt rootfs mapping",
+                "- RatOS/Klipper/Moonraker services",
+                "NOTE",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    try:
+        script_path.chmod(0o755)
+    except OSError:
+        pass
+
+    return {
+        "ok": source_found,
+        "targetDir": str(target),
+        "sourceFound": source_found,
+        "sourcePath": str(image_path) if source_found else "",
+        "sourceName": resolved.get("name") or "",
+        "source": resolved.get("source") or "",
+        "sizeBytes": image_size,
+        "size": human_bytes(image_size) if image_size else "",
+        "fileInfo": file_info.strip(),
+        "xzInfo": xz_info,
+        "searched": resolved.get("searched", []),
+        "reportPath": str(report_path),
+        "caseSetupPath": str(setup_path),
+        "inspectScriptPath": str(script_path),
+    }
+
+
+def embedded_linux_image_preflight_working_notes(result):
+    notes = []
+    if result.get("sourceFound"):
+        notes.append(f"Found source OS image: {result.get('sourcePath')} ({result.get('size')}).")
+    else:
+        notes.append("Did not find the referenced OS image yet; stopping before pretending a Pi 5 image was created.")
+    notes.append("Classified the request as Raspberry Pi/RatOS embedded Linux image work, not CAD, CFD, or structural FEA.")
+    notes.append("Staged a boot/kernel/firmware preflight report and a safe inspection script; no image was expanded, flashed, or claimed bootable.")
+    return notes
+
+
+def format_embedded_linux_image_preflight_answer(result):
+    found = bool(result.get("sourceFound"))
+    source_line = (
+        f"Source image: `{result.get('sourcePath')}` ({result.get('size')})."
+        if found
+        else f"Source image not found yet. Filename reference: `{result.get('sourceName') or 'unknown'}`."
+    )
+    return "\n\n".join(
+        [
+            (
+                "I found the RatOS image and staged a Raspberry Pi 5 compatibility preflight, not a CAD/FEA package."
+                if found
+                else "I treated this as a Raspberry Pi/RatOS OS-image porting job and stopped before making a fake Pi 5 image."
+            ),
+            "\n".join(
+                [
+                    source_line,
+                    f"Preflight report: `{result.get('reportPath')}`",
+                    f"Case setup: `{result.get('caseSetupPath')}`",
+                    f"Inspection script: `{result.get('inspectScriptPath')}`",
+                ]
+            ),
+            (
+                "This is why: moving a RatOS image from Raspberry Pi 4 to Raspberry Pi 5 is a boot/kernel/firmware compatibility job. "
+                "The answer has to inspect the boot partition, Pi 5 DTB files, kernel/modules, overlays, `cmdline.txt`, userland architecture, and RatOS/Klipper services before claiming a working image."
+            ),
+            (
+                "You should also consider: I did not expand or rewrite the 2 GB compressed image in this pass because that can consume several more gigabytes and should be done only after storage is confirmed. "
+                "No removable media was written or flashed. The next real step is read-only image expansion/mount inspection, then either patching the image or rebuilding from a Pi 5-capable RatOS/Raspberry Pi OS base and boot-testing it on the Pi 5."
+            ),
+        ]
+    )
+
+
 def is_aero_cfd_analysis_request(messages):
     query = latest_user_text(messages).lower()
     if not query:
+        return False
+    if is_embedded_linux_image_request(messages):
         return False
     if is_cad_design_request(messages) and text_has_any(query, ("cpap", "part cooling", "cooling duct", "fusion 360", "cad")):
         return False
@@ -10815,6 +14003,12 @@ IMPORTANT_PYTHON_MODULES = [
     "matplotlib",
     "rtree",
     "open3d",
+    "dspy",
+    "lancedb",
+    "mlx_lm",
+    "ruff",
+    "pytest",
+    "mypy",
     "pandas",
     "openpyxl",
     "docx",
@@ -12344,6 +15538,8 @@ def structural_analysis_parameters(messages):
 def is_structural_mechanical_design_request(messages):
     query = latest_user_text(messages).lower()
     if not query:
+        return False
+    if is_embedded_linux_image_request(messages):
         return False
     if re.match(r"\s*what\s+is\s+the\s+best\s+filament\b", query):
         return False
@@ -14748,7 +17944,9 @@ def build_prompt(
         if web_search == "live"
         else build_web_disabled_context(messages)
     )
+    attachment_context = build_attachment_context(messages)
     research_context = build_research_quality_context(messages)
+    research_apply_context = build_research_apply_context(messages, route or {})
     local_context = build_local_context(messages)
     local_tools_context = build_local_tools_context()
     autonomy_context = build_autonomy_supervisor_context(messages, route or {}, web_search=web_search)
@@ -14772,8 +17970,10 @@ def build_prompt(
             + manager_context
             + ("\n" if manager_context else "")
             + startup_context_text
+            + attachment_context
             + web_context
             + research_context
+            + research_apply_context
             + local_context
             + local_tools_context
             + autonomy_context
@@ -14796,6 +17996,8 @@ def build_prompt(
         "",
         startup_context_text.strip(),
         "",
+        attachment_context.strip(),
+        "",
         quality_context.strip(),
         "",
         "Continue this local Codex CLI conversation. Answer the latest user request.",
@@ -14811,6 +18013,8 @@ def build_prompt(
         blocks.append(web_context)
     if research_context:
         blocks.append(research_context)
+    if research_apply_context:
+        blocks.append(research_apply_context)
     if local_context:
         blocks.append(local_context)
     if local_tools_context:
@@ -15251,6 +18455,17 @@ def local_research_queries(query, route):
                 "continuous fiber 3D printer toolhead hotend cutting mechanism impregnation",
             ]
         )
+    elif is_research_apply_request([{"role": "user", "text": query}]):
+        terms = [term for term in re_words(lower) if term not in STOP_WORDS]
+        core = " ".join(terms[:8]) or query
+        queries.extend(
+            [
+                f"{core} official guide documentation",
+                f"{core} implementation workflow",
+                "Ellis Print Tuning Guide pressure advance extrusion multiplier max volumetric flow",
+                "OrcaSlicer calibration guide filament tuning workflow",
+            ]
+        )
     elif wants_material_shopping_context([{"role": "user", "text": query}]) or any(
         term in lower for term in ["pet-cf", "pet cf", "filament", "spool"]
     ):
@@ -15467,8 +18682,14 @@ def run_ollama_generate(
             data = json.loads(response.read().decode("utf-8"))
     except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
         return {"error": f"Ollama local model request failed: {exc}"}
-    text = str(data.get("response", "")).strip()
+    text = strip_thinking_markup(data.get("response", ""))
     if not text:
+        thinking_len = len(str(data.get("thinking") or ""))
+        if thinking_len:
+            reason = "Ollama returned hidden reasoning but no final response."
+            if str(data.get("done_reason") or "") == "length":
+                reason += " The model used the output budget before producing a final answer; retry with a larger num_predict budget."
+            return {"error": reason}
         return {"error": "Ollama returned no final response. The local model may need a larger output budget or a restart."}
     return {"text": text}
 
@@ -15569,7 +18790,7 @@ def warm_ollama_model(model):
         return {"ok": False, "error": f"Ollama warmup failed: {exc}"}
     return {
         "ok": bool(data.get("done", True)),
-        "text": str(data.get("response") or data.get("thinking") or "").strip(),
+        "text": strip_thinking_markup(data.get("response") or data.get("thinking") or ""),
         "doneReason": data.get("done_reason", ""),
     }
 
@@ -15619,6 +18840,7 @@ def ollama_model_alias_audit():
         LOCAL_RESEARCH_MODEL,
         LOCAL_CODER_MODEL,
         LOCAL_REVIEW_MODEL,
+        LOCAL_DEEP_REVIEW_MODEL,
         MANAGER_POLISH_MODEL,
         *CODEX_PROFILE_MODELS.values(),
     }
@@ -15664,6 +18886,31 @@ def package_health_report():
         )
     except Exception as exc:
         add("ui:clickable-local-paths", "fail", str(exc))
+
+    try:
+        index_text = (APP_DIR / "index.html").read_text(encoding="utf-8")
+        styles_text = (APP_DIR / "styles.css").read_text(encoding="utf-8")
+        attach_button_match = re.search(r'<button[^>]+id="attachButton"[^>]*>', index_text)
+        attach_button_html = attach_button_match.group(0) if attach_button_match else ""
+        attach_css_match = re.search(r"\.attach-button\s*\{(?P<body>.*?)\}", styles_text, re.DOTALL)
+        attach_css = attach_css_match.group("body") if attach_css_match else ""
+        file_input_css_match = re.search(r"\.file-input-overlay\s*\{(?P<body>.*?)\}", styles_text, re.DOTALL)
+        file_input_css = file_input_css_match.group("body") if file_input_css_match else ""
+        ok = (
+            'id="attachButton"' in attach_button_html
+            and 'aria-hidden="true"' not in attach_button_html
+            and "tabindex=\"-1\"" not in attach_button_html
+            and "pointer-events: none" not in attach_css
+            and "left: -9999px" in file_input_css
+            and "pointer-events: none" in file_input_css
+        )
+        add(
+            "ui:attach-plus-native-button",
+            "pass" if ok else "fail",
+            "visible plus button owns the click; hidden input is fallback only",
+        )
+    except Exception as exc:
+        add("ui:attach-plus-native-button", "fail", str(exc))
 
     py_compile = subprocess.run(
         ["/usr/bin/python3", "-m", "py_compile", str(APP_DIR / "server.py")],
@@ -15721,6 +18968,71 @@ def package_health_report():
         add("tools:capability-manager", "fail", str(exc))
 
     try:
+        catalog = capability_tool_catalog()
+        by_id = {tool.get("id"): tool for tool in catalog.get("tools", [])}
+        installed = [tool_id for tool_id in REASONING_TOOL_IDS if by_id.get(tool_id, {}).get("installed")]
+        missing = [tool_id for tool_id in REASONING_TOOL_IDS if not by_id.get(tool_id, {}).get("installed")]
+        add(
+            "tools:reasoning-pack",
+            "pass" if not missing else "fail",
+            f"{len(installed)}/{len(REASONING_TOOL_IDS)} ready"
+            + (f"; missing {', '.join(missing)}" if missing else ""),
+        )
+        optional = [tool_id for tool_id in OPTIONAL_REASONING_TOOL_IDS if by_id.get(tool_id, {}).get("installed")]
+        add(
+            "tools:optional-reasoning-stack",
+            "pass",
+            f"{len(optional)}/{len(OPTIONAL_REASONING_TOOL_IDS)} optional Python/RAG tools installed",
+        )
+        quality_installed = [
+            tool_id for tool_id in CODE_QUALITY_TOOL_IDS if by_id.get(tool_id, {}).get("installed")
+        ]
+        quality_missing = [
+            tool_id for tool_id in CODE_QUALITY_TOOL_IDS if not by_id.get(tool_id, {}).get("installed")
+        ]
+        add(
+            "tools:code-quality-pack",
+            "pass" if not quality_missing else "fail",
+            f"{len(quality_installed)}/{len(CODE_QUALITY_TOOL_IDS)} ready"
+            + (f"; missing {', '.join(quality_missing)}" if quality_missing else ""),
+        )
+    except Exception as exc:
+        add("tools:reasoning-pack", "fail", str(exc))
+
+    try:
+        add(
+            "quality:thinking-output-sanitizer",
+            "pass" if thinking_output_sanitizer_synthetic_check() else "fail",
+            "removes hidden-reasoning markup, Qwen-style thinking blocks, and terminal control codes",
+        )
+    except Exception as exc:
+        add("quality:thinking-output-sanitizer", "fail", str(exc))
+
+    try:
+        ok = (
+            "local-deep-review" in PROFILE_LEVELS
+            and "local-deep-review" in LOCAL_REVIEW_PROFILES
+            and local_review_model_for_profile("local-deep-review") == LOCAL_DEEP_REVIEW_MODEL
+            and LOCAL_DEEP_REVIEW_MODEL
+        )
+        add(
+            "tools:deep-review-profile",
+            "pass" if ok else "fail",
+            f"Deep Review uses {LOCAL_DEEP_REVIEW_MODEL}",
+        )
+    except Exception as exc:
+        add("tools:deep-review-profile", "fail", str(exc))
+
+    try:
+        add(
+            "quality:auto-deep-review-escalation",
+            "pass" if auto_deep_review_synthetic_check() else "fail",
+            "escalates hard/corrected Manager tasks to Deep Review without slowing normal direct questions",
+        )
+    except Exception as exc:
+        add("quality:auto-deep-review-escalation", "fail", str(exc))
+
+    try:
         add(
             "tools:recovery-engine",
             "pass" if tool_recovery_synthetic_check() else "fail",
@@ -15749,6 +19061,24 @@ def package_health_report():
 
     try:
         add(
+            "tools:research-apply-loop",
+            "pass" if research_apply_synthetic_check() else "fail",
+            "requires sources, project application, receipt/output proof, and verification",
+        )
+    except Exception as exc:
+        add("tools:research-apply-loop", "fail", str(exc))
+
+    try:
+        add(
+            "tools:project-apply-executor",
+            "pass" if project_apply_synthetic_check() else "fail",
+            "stages target inventory, Orca/TinManX1 profile artifacts, apply manifest, and backup-first visibility checks",
+        )
+    except Exception as exc:
+        add("tools:project-apply-executor", "fail", str(exc))
+
+    try:
+        add(
             "tools:language-quality-gate",
             "pass" if quality_gate_synthetic_check() else "fail",
             "validates Python, C++, Klipper, G-code, and failing syntax without live machine actions",
@@ -15764,6 +19094,15 @@ def package_health_report():
         )
     except Exception as exc:
         add("tools:self-healing-supervisor", "fail", str(exc))
+
+    try:
+        add(
+            "tools:wrong-answer-repair-loop",
+            "pass" if wrong_answer_repair_loop_synthetic_check() else "fail",
+            "turns wrong-answer corrections into diagnosis, regression test, and self-patch candidate",
+        )
+    except Exception as exc:
+        add("tools:wrong-answer-repair-loop", "fail", str(exc))
 
     try:
         diagram_messages = [
@@ -16061,6 +19400,194 @@ def package_health_report():
         )
     except Exception as exc:
         add("tools:orca-profile-parameter-pull", "fail", str(exc))
+
+    try:
+        creation_messages = [
+            {
+                "role": "user",
+                "text": (
+                    "Can you create an Orca PETG filament profile for all printers all nozzle sizes? "
+                    "Use the best practices and lessons learned from what we have done and industry."
+                ),
+            }
+        ]
+        LOCAL_ORCA_PROFILE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="health-orca-profile-", dir=str(LOCAL_ORCA_PROFILE_OUTPUT_DIR)) as tmp_dir:
+            creation_result = stage_orca_profile_pack(creation_messages, target_path=tmp_dir)
+            creation_files_ok = (
+                Path(creation_result.get("matrixPath", "")).exists()
+                and Path(creation_result.get("readmePath", "")).exists()
+            )
+        creation_route = route_manager(creation_messages, requested_profile="manager", web_search="disabled")
+        ok = (
+            is_orca_profile_creation_request(creation_messages)
+            and not is_filament_profile_pull_request(creation_messages)
+            and creation_route.get("projectId") == "tinmanx-slicer-research"
+            and creation_result.get("profileCount", 0) >= 12
+            and creation_files_ok
+        )
+        add(
+            "tools:orca-profile-creation-pack",
+            "pass" if ok else "fail",
+            f"{creation_result.get('profileCount', 0)} starter profiles generated for Orca import review",
+        )
+    except Exception as exc:
+        add("tools:orca-profile-creation-pack", "fail", str(exc))
+
+    try:
+        nozzle_messages = [
+            {
+                "role": "user",
+                "text": (
+                    "I am able to sync the filament type and color into the prepare tab. "
+                    "I would still like to be able to see what nozzle is installed on the machine and what type in Orca. "
+                    "What are my options at this point?"
+                ),
+            }
+        ]
+        nozzle_route = route_manager(nozzle_messages, requested_profile="manager", web_search="disabled")
+        nozzle_answer = orca_nozzle_visibility_direct_answer(nozzle_messages)
+        ok = (
+            is_orca_nozzle_visibility_question(nozzle_messages)
+            and nozzle_route.get("projectId") == "tinmanx-slicer-research"
+            and "configured nozzle" in nozzle_answer.lower()
+            and "installed physical nozzle" in nozzle_answer.lower()
+            and "local machine inventory" in nozzle_answer.lower()
+            and "This is why:" in nozzle_answer
+            and "You should also consider:" in nozzle_answer
+            and "password" not in nozzle_answer.lower()
+            and "Fusion 360" not in nozzle_answer
+        )
+        add(
+            "tools:orca-nozzle-visibility-options",
+            "pass" if ok else "fail",
+            "Orca nozzle visibility questions route to slicer workflow design, not live printer status",
+        )
+    except Exception as exc:
+        add("tools:orca-nozzle-visibility-options", "fail", str(exc))
+
+    try:
+        workflow_cases = [
+            (
+                "orca-405",
+                [{"role": "user", "text": "When I try to print to my K2 Plus from Orca, I am getting HTTP 405 not allowed. How can I fix this?"}],
+                "tinmanx-slicer-research",
+                orca_http_405_direct_answer,
+                ("HTTP 405", "This is why:", "You should also consider:"),
+            ),
+            (
+                "tinmanx-slice-stall",
+                [{"role": "user", "text": "in TinManX orca, the slice hits 80% then stalls. how can we fix this?"}],
+                "tinmanx-slicer-research",
+                tinmanx_slice_stall_direct_answer,
+                ("80% stall", "This is why:", "You should also consider:"),
+            ),
+            (
+                "orca-device-tab",
+                [{"role": "user", "text": "on the centari carbon printers with open centauri firmware, in the devive tab of orca, is there any way to give me more control like in a standard klipper printer?"}],
+                "tinmanx-slicer-research",
+                orca_device_tab_control_direct_answer,
+                ("Device tab", "This is why:", "You should also consider:"),
+            ),
+            (
+                "fusion-cam-stock-shoulder",
+                [{"role": "user", "text": "In Autodesk Fusion manufacture workspace I have a simple 2D contour and simulation gives Stock + Shoulder. How can I fix this?"}],
+                "cad-modeling-projects",
+                fusion_cam_stock_shoulder_direct_answer,
+                ("Stock + Shoulder", "This is why:", "You should also consider:"),
+            ),
+        ]
+        failed_workflows = []
+        for name, case_messages, expected_project, answer_fn, terms in workflow_cases:
+            route = route_manager(case_messages, requested_profile="manager", web_search="disabled")
+            answer = answer_fn(case_messages)
+            score = analytical_answer_score(case_messages, route, answer, web_search="disabled")
+            if not (
+                route.get("projectId") == expected_project
+                and answer
+                and all(term.lower() in answer.lower() for term in terms)
+                and int(score.get("score") or 0) >= 82
+            ):
+                failed_workflows.append(name)
+        add(
+            "tools:slicer-cam-workflow-direct-answers",
+            "pass" if not failed_workflows else "fail",
+            "Orca workflow and Fusion CAM troubleshooting direct answers route correctly"
+            if not failed_workflows
+            else "failed cases: " + ", ".join(failed_workflows),
+        )
+    except Exception as exc:
+        add("tools:slicer-cam-workflow-direct-answers", "fail", str(exc))
+
+    try:
+        direct_cases = [
+            (
+                "ai-print-failure",
+                [{"role": "user", "text": "What would be the best option for AI print failure monitoring?"}],
+                "general",
+                ("Best free/local", "This is why:", "You should also consider:"),
+            ),
+            (
+                "aircraft-wood-defect",
+                [{"role": "user", "text": "Which defect is acceptable when choosing wood for aircraft structural repair? A Compression failure. B Splits. C Mineral streaks (not accompanied by decay)."}],
+                "cad-modeling-projects",
+                ("Pick C", "This is why:", "You should also consider:"),
+            ),
+            (
+                "flightops-no-activity-charge",
+                [{"role": "user", "text": "Sometimes there is no flight activity for a customer for the month. If this is the case and there are services charges, we need to still show the charges. In N411GC for February there was a services charge for WB Air 2021 but he had no flights, this service fee was not posted to the report. Can you fix this?"}],
+                "flightops-tracker",
+                ("zero flight rows", "This is why:", "You should also consider:"),
+            ),
+            (
+                "tinmanx-theme-branding",
+                [{"role": "user", "text": "can we change the colors on the app so I dont keep getting confused? Can you change the black on the orca to blue and the green to red and when it opens change the opening tile version from orca slicer ti TinmanX 1.0.0?"}],
+                "tinmanx-slicer-research",
+                ("source-level theme", "This is why:", "You should also consider:"),
+            ),
+            (
+                "inverter-three-phase-input",
+                [{"role": "user", "text": "can you check and see if this inverter will directly take a 3 phase ac input? VEVOR 6400W 48V Hybrid Solar Inverter, 120V/240V Split Phase"}],
+                "energy-power-research",
+                ("do not feed", "split-phase", "This is why:", "You should also consider:"),
+            ),
+            (
+                "aero-tool-install-path",
+                [{"role": "user", "text": "how do we get XFOIL, OpenVSP, SU2, and QBlade?"}],
+                "cad-modeling-projects",
+                ("install them in this order", "OpenVSP", "This is why:", "You should also consider:"),
+            ),
+            (
+                "vague-failure-diagnostic",
+                [{"role": "user", "text": "On my cantauri Tinman, I believe I had a failure. Can you see what failure it was?"}],
+                "general",
+                ("most recent local app/log failure", "read-only", "This is why:", "You should also consider:"),
+            ),
+        ]
+        failed_direct = []
+        for name, case_messages, expected_project, terms in direct_cases:
+            route = route_manager(case_messages, requested_profile="manager", web_search="disabled")
+            packet = general_direct_knowledge_answer(case_messages, route)
+            answer = (packet or {}).get("answer", "")
+            score = analytical_answer_score(case_messages, route, answer, web_search="disabled")
+            if not (
+                route.get("projectId") == expected_project
+                and answer
+                and all(term.lower() in answer.lower() for term in terms)
+                and int(score.get("score") or 0) >= 82
+                and "Recovery plan:" not in answer
+                and "Fusion 360" not in answer
+            ):
+                failed_direct.append(name)
+        add(
+            "tools:history-direct-answer-cases",
+            "pass" if not failed_direct else "fail",
+            "history-derived direct answers route and respond without cold fallback"
+            if not failed_direct
+            else "failed cases: " + ", ".join(failed_direct),
+        )
+    except Exception as exc:
+        add("tools:history-direct-answer-cases", "fail", str(exc))
 
     try:
         profile_answer = printer_profile_direct_answer(
@@ -16628,6 +20155,41 @@ def package_health_report():
         add("analysis:platform-classifier", "fail", str(exc))
 
     try:
+        ratos_messages = [
+            {
+                "role": "user",
+                "text": "I have downloaded a file in the downloads folder. It is Rat OS. It works on rasberry pi 4 but not rasberry pi 5. can you create a working version that will work seemlessly on the pi 5?2026-03-04-RatOS-2.1.0-raspberry-rpi32.img.xz",
+            }
+        ]
+        ratos_route = route_manager(ratos_messages, requested_profile="manager", web_search="disabled")
+        ratos_contract = task_contract(ratos_messages, ratos_route)
+        ratos_answer = "\n\n".join(
+            [
+                "I treated this as a Raspberry Pi/RatOS OS-image porting job and stopped before making a fake Pi 5 image.",
+                "Source image not found yet. Preflight report: `/Users/example/data/generated/embedded-images/ratos/RATOS_PI5_IMAGE_PREFLIGHT.md`\nInspection script: `/Users/example/data/generated/embedded-images/ratos/inspect_ratos_pi5_image.sh`",
+                "This is why: Pi 5 compatibility depends on boot firmware, kernel, DTB files, config.txt, cmdline.txt, and RatOS services.",
+                "You should also consider: do not expand or flash the image until storage and removable media are confirmed; this is not yet a boot-tested Pi 5 image.",
+            ]
+        )
+        ratos_gate = task_contract_gate(ratos_messages, ratos_route, ratos_answer, contract=ratos_contract, web_search="disabled")
+        ok = (
+            is_embedded_linux_image_request(ratos_messages)
+            and not is_cad_design_request(ratos_messages)
+            and not is_aero_cfd_analysis_request(ratos_messages)
+            and not is_structural_mechanical_design_request(ratos_messages)
+            and ratos_route.get("projectId") == "embedded-linux-images"
+            and ratos_contract.get("kind") == "Embedded/Linux image port"
+            and ratos_gate.get("status") == "pass"
+        )
+        add(
+            "analysis:ratos-pi5-image-routing",
+            "pass" if ok else "fail",
+            f"{ratos_route.get('projectId')} contract={ratos_contract.get('kind')} gate={ratos_gate.get('status')}",
+        )
+    except Exception as exc:
+        add("analysis:ratos-pi5-image-routing", "fail", str(exc))
+
+    try:
         research_route = route_manager(
             [
                 {
@@ -16782,6 +20344,15 @@ def package_health_report():
         add("response:examples-library", "fail", str(exc))
 
     try:
+        add(
+            "response:task-contract-gate",
+            "pass" if task_contract_gate_synthetic_check() else "fail",
+            "blocks fake hard-task completion, accepts honest blockers, and requires source/artifact proof",
+        )
+    except Exception as exc:
+        add("response:task-contract-gate", "fail", str(exc))
+
+    try:
         LOCAL_CAD_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="health-package-", dir=str(LOCAL_CAD_OUTPUT_DIR)) as tmp_dir:
             package_messages = [
@@ -16869,6 +20440,54 @@ def package_health_report():
     except Exception as exc:
         add("analysis:hard-case-golden-tests", "fail", str(exc))
 
+    try:
+        add(
+            "analysis:contract-gate-golden-tests",
+            "pass" if contract_gate_golden_tests_synthetic_check() else "fail",
+            f"{len(CONTRACT_GATE_GOLDEN_TEST_IDS)} contract-aware golden tests installed",
+        )
+    except Exception as exc:
+        add("analysis:contract-gate-golden-tests", "fail", str(exc))
+
+    try:
+        domain_count = sum(len(info["questions"]) for info in DOMAIN_SAMPLE_QUESTION_GROUPS.values())
+        add(
+            "analysis:domain-sample-golden-tests",
+            "pass" if domain_sample_golden_tests_synthetic_check() else "fail",
+            f"{domain_count} domain sample guardrails installed",
+        )
+    except Exception as exc:
+        add("analysis:domain-sample-golden-tests", "fail", str(exc))
+
+    try:
+        fusion_orca_count = sum(len(info["questions"]) for info in FUSION_ORCA_SAMPLE_QUESTION_GROUPS.values())
+        add(
+            "analysis:fusion-orca-sample-golden-tests",
+            "pass" if fusion_orca_sample_golden_tests_synthetic_check() else "fail",
+            f"{fusion_orca_count} Fusion 360 and Orca Slicer guardrails installed",
+        )
+    except Exception as exc:
+        add("analysis:fusion-orca-sample-golden-tests", "fail", str(exc))
+
+    try:
+        manufacturing_count = len(load_manufacturing_question_bank())
+        add(
+            "analysis:manufacturing-sample-golden-tests",
+            "pass" if manufacturing_sample_golden_tests_synthetic_check() else "fail",
+            f"{manufacturing_count} CAD/CNC manufacturing guardrails installed",
+        )
+    except Exception as exc:
+        add("analysis:manufacturing-sample-golden-tests", "fail", str(exc))
+
+    try:
+        add(
+            "analysis:workflow-scenario-golden-tests",
+            "pass" if workflow_scenario_golden_tests_synthetic_check() else "fail",
+            "TinmanX1 Polymaker/steer/edit/self-repair/release scenario installed",
+        )
+    except Exception as exc:
+        add("analysis:workflow-scenario-golden-tests", "fail", str(exc))
+
     health = ollama_health()
     add(
         "ollama:service",
@@ -16876,7 +20495,15 @@ def package_health_report():
         f"{health.get('modelCount', 0)} model tags, {health.get('loadedCount', 0)} loaded",
     )
     available_names = [model.get("name", "") for model in health.get("models", [])]
-    for model in sorted({LOCAL_RESEARCH_MODEL, LOCAL_CODER_MODEL, LOCAL_REVIEW_MODEL, *CODEX_PROFILE_MODELS.values()}):
+    for model in sorted(
+        {
+            LOCAL_RESEARCH_MODEL,
+            LOCAL_CODER_MODEL,
+            LOCAL_REVIEW_MODEL,
+            LOCAL_DEEP_REVIEW_MODEL,
+            *CODEX_PROFILE_MODELS.values(),
+        }
+    ):
         add(
             f"ollama:model:{model}",
             "pass" if model_available(model, available_names) else "fail",
@@ -16979,14 +20606,178 @@ def package_health_report():
 def fallback_model_for_profile(profile):
     if profile == "local-coder":
         return LOCAL_CODER_MODEL
+    if profile == "local-deep-review":
+        return LOCAL_DEEP_REVIEW_MODEL
     if profile == "local-review":
         return LOCAL_REVIEW_MODEL
     return LOCAL_RESEARCH_MODEL
 
 
+def deep_review_trigger_terms(messages):
+    query = latest_user_text(messages).lower()
+    terms = []
+    if text_has_any(
+        query,
+        (
+            "go deep",
+            "deep review",
+            "full review",
+            "deep dive",
+            "think deeply",
+            "analyze deeply",
+            "hard question",
+            "challenging",
+            "complex",
+            "don't cut corners",
+            "do not cut corners",
+            "double check",
+            "second opinion",
+            "use the big model",
+            "world class",
+        ),
+    ):
+        terms.append("Tinman explicitly asked for deeper review")
+    if text_has_any(
+        query,
+        (
+            "wrong",
+            "not acceptable",
+            "failed",
+            "failure",
+            "fix this",
+            "still not",
+            "didn't answer",
+            "did not answer",
+            "no response",
+            "try again",
+            "missed the point",
+            "massive disappointment",
+            "was a test",
+        ),
+    ):
+        terms.append("Tinman is correcting a weak or failed answer")
+    return terms
+
+
+def ambiguous_or_complex_task_signal(messages, route, contract):
+    query = latest_user_text(messages)
+    lower = query.lower()
+    reasons = []
+    attachments = message_attachments(messages)
+    numeric_constraints = re.findall(
+        r"\b\d+(?:\.\d+)?\s*(?:mm|cm|m|in|inch|v|vdc|vac|a|amp|amps|cfm|rpm|kg|g|w|kw|psi|pa|c|f|%)?\b",
+        lower,
+    )
+    if attachments and text_has_any(lower, ("design", "diagnose", "analyze", "review", "compare", "tune", "inspect")):
+        reasons.append("attached files/images need interpretation")
+    if len(numeric_constraints) >= 5 and text_has_any(lower, ("design", "diagnose", "calculate", "size", "compare", "optimize")):
+        reasons.append("many numeric constraints are in play")
+    if len(query.split()) >= 90 and text_has_any(lower, ("design", "diagnose", "compare", "figure out", "optimize", "research")):
+        reasons.append("long multi-constraint request")
+    if text_has_any(lower, ("not sure", "unclear", "ambiguous", "conflicting", "multiple", "tradeoff", "trade-off")):
+        reasons.append("ambiguous or tradeoff-heavy wording")
+    if route.get("confidence") == "low" and contract.get("hardGate"):
+        reasons.append("low routing confidence on a hard task")
+    return reasons
+
+
+def manager_auto_deep_review_decision(messages, route, requested_depth, profile):
+    requested = safe_choice(requested_depth, MANAGER_DEPTH_LEVELS, "balanced")
+    decision = {
+        "enabled": profile in MANAGER_PROFILES,
+        "requestedDepth": requested,
+        "effectiveDepth": requested,
+        "escalated": False,
+        "model": "",
+        "reasons": [],
+    }
+    if profile not in MANAGER_PROFILES:
+        return decision
+
+    contract = task_contract(messages, route or {})
+    reasons = []
+    trigger_reasons = deep_review_trigger_terms(messages)
+    reasons.extend(trigger_reasons)
+    if contract.get("hardGate"):
+        reasons.append(f"hard task contract: {contract.get('kind', 'hard task')}")
+    reasons.extend(ambiguous_or_complex_task_signal(messages, route or {}, contract))
+
+    unique_reasons = list(dict.fromkeys(reasons))[:5]
+    force = bool(trigger_reasons)
+    should_escalate = requested == "balanced" and bool(unique_reasons)
+    if requested == "fast":
+        should_escalate = force
+    if requested == "full":
+        decision.update(
+            {
+                "effectiveDepth": "full",
+                "model": LOCAL_DEEP_REVIEW_MODEL,
+                "reasons": unique_reasons or ["Manager Full was selected"],
+            }
+        )
+        return decision
+    if should_escalate:
+        decision.update(
+            {
+                "effectiveDepth": "full",
+                "escalated": True,
+                "model": LOCAL_DEEP_REVIEW_MODEL,
+                "reasons": unique_reasons,
+            }
+        )
+    else:
+        decision["reasons"] = unique_reasons
+    return decision
+
+
+def auto_deep_review_note(decision):
+    if not (decision or {}).get("escalated"):
+        return ""
+    reasons = "; ".join((decision.get("reasons") or [])[:3]) or "hard or ambiguous work"
+    return f"Auto Deep Review escalated this run: {reasons}. Using local `{LOCAL_DEEP_REVIEW_MODEL}` for the review pass."
+
+
+def auto_deep_review_synthetic_check():
+    normal_messages = [{"role": "user", "text": "What is the inner diameter of a 3D printer CPAP hose?"}]
+    normal_route = route_manager(normal_messages, requested_profile="manager", web_search="disabled")
+    normal = manager_auto_deep_review_decision(normal_messages, normal_route, "balanced", "manager")
+
+    cad_messages = [
+        {
+            "role": "user",
+            "text": (
+                "Design a CPAP cooling duct in CAD for Fusion 360 with an 18 mm inlet, "
+                "1.5 mm clearance, 1 mm wall thickness, 5 mm max growth, and 0 mm Y growth."
+            ),
+        }
+    ]
+    cad_route = route_manager(cad_messages, requested_profile="manager", web_search="disabled")
+    cad = manager_auto_deep_review_decision(cad_messages, cad_route, "balanced", "manager")
+
+    correction_messages = [
+        {"role": "assistant", "text": "I staged a CAD package."},
+        {"role": "user", "text": "That was wrong and not acceptable. Fix this and go deep."},
+    ]
+    correction_route = route_manager(correction_messages, requested_profile="manager", web_search="disabled")
+    correction = manager_auto_deep_review_decision(correction_messages, correction_route, "fast", "manager")
+
+    non_manager = manager_auto_deep_review_decision(cad_messages, cad_route, "balanced", "local-oss")
+    note = auto_deep_review_note(cad)
+    return (
+        not normal.get("escalated")
+        and cad.get("escalated")
+        and cad.get("effectiveDepth") == "full"
+        and correction.get("escalated")
+        and correction.get("effectiveDepth") == "full"
+        and not non_manager.get("enabled")
+        and "qwen3.6" in note
+    )
+
+
 def local_research_prompt(query, route, evidence_pack, friendliness_level=None, humor_level=None):
     playbook = PROJECT_PLAYBOOKS.get(route.get("projectId"), PROJECT_PLAYBOOKS["general"])
     admin_context = build_admin_context([{"role": "user", "text": query}], route=route)
+    research_apply_context = build_research_apply_context([{"role": "user", "text": query}], route)
     return "\n".join(
         [
             "You are Tinman's Local Research specialist running fully locally on his Mac.",
@@ -16998,6 +20789,7 @@ def local_research_prompt(query, route, evidence_pack, friendliness_level=None, 
                 local_tools=True,
             ).strip(),
             build_response_quality_context([{"role": "user", "text": query}], route).strip(),
+            research_apply_context.strip(),
             "Use only the evidence provided below plus basic arithmetic and clearly labeled engineering assumptions.",
             "Do not claim a product or part fits unless the evidence supports every required spec.",
             "Do not claim a price or under-budget fit unless the evidence explicitly contains that price.",
@@ -17022,6 +20814,47 @@ def local_research_prompt(query, route, evidence_pack, friendliness_level=None, 
             "- Start naturally with the answer Tinman needs. Do not use labels like `Best local-research answer:`.",
             "- For shopping comparisons, lead with a compact table containing item, size, price, $/kg, availability, and caveat.",
             "- Include a short buy order: best value, safest/known-good option, and skip/rejects.",
+            "- End with `Sources checked` as a concise numbered URL list.",
+            "- Keep it concise. Do not mention hidden chain-of-thought.",
+        ]
+    )
+
+
+def research_apply_prompt(query, route, evidence_pack, cwd="", friendliness_level=None, humor_level=None):
+    admin_context = build_admin_context([{"role": "user", "text": query}], route=route)
+    return "\n".join(
+        [
+            "You are Tinman's Research + Apply specialist running fully locally on his Mac.",
+            build_assistant_style_context(friendliness_level, humor_level).strip(),
+            build_analytical_context(
+                [{"role": "user", "text": query}],
+                route={**(route or {}), "engine": "research-apply"},
+                web_search="live",
+                local_tools=True,
+            ).strip(),
+            build_response_quality_context([{"role": "user", "text": query}], route or {}).strip(),
+            build_research_apply_context([{"role": "user", "text": query}], {**(route or {}), "engine": "research-apply"}).strip(),
+            "Use only the evidence provided below plus basic arithmetic and clearly labeled engineering assumptions.",
+            "Do not claim a project file was changed unless the provided run created or verified a path.",
+            "When no safe direct project edit is possible, treat the local research/apply receipt as the applied project artifact and say what blocker prevents deeper edits.",
+            "",
+            format_manager_context(route or {}),
+            "",
+            admin_context,
+            "",
+            f"Active working directory: {cwd or DEFAULT_CWD}",
+            "",
+            "Research + Apply task:",
+            query,
+            "",
+            "Evidence pack:",
+            format_evidence_for_prompt(evidence_pack),
+            "",
+            "Required answer shape:",
+            "- Start with the direct applied outcome, not a source dump.",
+            "- Include `What I learned` in plain language.",
+            "- Include `Applied to project` with the concrete project impact and file/artifact/change path or explicit blocker.",
+            "- Include `Verification` naming what was checked or why the next validation is blocked.",
             "- End with `Sources checked` as a concise numbered URL list.",
             "- Keep it concise. Do not mention hidden chain-of-thought.",
         ]
@@ -17078,8 +20911,61 @@ def local_review_prompt(messages, route, friendliness_level=None, humor_level=No
     return "\n".join(blocks).strip()
 
 
+def strip_terminal_control_sequences(text):
+    clean = str(text or "")
+    clean = re.sub(
+        r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))",
+        "",
+        clean,
+    )
+    clean = clean.replace("\r", "\n")
+    while "\b" in clean:
+        next_clean = re.sub(r".\x08", "", clean)
+        if next_clean == clean:
+            clean = clean.replace("\b", "")
+            break
+        clean = next_clean
+    return clean
+
+
 def strip_thinking_markup(text):
-    return re.sub(r"(?is)<think>.*?</think>", "", str(text or "")).strip()
+    clean = strip_terminal_control_sequences(text)
+    clean = re.sub(r"(?is)<think\b[^>]*>.*?</think\s*>", "", clean)
+    clean = re.sub(
+        r"(?is)(?:^|\n)[^\w\n]{0,24}\s*Thinking\s*\.\.\.\s*.*?\.\.\.\s*done thinking\.?\s*",
+        "\n",
+        clean,
+    )
+    clean = re.sub(r"(?im)^\s*(?:thinking|done thinking)\.?\s*$", "", clean)
+    clean = re.sub(r"\n{3,}", "\n\n", clean)
+    return clean.strip()
+
+
+def thinking_output_sanitizer_synthetic_check():
+    samples = [
+        (
+            "<think>work Tinman should not see</think>\nFinal answer.",
+            ("Final answer.",),
+            ("<think>", "work Tinman should not see"),
+        ),
+        (
+            "\x1b[?25lThinking...\nI should reason privately.\n...done thinking.\n\nUse the smoother duct path first.",
+            ("Use the smoother duct path first.",),
+            ("Thinking", "done thinking", "reason privately", "\x1b"),
+        ),
+        (
+            "\n  Thinking...\ninternal checklist\n...done thinking.\n\nBest answer: 250 C.",
+            ("Best answer: 250 C.",),
+            ("internal checklist", "Thinking"),
+        ),
+    ]
+    for raw, required_terms, forbidden_terms in samples:
+        clean = strip_thinking_markup(raw)
+        if not all(term in clean for term in required_terms):
+            return False
+        if any(term in clean for term in forbidden_terms):
+            return False
+    return True
 
 
 def normalize_direct_answer_shape(messages, route, text):
@@ -17092,6 +20978,9 @@ def normalize_direct_answer_shape(messages, route, text):
     replacements = (
         (r"(?i)\bwhy it fits\s*:", "This is why:"),
         (r"(?i)\bwhy this fits\s*:", "This is why:"),
+        (r"(?i)\bwhy this happens\s*:", "This is why:"),
+        (r"(?i)\bwhy this matters\s*:", "This is why:"),
+        (r"(?i)\bwhy it matters\s*:", "This is why:"),
         (r"(?i)\bwhy it works\s*:", "This is why:"),
         (r"(?i)(?<!this is )\bwhy\s*:", "This is why:"),
         (r"(?i)(?<!should )\balso consider\s*:", "You should also consider:"),
@@ -17211,6 +21100,11 @@ def response_role_style(route=None):
             "voice": "Product-minded, implementation plus verification, with private/local boundaries called out.",
             "checklist": ["behavior change", "local files", "verification", "GitHub/package state"],
         },
+        "embedded-linux-images": {
+            "title": "Embedded Linux Specialist",
+            "voice": "Boot chain first, plain-language blockers, no fake compatibility claims, storage/flash safety explicit.",
+            "checklist": ["source image", "boot firmware", "kernel/DTB", "services", "storage/flash boundary"],
+        },
         "mac-system-accounts": {
             "title": "Mac/Network Tech",
             "voice": "Reversible diagnostics, privacy-aware, clear LAN/VPN/public-network boundaries.",
@@ -17231,43 +21125,105 @@ def task_contract(messages, route=None):
     route_engine = route.get("engine", "")
     kind = "General help"
     done = "Answer the actual question in plain language and include the useful next step."
+    must_do = ["answer the actual request"]
+    required_proof = ["plain-language final answer"]
+    reject_if = ["answers a different question", "uses the wrong domain/tool family", "claims work that did not happen"]
+    hard_gate = False
     if is_cad_reference_question(messages):
         kind = "CAD reference"
         done = "Give the format/spec answer directly; do not create CAD artifacts."
+        must_do = ["answer the CAD/export reference directly", "avoid unrelated file generation"]
+        required_proof = ["direct format recommendation", "why/caveat explanation"]
+        reject_if.append("stages Fusion/OpenSCAD artifacts for a reference question")
+    elif is_embedded_linux_image_request(messages):
+        kind = "Embedded/Linux image port"
+        done = "Resolve the source OS image, inspect or stage boot/kernel/firmware checks, list storage/flash safety limits, and do not claim Pi 5 bootability until verified."
+        must_do = ["resolve source image", "check boot/kernel/firmware compatibility path", "state storage and flash safety boundary"]
+        required_proof = ["source image status", "boot/kernel/firmware checklist", "storage or flash safety boundary"]
+        reject_if.extend(["routes to CAD/CFD/FEA", "claims a working Pi 5 image without boot testing", "expands or flashes a large image without confirmation"])
+        hard_gate = True
     elif is_engineering_diagram_request(messages):
         kind = "Engineering diagram"
         done = "Create editable block/wiring diagram artifacts, label paths, list assumptions, and flag missing ratings or code-sensitive details."
+        must_do = ["create editable diagram artifacts", "label power/signal/safety paths", "flag missing ratings"]
+        required_proof = ["clickable diagram/report files", "assumption or rule-check ledger"]
+        reject_if.extend(["only describes a diagram in prose", "omits safety/protection paths"])
+        hard_gate = True
     elif is_stl_cfd_duct_design_request(messages):
         kind = "STL/CAD deliverable"
         done = "Find or confirm the STL, generate usable design artifacts, list clickable paths, and state validation limits."
+        must_do = ["confirm the actual STL is readable", "inspect mesh/ports before geometry", "generate or honestly block artifacts"]
+        required_proof = ["source STL status", "clickable CAD/CFD files or explicit missing-attachment blocker", "validation limits"]
+        reject_if.extend(["invents duct geometry without the STL", "claims CFD solved when only preflight ran"])
+        hard_gate = True
     elif is_aero_cfd_analysis_request(messages):
         kind = "Aero/CFD preflight"
         done = "Resolve geometry, inspect mesh readiness, stage OpenFOAM-ready analysis files, and clearly separate preflight from solved CFD."
+        must_do = ["resolve geometry", "stage solver/preflight files", "separate preflight from solved CFD"]
+        required_proof = ["geometry status", "OpenFOAM/solver-case files", "validation limits"]
+        reject_if.extend(["claims CFD results without a solver run", "omits boundary-condition assumptions"])
+        hard_gate = True
     elif is_structural_mechanical_design_request(messages):
         kind = "Mechanical/structural preflight"
         done = "Identify loads, constraints, material/process assumptions, failure modes, and stage CalculiX-ready files without claiming final strength."
+        must_do = ["identify loads/constraints/material", "stage or run FEA preflight", "state failure modes and safety factor basis"]
+        required_proof = ["load/material assumptions", "FEA/report files or explicit missing-geometry blocker", "validation limits"]
+        reject_if.extend(["claims strength without load/material proof", "omits safety-factor basis"])
+        hard_gate = True
     elif is_cad_design_request(messages) or is_cad_artifact_tool_request(messages):
         kind = "CAD/design deliverable"
         done = "Create or specify importable CAD artifacts, explain design choices, list assumptions, and state validation status."
+        must_do = ["produce or specify importable CAD artifacts", "preserve dimensional constraints", "state validation status"]
+        required_proof = ["clickable CAD/script/readme files", "assumptions", "fit/validation caveats"]
+        reject_if.extend(["only gives a file receipt", "omits geometry reasoning", "claims validation without checks"])
+        hard_gate = True
     elif is_read_only_printer_status_query(messages):
         kind = "Printer status"
         done = "Report current read-only status from the configured endpoint or say exactly why it is unreachable."
+        must_do = ["use read-only status path", "identify the configured endpoint or unreachable blocker"]
+        required_proof = ["endpoint/status wording", "no generic no-access fallback"]
+        reject_if.extend(["tells Tinman to check it himself", "uses generic OctoPrint advice for a configured printer"])
+    elif route_engine == "research-apply" or is_research_apply_request(messages):
+        kind = "Research + Apply"
+        done = "Use current/source-backed evidence, distill lessons, map them to the active project, create or stage an applied output/change, and verify it."
+        must_do = ["use source-backed evidence", "distill durable lessons", "map lessons to project action", "create/stage applied output or state blocker", "verify the result"]
+        required_proof = ["source URL", "research/apply receipt", "applied file/path or blocker", "verification note"]
+        reject_if.extend(["stops at research summary", "claims project changes without a path", "omits source URLs", "omits verification"])
+        hard_gate = True
     elif route_engine in {"local-research", "openai"} or wants_research_quality_context(messages) or wants_web_context(messages):
         kind = "Research"
         done = "Use current evidence, make a clear recommendation, reject weak matches, and cite source URLs."
+        must_do = ["use current/source-backed evidence", "make a clear recommendation", "reject weak matches"]
+        required_proof = ["source URL", "operating-point or spec caveat"]
+        reject_if.extend(["claims current price/spec without a source", "accepts nominal labels without checking the target requirement"])
     elif text_has_any(query, ("write code", "python", "javascript", "c++", "cpp", "klipper", "gcode", "macro", "script", "config")):
         kind = "Code/config"
         done = "Produce the code/config, validate syntax when possible, and explain where to save or run it."
+        must_do = ["produce the code/config", "validate syntax or explain why validation cannot run"]
+        required_proof = ["code/config output", "quality-gate or syntax-check note"]
+        reject_if.extend(["returns only advice when code was requested", "claims validation without running or naming the check"])
+        hard_gate = True
     elif text_has_any(query, ("create", "make", "build", "save", "write", "upload", "find the folder", "local folder")):
         kind = "File/action"
         done = "Perform the local action when safe, list changed/created files, and verify the result."
+        must_do = ["perform the safe local action or state the blocker", "list changed/created files"]
+        required_proof = ["file path or blocker", "verification note"]
+        reject_if.extend(["claims a file was saved without a path", "changes a live machine without verified standby"])
+        hard_gate = True
     elif text_has_any(query, ("what is", "which", "what file", "can you tell", "best", "?")):
         kind = "Direct answer"
         done = "Answer first, then explain why and what to consider."
+        must_do = ["answer in the first paragraph", "include why and what to consider when useful"]
+        required_proof = ["direct answer", "why/caveat shape"]
+        reject_if.extend(["starts with a recovery plan", "buries the answer"])
     style = response_role_style(route)
     return {
         "kind": kind,
         "doneMeans": done,
+        "mustDo": must_do,
+        "requiredProof": required_proof,
+        "rejectIf": reject_if[:10],
+        "hardGate": hard_gate,
         "role": style["title"],
         "projectId": route.get("projectId", "general"),
         "engine": route.get("engine", "local"),
@@ -17348,9 +21304,256 @@ def extract_assumption_ledger(messages, route, answer, contract=None):
     if "you should also consider:" in lower:
         caveat = str(answer or "").split("You should also consider:", 1)[-1].strip().split("\n\n", 1)[0]
         add("Caveat", caveat, "caution")
+    if text_has_any(lower, ("not yet a boot-tested", "not boot-tested", "not call it bootable", "no removable media was written", "not expand")):
+        add("Validation", "Bootable image status is explicitly limited until inspection or boot testing proves it.", "limited")
     if not ledger and (contract or {}).get("kind", "").lower().startswith(("cad", "stl")):
         add("Validation", "Engineering/CAD work should still be fit-checked before final use.", "caution")
     return ledger
+
+
+def answer_has_honest_blocker(answer):
+    lower = str(answer or "").lower()
+    blocker_terms = (
+        "did not find",
+        "could not find",
+        "not attached",
+        "attach the",
+        "unreachable",
+        "offline",
+        "blocked",
+        "cannot complete",
+        "can't complete",
+        "need the actual",
+        "missing",
+    )
+    return any(term in lower for term in blocker_terms)
+
+
+def answer_claims_solved_cfd(answer):
+    lower = str(answer or "").lower()
+    if text_has_any(lower, ("no full cfd", "no cfd solver", "not a completed cfd", "not solved cfd", "cfd preflight")):
+        return False
+    return bool(re.search(r"\b(cfd|openfoam|su2)\b[^.\n]{0,80}\b(ran|solved|completed|finished|validated|converged)\b", lower))
+
+
+def answer_claims_final_strength(answer):
+    lower = str(answer or "").lower()
+    if text_has_any(lower, ("preflight", "not final", "not validated", "before final use", "validation limits")):
+        return False
+    return bool(re.search(r"\b(strong enough|will hold|safe to use|passes|validated)\b", lower))
+
+
+def answer_claims_generated_cad_geometry(answer):
+    raw = str(answer or "")
+    lower = raw.lower()
+    geometry_labels = (
+        "fusion 360 script:",
+        "openscad model:",
+        "editable scad:",
+        "duct stl:",
+        "airway stl:",
+        "i generated an inferred",
+        "i made the first-pass cad",
+        "i staged a first-pass cad",
+        "i prepared a first-pass cad",
+    )
+    if any(label in lower for label in geometry_labels):
+        return True
+    if text_has_any(lower, ("paths checked:", "preflight folder:")) and text_has_any(
+        lower,
+        ("did not find", "not attached", "attach the stl", "missing"),
+    ):
+        return False
+    return bool(
+        re.search(
+            r"/(?:Users|Applications|Volumes|private/tmp|tmp|var/folders)/[^\n`'\"<>]+"
+            r"(?:_fusion360\.py|\.scad|\.stl|\.step|\.stp)",
+            raw,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def task_contract_gate(messages, route, answer, contract=None, deliverables=None, assumptions=None, web_search="live"):
+    text = str(answer or "")
+    lower = text.lower()
+    contract = contract or task_contract(messages, route or {})
+    kind = contract.get("kind") or "General help"
+    deliverables = deliverables if deliverables is not None else extract_response_deliverables(text)
+    assumptions = assumptions if assumptions is not None else extract_assumption_ledger(messages, route or {}, text, contract)
+    blocker = answer_has_honest_blocker(text)
+    checks = []
+
+    def add(label, passed, detail="", severity="medium"):
+        checks.append(
+            {
+                "label": label,
+                "passed": bool(passed),
+                "detail": compact(detail, 200),
+                "severity": severity,
+            }
+        )
+
+    first = next((part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()), "")
+    hard_kinds = {
+        "CAD/design deliverable",
+        "STL/CAD deliverable",
+        "Aero/CFD preflight",
+        "Mechanical/structural preflight",
+        "Embedded/Linux image port",
+        "Engineering diagram",
+        "Research + Apply",
+        "File/action",
+        "Code/config",
+    }
+
+    add("Objective match", bool(first) and not first.lower().startswith(("recovery plan", "working notes")), "Answer starts with the requested outcome, not internal process.")
+
+    if kind in {"Direct answer", "CAD reference", "Printer status"}:
+        add(
+            "Direct answer shape",
+            "this is why:" in lower and "you should also consider:" in lower,
+            "Direct questions need answer/why/consider unless the user asked for a terse command output.",
+        )
+
+    if kind in hard_kinds:
+        deliverable_or_blocker = bool(deliverables) or blocker
+        add(
+            "Required artifact/action proof",
+            deliverable_or_blocker,
+            "Hard tasks need clickable outputs or an explicit blocker before final.",
+            "hard",
+        )
+
+    if kind in {"CAD/design deliverable", "STL/CAD deliverable", "Aero/CFD preflight", "Mechanical/structural preflight", "Engineering diagram"}:
+        add(
+            "Assumptions and validation",
+            bool(assumptions) or blocker,
+            "Engineering tasks need assumptions, limits, validation, or a clear blocker.",
+            "hard",
+        )
+
+    if kind == "STL/CAD deliverable":
+        fake_geometry = answer_claims_generated_cad_geometry(text) and text_has_any(
+            lower,
+            ("did not find a readable stl", "attach the stl", "not attached"),
+        )
+        add(
+            "No fake STL geometry",
+            not fake_geometry,
+            "Do not generate CAD geometry when the STL is missing.",
+            "hard",
+        )
+
+    if kind == "Research" and web_search == "live":
+        add(
+            "Source evidence",
+            answer_has_source_url(text),
+            "Research/current/spec/price answers need source URLs.",
+            "hard",
+        )
+
+    if kind == "Research + Apply":
+        has_application_language = text_has_any(
+            lower,
+            (
+                "applied to project",
+                "project application",
+                "applied output",
+                "changed file",
+                "created file",
+                "updated",
+                "blocked because",
+            ),
+        )
+        has_project_proof = bool(deliverables) or answer_has_honest_blocker(text)
+        has_verification = text_has_any(
+            lower,
+            ("verified", "validation", "receipt", "test", "package health", "blocked because"),
+        )
+        add("Source evidence", answer_has_source_url(text), "Research + Apply needs source URLs.", "hard")
+        add(
+            "Project application",
+            has_application_language and has_project_proof,
+            "Research + Apply needs an applied file/path/output or explicit blocker.",
+            "hard",
+        )
+        add(
+            "Verification receipt",
+            has_verification,
+            "Research + Apply needs a verification note, receipt, test, or honest blocker.",
+            "hard",
+        )
+        add(
+            "No unverified project/test claims",
+            not research_apply_claims_unverified_project_work(text, deliverables),
+            "Do not claim a profile/file/test changed unless the path or test proof is present.",
+            "hard",
+        )
+
+    if kind == "CAD reference":
+        add(
+            "No artifact detour",
+            not answer_has_cad_artifact(text),
+            "Reference questions should not stage CAD files.",
+            "hard",
+        )
+
+    if kind == "Aero/CFD preflight":
+        add(
+            "No false CFD claim",
+            not answer_claims_solved_cfd(text) or bool(deliverables),
+            "Only claim solved CFD when solver output/report files are present.",
+            "hard",
+        )
+
+    if kind == "Mechanical/structural preflight":
+        has_strength_basis = text_has_any(lower, ("safety factor", "calculix", "load", "constraint", "stress", "deflection", "not final"))
+        add(
+            "Strength basis",
+            (not answer_claims_final_strength(text)) or has_strength_basis,
+            "Strength claims need load/material/safety-factor basis.",
+            "hard",
+        )
+
+    if kind == "Embedded/Linux image port":
+        pi5_complete_claim = text_has_any(lower, ("working pi 5 image is ready", "seamless pi 5 image is complete"))
+        pi5_complete_claim = pi5_complete_claim or (
+            "boot-tested pi 5 image" in lower
+            and "not yet a boot-tested pi 5 image" not in lower
+            and "not a boot-tested pi 5 image" not in lower
+        )
+        add(
+            "Boot-chain basis",
+            text_has_any(lower, ("boot", "kernel", "dtb", "firmware", "cmdline.txt", "config.txt")),
+            "OS image porting answers need boot/kernel/firmware checks.",
+            "hard",
+        )
+        add(
+            "No fake Pi 5 completion",
+            not pi5_complete_claim,
+            "Do not claim a finished Pi 5 image without boot/test proof.",
+            "hard",
+        )
+
+    if kind == "Code/config":
+        add(
+            "Validation named",
+            text_has_any(lower, ("validated", "syntax", "quality-gate", "py_compile", "node --check", "klipper", "not run")),
+            "Code/config answers should name validation or why it could not run.",
+            "medium",
+        )
+
+    failed = [check for check in checks if not check.get("passed")]
+    hard_failed = [check for check in failed if check.get("severity") == "hard" or contract.get("hardGate")]
+    status = "block" if hard_failed else "review" if failed else "pass"
+    return {
+        "status": status,
+        "checks": checks,
+        "failed": failed,
+        "requiredProof": contract.get("requiredProof", []),
+        "rejectIf": contract.get("rejectIf", []),
+    }
 
 
 def response_scorecard(messages, route, answer, contract=None, deliverables=None, assumptions=None):
@@ -17359,11 +21562,21 @@ def response_scorecard(messages, route, answer, contract=None, deliverables=None
     contract = contract or task_contract(messages, route)
     deliverables = deliverables if deliverables is not None else extract_response_deliverables(text)
     assumptions = assumptions if assumptions is not None else extract_assumption_ledger(messages, route, text, contract)
+    gate = task_contract_gate(messages, route or {}, text, contract, deliverables, assumptions)
     first = next((part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()), "")
     checks = []
 
     def add(label, passed, detail=""):
         checks.append({"label": label, "passed": bool(passed), "detail": compact(detail, 180)})
+
+    def add_gate(check):
+        checks.append(
+            {
+                "label": f"Contract: {check.get('label')}",
+                "passed": bool(check.get("passed")),
+                "detail": compact(check.get("detail", ""), 180),
+            }
+        )
 
     add(
         "Answer first",
@@ -17381,11 +21594,11 @@ def response_scorecard(messages, route, answer, contract=None, deliverables=None
         (not direct_needed) or ("this is why:" in lower and "you should also consider:" in lower),
         "Direct answers should include why and what to consider.",
     )
-    if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable", "Aero/CFD preflight", "Mechanical/structural preflight", "Engineering diagram", "File/action", "Code/config"}:
+    if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable", "Aero/CFD preflight", "Mechanical/structural preflight", "Embedded/Linux image port", "Engineering diagram", "Research + Apply", "File/action", "Code/config"}:
         add("Deliverables visible", bool(deliverables), "Created or referenced files should be visible and clickable.")
     else:
         add("No wrong artifact route", not (contract.get("kind") == "CAD reference" and answer_has_cad_artifact(text)), "Reference questions should not stage artifacts.")
-    if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable", "Aero/CFD preflight", "Mechanical/structural preflight", "Engineering diagram"}:
+    if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable", "Aero/CFD preflight", "Mechanical/structural preflight", "Embedded/Linux image port", "Engineering diagram"}:
         add("Assumptions/validation shown", bool(assumptions), "Engineering work should show assumptions or validation limits.")
     analytical = analytical_answer_score(messages, route or {}, text)
     add(
@@ -17393,8 +21606,11 @@ def response_scorecard(messages, route, answer, contract=None, deliverables=None
         analytical.get("score", 0) >= 82,
         "Answer should solve the actual problem, preserve constraints, use the right evidence/tools, and include a decision path.",
     )
+    for check in gate.get("checks", []):
+        add_gate(check)
     score = int(round(100 * sum(1 for check in checks if check["passed"]) / max(1, len(checks))))
-    return {"score": score, "status": "pass" if score >= 80 else "review", "checks": checks}
+    status = "review" if gate.get("status") == "block" else "pass" if score >= 80 and gate.get("status") == "pass" else "review"
+    return {"score": score, "status": status, "checks": checks, "contractGate": gate}
 
 
 def response_coach_answer(messages, route, answer):
@@ -17416,6 +21632,8 @@ def response_package(messages, route, answer):
     assumptions = extract_assumption_ledger(messages, route or {}, coached, contract)
     scorecard = response_scorecard(messages, route or {}, coached, contract, deliverables, assumptions)
     analytical = analytical_answer_score(messages, route or {}, coached)
+    gate = scorecard.get("contractGate") or task_contract_gate(messages, route or {}, coached, contract, deliverables, assumptions)
+    contract = {**contract, "gateStatus": gate.get("status"), "gateFailures": gate.get("failed", [])[:6]}
     return {
         "text": coached,
         "taskContract": contract,
@@ -17423,11 +21641,250 @@ def response_package(messages, route, answer):
         "deliverables": deliverables,
         "assumptions": assumptions,
         "scorecard": scorecard,
+        "contractGate": gate,
         "analyticalCore": analytical,
     }
 
 
+def task_contract_gate_synthetic_check():
+    cad_messages = [{"role": "user", "text": "Design a CPAP cooling duct in CAD for Fusion 360 with an 18mm inlet."}]
+    cad_route = {"projectId": "cad-modeling-projects", "engine": "local"}
+    fake_cad = task_contract_gate(cad_messages, cad_route, "I staged a CAD package for it.", web_search="disabled")
+
+    reference_messages = [{"role": "user", "text": "what file type from fusion preserves component names?"}]
+    reference_route = {"projectId": "cad-modeling-projects", "engine": "local"}
+    wrong_reference = task_contract_gate(
+        reference_messages,
+        reference_route,
+        "Fusion 360 script: `/Users/example/generated/fusion360.py`\nOpenSCAD model: `/Users/example/generated/model.scad`",
+        web_search="disabled",
+    )
+
+    missing_stl_messages = [
+        {
+            "role": "user",
+            "text": "missing-test.stl I need a CPAP duct designed from the attached STL with 1.5mm clearance.",
+        }
+    ]
+    missing_stl = task_contract_gate(
+        missing_stl_messages,
+        cad_route,
+        "I did not find a readable STL. Attach the STL file and I will inspect the mesh before generating duct geometry.",
+        web_search="disabled",
+    )
+
+    research_messages = [{"role": "user", "text": "Search the web for a 300 RPM wind generator under $500."}]
+    research_route = {"projectId": "energy-power-research", "engine": "local-research"}
+    sourceless = task_contract_gate(
+        research_messages,
+        research_route,
+        "Best pick is a 96V permanent magnet generator under $500.",
+        web_search="live",
+    )
+
+    good_cad = task_contract_gate(
+        cad_messages,
+        cad_route,
+        "Fusion 360 script: `/Users/example/generated/duct_fusion360.py`\n\nThis is why: the model preserves the 18mm inlet and keeps validation limits explicit.\n\nYou should also consider: no full CFD was run.",
+        deliverables=[{"path": "/Users/example/generated/duct_fusion360.py", "exists": True}],
+        assumptions=[{"kind": "Validation", "text": "No full CFD was run.", "status": "limited"}],
+        web_search="disabled",
+    )
+
+    return (
+        fake_cad.get("status") == "block"
+        and wrong_reference.get("status") == "block"
+        and missing_stl.get("status") == "pass"
+        and sourceless.get("status") == "block"
+        and good_cad.get("status") == "pass"
+    )
+
+
+def research_apply_synthetic_check():
+    messages = [
+        {
+            "role": "user",
+            "text": "Research Ellis' Print Tuning Guide and apply what you learn to our Orca PCTG filament tuning workflow.",
+        }
+    ]
+    route = route_manager(messages, requested_profile="manager", web_search="live")
+    contract = task_contract(messages, route)
+    summary_only = task_contract_gate(
+        messages,
+        route,
+        "I researched Ellis' guide and it has useful tuning steps. Sources checked: https://ellis3dp.com/Print-Tuning-Guide/",
+        contract=contract,
+        deliverables=[],
+        web_search="live",
+    )
+    good_answer = (
+        "I applied the Ellis tuning order to the Orca PCTG workflow.\n\n"
+        "What I learned: tune first layer, pressure advance, extrusion multiplier, cooling, retraction, and max volumetric flow as separate checks. "
+        "Source: https://ellis3dp.com/Print-Tuning-Guide/\n\n"
+        "Applied to project: created file `/Users/example/data/generated/research-apply/ellis-pctg/RESEARCH_APPLY.md` and mapped it to the Orca PCTG profile workflow.\n\n"
+        "Verification: receipt written locally and ready for the next profile/test pass."
+    )
+    good_gate = task_contract_gate(
+        messages,
+        route,
+        good_answer,
+        contract=contract,
+        deliverables=[{"path": "/Users/example/data/generated/research-apply/ellis-pctg/RESEARCH_APPLY.md", "exists": True}],
+        web_search="live",
+    )
+    hallucinated_work = task_contract_gate(
+        messages,
+        route,
+        (
+            "Created a new Orca filament profile at `~/Applications/Orca/filament_profiles/PCTG-Orca.json`.\n\n"
+            "Applied to project: updated the profile and ran Flow Pass 1 on a test print.\n\n"
+            "Verification: top surface looked smooth under magnification.\n\n"
+            "Sources checked: https://ellis3dp.com/Print-Tuning-Guide/"
+        ),
+        contract=contract,
+        deliverables=[{"path": "/Users/example/data/generated/research-apply/ellis-pctg/RESEARCH_APPLY.md", "exists": True}],
+        web_search="live",
+    )
+    analytical = analytical_answer_score(messages, route, good_answer, web_search="live")
+    return (
+        is_research_apply_request(messages)
+        and route.get("engine") == "research-apply"
+        and route.get("effectiveProfile") == "research-apply"
+        and contract.get("kind") == "Research + Apply"
+        and summary_only.get("status") == "block"
+        and good_gate.get("status") == "pass"
+        and hallucinated_work.get("status") == "block"
+        and analytical.get("status") == "pass"
+    )
+
+
+def format_contract_gate_blocker(messages, route, answer, contract, gate):
+    failures = gate.get("failed", []) if isinstance(gate, dict) else []
+    missing = ", ".join(check.get("label", "required proof") for check in failures[:4]) or "required proof"
+    must_do = ", ".join((contract or {}).get("mustDo", [])[:3]) or "complete the required tool/evidence path"
+    proof = ", ".join((contract or {}).get("requiredProof", [])[:3]) or "verifiable output"
+    return "\n\n".join(
+        [
+            "I’m not going to call this done yet, Tinman.",
+            (
+                f"This is why: the task contract is `{(contract or {}).get('kind', 'unknown')}` and done means "
+                f"{(contract or {}).get('doneMeans', 'the requested work is complete')}. The draft is missing: {missing}."
+            ),
+            (
+                f"You should also consider: the next pass needs to {must_do}. Required proof before final answer: {proof}. "
+                "I can keep working through that path instead of giving you a polished but incomplete answer."
+            ),
+        ]
+    )
+
+
+def messages_with_live_steering(messages, notes):
+    if not notes:
+        return messages
+    note_lines = "\n".join(f"- {note}" for note in notes)
+    return list(messages or []) + [
+        {
+            "role": "user",
+            "text": "Live steering from Tinman while the run was in progress:\n" + note_lines,
+            "steering": True,
+        }
+    ]
+
+
+def live_steering_revision_prompt(messages, route, candidate_answer, notes, friendliness_level=None, humor_level=None):
+    clean_messages = []
+    for message in (messages or [])[-12:]:
+        role = str(message.get("role", "")).strip().lower()
+        text = str(message.get("text", "")).strip()
+        if role in {"user", "assistant"} and text:
+            clean_messages.append((role, text))
+
+    blocks = [
+        "You are Tinman's local final-answer editor.",
+        build_assistant_style_context(friendliness_level, humor_level).strip(),
+        build_response_quality_context(messages, route or {}).strip(),
+        "Tinman sent live steering while the answer was being generated.",
+        "Revise the candidate answer to follow Tinman's steering before final delivery.",
+        "If the steering corrects scope, assumptions, tone, format, or priority, apply it.",
+        "Preserve verified facts, file paths, command results, sources, and caveats from the candidate answer.",
+        "Do not invent new facts, tests, files, tool results, product specs, prices, or machine access claims.",
+        "Return only the final answer for Tinman. Do not mention this editor or hidden reasoning.",
+        "",
+        format_manager_context(route or {}).strip(),
+        "",
+    ]
+    if clean_messages:
+        blocks.append("Conversation context:")
+        for role, text in clean_messages:
+            label = "User" if role == "user" else "Assistant"
+            blocks.append(f"{label}:\n{text}")
+            blocks.append("")
+    blocks.extend(
+        [
+            "Live steering notes:",
+            "\n".join(f"- {note}" for note in notes),
+            "",
+            "Candidate answer:",
+            str(candidate_answer or "").strip(),
+            "",
+            "Final answer:",
+        ]
+    )
+    return "\n".join(block for block in blocks if block is not None).strip()
+
+
+def apply_live_steering_to_answer(messages, route, answer, run_id, emit=None, friendliness_level=None, humor_level=None):
+    notes = live_steering_notes(run_id)
+    if not notes or not str(answer or "").strip():
+        return answer, messages
+    steered_messages = messages_with_live_steering(messages, notes)
+    if emit:
+        emit(f"Tinman's live steering arrived; applying {len(notes)} note{'s' if len(notes) != 1 else ''} before final delivery.")
+    try:
+        result = run_ollama_generate(
+            live_steering_revision_prompt(
+                steered_messages,
+                route or {},
+                answer,
+                notes,
+                friendliness_level=friendliness_level,
+                humor_level=humor_level,
+            ),
+            model=MANAGER_POLISH_MODEL,
+            timeout=180,
+            num_predict=1800,
+            num_ctx=12000,
+        )
+        revised = strip_thinking_markup(result.get("text") or "").strip()
+        if revised:
+            if emit:
+                emit("Live steering was applied to the final answer.")
+            return revised, steered_messages
+        if emit:
+            emit("Live steering pass returned no usable text, so I kept the best available answer.")
+    except Exception as exc:
+        if emit:
+            emit(f"Live steering pass failed, so I kept the best available answer: {compact(exc, 120)}")
+    return answer, steered_messages
+
+
 def emit_assistant_answer(handler, messages, route, admin_topic, text, normalize=True):
+    run_id = getattr(handler, "current_run_id", "")
+    if run_id and not getattr(handler, "current_run_steering_applied", False) and not (admin_topic or {}).get("testRun"):
+        def emit_steering_note(note):
+            json_line(handler, {"type": "thought", "text": note})
+
+        text, messages = apply_live_steering_to_answer(
+            messages,
+            route or {},
+            text,
+            run_id,
+            emit=emit_steering_note,
+            friendliness_level=getattr(handler, "current_friendliness_level", None),
+            humor_level=getattr(handler, "current_humor_level", None),
+        )
+        handler.current_run_steering_applied = True
+        finish_live_steering(run_id)
     answer = normalize_direct_answer_shape(messages, route, text) if normalize else strip_thinking_markup(text)
     package = response_package(messages, route or {}, answer)
     answer = package["text"]
@@ -17444,6 +21901,7 @@ def emit_assistant_answer(handler, messages, route, admin_topic, text, normalize
             "deliverables": package["deliverables"],
             "assumptions": package["assumptions"],
             "scorecard": package["scorecard"],
+            "contractGate": package["contractGate"],
             "analyticalCore": package["analyticalCore"],
         },
     )
@@ -17501,7 +21959,20 @@ def supervise_answer_before_emit(
         except Exception as exc:
             if emit:
                 emit(f"Analytical Core correction pass failed, keeping the best available answer: {compact(exc, 120)}")
+    contract = task_contract(messages, route or {})
+    package = response_package(messages, route or {}, recovered or answer)
+    gate = package.get("contractGate") or {}
+    if gate.get("status") == "block":
+        if emit:
+            emit("Task Contract Gate blocked the draft from being marked complete.")
+        return format_contract_gate_blocker(messages, route or {}, recovered or answer, contract, gate)
     return recovered or answer
+
+
+def local_review_model_for_profile(profile=None):
+    if profile == "local-deep-review":
+        return LOCAL_DEEP_REVIEW_MODEL
+    return LOCAL_REVIEW_MODEL
 
 
 def run_local_review(
@@ -17509,23 +21980,26 @@ def run_local_review(
     route,
     emit=None,
     num_predict=1800,
+    model=None,
+    timeout=240,
     friendliness_level=None,
     humor_level=None,
 ):
     prompt = local_review_prompt(messages, route, friendliness_level, humor_level)
     if not prompt:
         return {"error": "Review needs a user request or answer to inspect."}
+    selected_model = model or LOCAL_REVIEW_MODEL
     if emit:
-        emit(f"Asking local `{LOCAL_REVIEW_MODEL}` for a second pass.")
+        emit(f"Asking local `{selected_model}` for a second pass.")
     result = run_ollama_generate(
         prompt,
-        model=LOCAL_REVIEW_MODEL,
-        timeout=240,
+        model=selected_model,
+        timeout=timeout,
         num_predict=num_predict,
         num_ctx=12000,
     )
     if result.get("text"):
-        return {"text": strip_thinking_markup(result["text"]), "model": LOCAL_REVIEW_MODEL}
+        return {"text": strip_thinking_markup(result["text"]), "model": selected_model}
     return result
 
 
@@ -17729,11 +22203,20 @@ def run_manager_review_and_polish(
             emit("Manager speed is Fast; skipping review and polish for this run.")
         return {"text": primary_answer, "review": "", "polished": False}
 
-    review_predict = 1100 if manager_depth == "balanced" else 1800
+    review_model = LOCAL_REVIEW_MODEL
+    review_timeout = 240
+    review_predict = 1100
+    if manager_depth == "full":
+        review_model = LOCAL_DEEP_REVIEW_MODEL
+        review_timeout = 420
+        review_predict = 4200
     polish_predict = 1500 if manager_depth == "balanced" else 2200
 
     review_messages = list(messages) + [{"role": "assistant", "text": primary_answer}]
     if emit:
+        escalation_note = auto_deep_review_note((route or {}).get("autoDeepReview") or {})
+        if escalation_note:
+            emit(escalation_note)
         label = "Balanced" if manager_depth == "balanced" else "Full"
         emit(f"Manager speed is {label}; running a local review pass.")
     try:
@@ -17742,6 +22225,8 @@ def run_manager_review_and_polish(
             route,
             emit=emit,
             num_predict=review_predict,
+            model=review_model,
+            timeout=review_timeout,
             friendliness_level=friendliness_level,
             humor_level=humor_level,
         )
@@ -17939,6 +22424,215 @@ def run_local_research(
     return result
 
 
+def write_research_apply_receipt(messages, route, evidence_pack, answer_text, cwd=""):
+    query = latest_user_text(messages)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    target = LOCAL_RESEARCH_APPLY_OUTPUT_DIR / f"{stamp}-{slugify(query, 'research-apply')[:54]}"
+    target.mkdir(parents=True, exist_ok=True)
+    evidence_path = target / "evidence.json"
+    report_path = target / "RESEARCH_APPLY.md"
+    payload = {
+        "ok": True,
+        "createdAt": time.time(),
+        "query": query,
+        "cwd": cwd or DEFAULT_CWD,
+        "route": route or {},
+        "evidence": evidence_pack,
+    }
+    write_json_atomic(evidence_path, payload)
+    source_lines = []
+    for item in evidence_pack:
+        source_lines.append(
+            f"- [{item.get('id')}] {item.get('title') or item.get('url')} - {item.get('url')}"
+        )
+    markdown = "\n".join(
+        [
+            "# Research + Apply Receipt",
+            "",
+            f"Created: {stamp}",
+            f"Project: {(route or {}).get('project', 'General Helper')}",
+            f"Project ID: {(route or {}).get('projectId', 'general')}",
+            f"Working directory: {cwd or DEFAULT_CWD}",
+            "",
+            "## Request",
+            "",
+            query,
+            "",
+            "## Applied Answer",
+            "",
+            strip_thinking_markup(answer_text) or "No answer text was produced.",
+            "",
+            "## Evidence Pack",
+            "",
+            "\n".join(source_lines) or "No source evidence captured.",
+            "",
+            "## Verification",
+            "",
+            "- Evidence index was written locally.",
+            "- Final answer must cite sources and map the learning to a project action or explicit blocker.",
+            "- Any real project edit still needs the relevant project-specific test, build, CAD, slicer, or package-health check.",
+            "",
+            f"Evidence JSON: `{evidence_path}`",
+        ]
+    ).strip() + "\n"
+    report_path.write_text(markdown, encoding="utf-8")
+    return {
+        "ok": True,
+        "outputDir": str(target),
+        "reportPath": str(report_path),
+        "evidencePath": str(evidence_path),
+    }
+
+
+def attach_research_apply_receipt(answer_text, receipt):
+    text = str(answer_text or "").strip()
+    if not receipt or not receipt.get("ok"):
+        return text
+    lower = text.lower()
+    additions = []
+    if "applied to project" not in lower and "project application" not in lower:
+        additions.append(
+            "Applied to project: I created a local research/apply receipt that maps the source evidence to this project and keeps the evidence pack available for the next implementation pass."
+        )
+    if "verification" not in lower and "verified" not in lower:
+        additions.append(
+            "Verification: the research/apply receipt and evidence index were written locally."
+        )
+    report_path = receipt.get("reportPath")
+    evidence_path = receipt.get("evidencePath")
+    if report_path and report_path not in text:
+        additions.append(f"Research/apply receipt: `{report_path}`")
+    if evidence_path and evidence_path not in text:
+        additions.append(f"Evidence index: `{evidence_path}`")
+    if additions:
+        text = text.rstrip() + "\n\n" + "\n".join(additions)
+    return text.strip()
+
+
+def research_apply_claims_unverified_project_work(answer_text, deliverables=None):
+    raw = str(answer_text or "")
+    lower = raw.lower()
+    deliverables = deliverables or []
+    non_receipt_deliverables = [
+        item for item in deliverables
+        if "/generated/research-apply/" not in str(item.get("path") or "")
+    ]
+    if "~/" in raw:
+        return True
+    if re.search(r"\b(ran|printed|measured|inspected|verified)\b[^.\n]{0,100}\b(flow pass|test print|calibration print|under \d|magnification|top surface)\b", lower):
+        return True
+    project_change_claim = re.search(
+        r"\b(created|wrote|saved|updated|patched|changed|added)\b[^.\n]{0,140}\b(profile|preset|json|cfg|cad|file|project|workflow)\b",
+        lower,
+    )
+    if project_change_claim and not non_receipt_deliverables:
+        claim_text = lower[project_change_claim.start(): project_change_claim.end() + 180]
+        if "receipt" not in claim_text and "evidence index" not in claim_text and "research-apply" not in claim_text:
+            return True
+    return False
+
+
+def safe_research_apply_answer(query, route, evidence_pack):
+    urls = [item.get("url") for item in evidence_pack if item.get("url")]
+    source_lines = "\n".join(f"{index}. {url}" for index, url in enumerate(urls[:6], start=1))
+    lessons = (
+        "For Orca filament tuning, use the source-backed order as a workflow guard: first layer and extrusion consistency first, "
+        "then pressure advance/linear advance, extrusion multiplier or flow, cooling/layer-time behavior, retraction, and max volumetric flow. "
+        "For PCTG, keep moisture control in the loop before trusting stringing, surface, or flow results."
+        if "orca" in query.lower() or "filament" in query.lower()
+        else "I distilled the checked sources into project-specific rules and kept the source evidence available for the next implementation pass."
+    )
+    return "\n\n".join(
+        [
+            "Applied outcome: I created a local Research + Apply receipt for this project pass instead of pretending a live project file, slicer profile, or physical test was changed.",
+            f"What I learned: {lessons}",
+            (
+                "Applied to project: the receipt maps the evidence to the active project workflow and becomes the handoff artifact for the next implementation step. "
+                "No Orca profile, CAD file, or machine setting was changed by this smoke-test pass."
+            ),
+            (
+                "Verification: this pass writes the receipt and evidence index locally, then the next pass should make the real project edit and run the matching package, slicer, CAD, or print validation."
+            ),
+            "Sources checked\n" + (source_lines or "No source URLs were captured."),
+        ]
+    )
+
+
+def run_research_apply(
+    messages,
+    route,
+    web_search="live",
+    cwd="",
+    emit=None,
+    friendliness_level=None,
+    humor_level=None,
+):
+    query = latest_user_text(messages)
+    if not query.strip():
+        return {"error": "Research + Apply needs a user question to research and apply."}
+    if web_search != "live":
+        return {"error": "Research + Apply needs Web enabled. Turn Web on or switch to a local non-research mode."}
+    route = {**(route or {}), "engine": "research-apply", "effectiveProfile": "research-apply"}
+    queries = local_research_queries(query, route)
+    if emit:
+        emit("Research + Apply: searching free public web sources.")
+    results = []
+    seen_urls = set()
+    for index, search_query in enumerate(queries, start=1):
+        if emit and len(queries) > 1:
+            emit(f"Research + Apply search pass {index}: `{search_query}`.")
+        for item in search_web_free(search_query):
+            url = item.get("url")
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            results.append(item)
+    if not results:
+        return {"error": "Research + Apply could not find free web results for that query."}
+    if emit:
+        emit(f"Research + Apply found {len(results)} candidate sources; checking the strongest pages.")
+    evidence_pack = build_evidence_pack(query, route, results)
+    if not evidence_pack:
+        return {"error": "Research + Apply found results but could not extract useful evidence."}
+    if emit:
+        emit(f"Research + Apply built an evidence pack from {len(evidence_pack)} sources.")
+        emit(f"Asking local `{LOCAL_RESEARCH_MODEL}` to convert research into project action.")
+    prompt = research_apply_prompt(
+        query,
+        route,
+        evidence_pack,
+        cwd=cwd,
+        friendliness_level=friendliness_level,
+        humor_level=humor_level,
+    )
+    result = run_ollama_generate(prompt)
+    if result.get("text"):
+        answer = ensure_source_links(result["text"], evidence_pack)
+        if research_apply_claims_unverified_project_work(answer, []):
+            if emit:
+                emit("Research + Apply guard removed unverified project/test claims before final delivery.")
+            answer = safe_research_apply_answer(query, route, evidence_pack)
+        receipt = write_research_apply_receipt(messages, route, evidence_pack, answer, cwd=cwd)
+        answer = attach_research_apply_receipt(answer, receipt)
+        project_apply = None
+        try:
+            if emit:
+                emit("Project Apply Executor: staging target inventory, apply plan, and manifest.")
+            project_apply = stage_project_apply_case(messages, route=route, cwd=cwd, research_receipt=receipt)
+            answer = attach_project_apply_receipt(answer, project_apply)
+        except Exception as exc:
+            if emit:
+                emit(f"Project Apply Executor could not stage a plan: {compact(exc, 160)}")
+        return {
+            "text": answer,
+            "evidence": evidence_pack,
+            "receipt": receipt,
+            "projectApply": project_apply,
+            "model": LOCAL_RESEARCH_MODEL,
+        }
+    return result
+
+
 class CodexUIHandler(BaseHTTPRequestHandler):
     server_version = "CodexCLIUI/0.1"
 
@@ -17976,6 +22670,7 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                     "localResearchModel": LOCAL_RESEARCH_MODEL,
                     "localCoderModel": LOCAL_CODER_MODEL,
                     "localReviewModel": LOCAL_REVIEW_MODEL,
+                    "localDeepReviewModel": LOCAL_DEEP_REVIEW_MODEL,
                     "managerPolishModel": MANAGER_POLISH_MODEL,
                     "freeOnly": FREE_ONLY,
                     "localResearchCache": str(LOCAL_RESEARCH_CACHE_PATH),
@@ -18039,12 +22734,28 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                             "description": "Free local DeepSeek R1 reviewer through direct Ollama for second opinions.",
                         },
                         {
+                            "id": "local-deep-review",
+                            "label": "Deep Review",
+                            "engine": "local-review",
+                            "reasoningLevel": "high",
+                            "model": LOCAL_DEEP_REVIEW_MODEL,
+                            "description": "Slow free local Qwen deep reviewer for hard analytical second opinions.",
+                        },
+                        {
                             "id": "local-research",
                             "label": "Local Research",
                             "engine": "local-research",
                             "reasoningLevel": "high",
                             "model": LOCAL_RESEARCH_MODEL,
                             "description": "Free public web evidence, local SQLite cache, and Ollama synthesis.",
+                        },
+                        {
+                            "id": "research-apply",
+                            "label": "Research + Apply",
+                            "engine": "research-apply",
+                            "reasoningLevel": "high",
+                            "model": LOCAL_RESEARCH_MODEL,
+                            "description": "Free web research, local evidence receipt, project impact map, and applied output guardrails.",
                         },
                         {
                             "id": "cloud-research",
@@ -18159,9 +22870,17 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 self.send_error(400, "Invalid JSON")
                 return
             try:
-                record = record_quality_feedback(payload)
-                improvement = record_improvement_from_feedback(record)
-                golden_test = golden_test_from_feedback_improvement(record, improvement)
+                self_healing = None
+                if str(payload.get("rating") or "").lower() == "fix":
+                    repair = run_wrong_answer_repair_loop(payload, source="fix-this-feedback", record=True)
+                    record = repair.get("record")
+                    improvement = repair.get("improvement")
+                    golden_test = repair.get("goldenTest")
+                    self_healing = repair.get("selfHealing")
+                else:
+                    record = record_quality_feedback(payload)
+                    improvement = record_improvement_from_feedback(record)
+                    golden_test = golden_test_from_feedback_improvement(record, improvement)
             except Exception as exc:
                 self.send_json(
                     {
@@ -18182,6 +22901,8 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                     "goldenTests": golden_tests(),
                     "qualityFeedback": quality_feedback_summary(),
                     "improvementLab": improvement_lab_summary(),
+                    "selfHealing": self_healing,
+                    "selfHealingSummary": self_healing_summary(),
                     "goldenTestSummary": golden_test_summary(),
                     "admin": admin_summary(),
                 }
@@ -18361,6 +23082,42 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             self.send_json({"ok": True, "profile": profile, "score": score, "route": route})
             return
 
+        if parsed.path == "/api/tools/task-contract":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self.send_error(400, "Invalid JSON")
+                return
+            messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+            if not messages:
+                prompt = str(payload.get("prompt") or payload.get("text") or "").strip()
+                if prompt:
+                    messages = [{"role": "user", "text": prompt}]
+            web_search = safe_choice(payload.get("webSearch") or "live", WEB_SEARCH_LEVELS, "live")
+            route = payload.get("route") if isinstance(payload.get("route"), dict) else route_manager(
+                messages,
+                requested_profile="manager",
+                web_search=web_search,
+            )
+            answer_text = payload.get("answerText") or payload.get("answer") or ""
+            contract = task_contract(messages, route)
+            gate = None
+            package = None
+            if answer_text:
+                package = response_package(messages, route, answer_text)
+                gate = package.get("contractGate")
+            self.send_json(
+                {
+                    "ok": True,
+                    "route": route,
+                    "contract": contract,
+                    "gate": gate,
+                    "scorecard": (package or {}).get("scorecard"),
+                }
+            )
+            return
+
         if parsed.path == "/api/tools/quality-gate":
             length = int(self.headers.get("Content-Length", "0") or "0")
             try:
@@ -18369,6 +23126,39 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 self.send_error(400, "Invalid JSON")
                 return
             result = quality_gate(payload)
+            self.send_json(result)
+            return
+
+        if parsed.path == "/api/tools/project-apply":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self.send_error(400, "Invalid JSON")
+                return
+            messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+            if not messages:
+                prompt = str(payload.get("prompt") or payload.get("text") or "").strip()
+                if prompt:
+                    messages = [{"role": "user", "text": prompt}]
+            route = payload.get("route") if isinstance(payload.get("route"), dict) else route_manager(
+                messages,
+                cwd=safe_cwd(payload.get("cwd")),
+                requested_profile=safe_choice(payload.get("profile"), PROFILE_LEVELS, DEFAULT_PROFILE),
+                web_search=safe_choice(payload.get("webSearch") or "disabled", WEB_SEARCH_LEVELS, "disabled"),
+            )
+            try:
+                result = stage_project_apply_case(
+                    messages,
+                    route=route,
+                    cwd=safe_cwd(payload.get("cwd")),
+                    research_receipt=payload.get("researchReceipt") if isinstance(payload.get("researchReceipt"), dict) else None,
+                    target_path=payload.get("targetPath") or payload.get("targetDir"),
+                    apply=bool(payload.get("apply")),
+                    confirm_live_write=payload.get("confirmLiveWrite") or "",
+                )
+            except Exception as exc:
+                result = {"ok": False, "error": str(exc)}
             self.send_json(result)
             return
 
@@ -18407,6 +23197,21 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 result = {"ok": False, "error": str(exc), "text": f"Deeper analysis failed before it could finish: {exc}"}
             self.send_json(result)
+            return
+
+        if parsed.path == "/api/run/steer":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self.send_json({"ok": False, "error": "Invalid JSON"}, status=400)
+                return
+            try:
+                count = add_live_steering(payload.get("runId"), payload.get("text") or payload.get("message") or "")
+            except ValueError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
+                return
+            self.send_json({"ok": True, "count": count})
             return
 
         if parsed.path == "/api/tools/aero-cfd-preflight":
@@ -18507,11 +23312,15 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             self.send_json(result)
             return
 
-        if parsed.path == "/api/files/upload":
-            length = int(self.headers.get("Content-Length", "0") or "0")
+        if parsed.path in {"/api/files/upload", "/api/upload", "/api/attachments", "/api/files/attach", "/files/upload"}:
             try:
-                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
-                result = save_uploaded_file(payload)
+                content_type = str(self.headers.get("Content-Type", "") or "").lower()
+                if content_type.startswith("multipart/form-data"):
+                    result = save_uploaded_multipart(self)
+                else:
+                    length = int(self.headers.get("Content-Length", "0") or "0")
+                    payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+                    result = save_uploaded_file(payload)
             except json.JSONDecodeError:
                 self.send_error(400, "Invalid JSON")
                 return
@@ -18602,6 +23411,11 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             HUMOR_LEVELS,
             safe_choice(DEFAULT_HUMOR_LEVEL, HUMOR_LEVELS, "light"),
         )
+        run_id = safe_run_id(payload.get("runId"))
+        self.current_run_id = run_id
+        self.current_run_steering_applied = False
+        self.current_friendliness_level = friendliness_level
+        self.current_humor_level = humor_level
         free_only_redirect = None
         if FREE_ONLY and profile in CLOUD_PROFILES:
             free_only_redirect = profile
@@ -18626,6 +23440,8 @@ class CodexUIHandler(BaseHTTPRequestHandler):
         else:
             if profile in CLOUD_PROFILES:
                 route["engine"] = "cloud"
+            elif profile in RESEARCH_APPLY_PROFILES:
+                route["engine"] = "research-apply"
             elif profile in LOCAL_RESEARCH_PROFILES:
                 route["engine"] = "local-research"
             elif profile in LOCAL_REVIEW_PROFILES:
@@ -18634,12 +23450,159 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 route["engine"] = "local"
             route["effectiveProfile"] = profile
             route["reasoningLevel"] = reasoning_level
+        if manager_mode:
+            deep_review_decision = manager_auto_deep_review_decision(
+                messages,
+                route,
+                manager_depth,
+                profile,
+            )
+            route["autoDeepReview"] = deep_review_decision
+            if deep_review_decision.get("escalated"):
+                manager_depth = safe_choice(
+                    deep_review_decision.get("effectiveDepth"),
+                    MANAGER_DEPTH_LEVELS,
+                    manager_depth,
+                )
+                reasoning_level = "high"
         fast = is_fast_mode(effective_profile, reasoning_level)
         admin_topic = route_admin_topic(messages, route)
         if is_read_only_printer_status_query(messages):
             admin_topic = {**admin_topic, "volatile": True}
         if payload.get("testRun"):
             admin_topic = {**admin_topic, "testRun": True}
+        natural_self_repair = None
+        if not payload.get("testRun"):
+            try:
+                natural_self_repair = record_natural_correction_repair(
+                    messages,
+                    cwd=cwd,
+                    web_search=web_search,
+                )
+            except Exception:
+                natural_self_repair = None
+        if natural_self_repair:
+            route["selfRepair"] = {
+                "diagnosis": natural_self_repair.get("diagnosis"),
+                "goldenTestId": (natural_self_repair.get("goldenTest") or {}).get("id"),
+                "patchId": (natural_self_repair.get("patchItem") or {}).get("id"),
+            }
+            admin_topic = {**admin_topic, "selfRepair": route["selfRepair"]}
+
+        if is_embedded_linux_image_request(messages):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            json_line(
+                self,
+                {
+                    "type": "status",
+                    "message": "starting",
+                    "cwd": cwd,
+                    "profile": profile,
+                    "effectiveProfile": effective_profile,
+                    "accessLevel": "local-files",
+                    "reasoningLevel": reasoning_level,
+                    "webSearch": web_search,
+                    "managerDepth": manager_depth,
+                    "friendlinessLevel": friendliness_level,
+                    "humorLevel": humor_level,
+                    "mode": "embedded-linux-image-preflight",
+                    "engine": "local-tool",
+                    "model": "",
+                    "freeOnlyRedirect": free_only_redirect,
+                    "route": route,
+                    "adminTopic": admin_topic,
+                },
+            )
+            json_line(
+                self,
+                {
+                    "type": "thought",
+                    "text": "Recognized this as a RatOS/Raspberry Pi OS-image compatibility job, not CAD, CFD, or structural analysis.",
+                },
+            )
+            json_line(
+                self,
+                {
+                    "type": "thought",
+                    "text": "Resolving the compressed image from uploads, the current workspace, and Downloads before deciding whether it can be inspected or modified.",
+                },
+            )
+            try:
+                tool_result = stage_embedded_linux_image_preflight(messages, cwd=cwd)
+                for note in embedded_linux_image_preflight_working_notes(tool_result):
+                    json_line(self, {"type": "thought", "text": note})
+            except Exception as exc:
+                tool_result = {
+                    "ok": False,
+                    "error": str(exc),
+                    "targetDir": str(LOCAL_EMBEDDED_IMAGE_OUTPUT_DIR),
+                    "searched": [],
+                }
+                json_line(
+                    self,
+                    {
+                        "type": "thought",
+                        "text": f"Embedded Linux image preflight failed before finalizing: {exc}",
+                    },
+                )
+            emit_assistant_answer(
+                self,
+                messages,
+                route,
+                admin_topic,
+                format_embedded_linux_image_preflight_answer(tool_result),
+                normalize=False,
+            )
+            json_line(self, {"type": "done", "returnCode": 0 if tool_result.get("sourceFound") else 1})
+            return
+
+        research_apply_requested = route.get("engine") == "research-apply" or profile in RESEARCH_APPLY_PROFILES or is_research_apply_request(messages)
+        direct_knowledge = None if research_apply_requested else general_direct_knowledge_answer(messages, route)
+        if direct_knowledge:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            json_line(
+                self,
+                {
+                    "type": "status",
+                    "message": "starting",
+                    "cwd": cwd,
+                    "profile": profile,
+                    "effectiveProfile": effective_profile,
+                    "accessLevel": "local-knowledge",
+                    "reasoningLevel": reasoning_level,
+                    "webSearch": web_search,
+                    "managerDepth": manager_depth,
+                    "friendlinessLevel": friendliness_level,
+                    "humorLevel": humor_level,
+                    "mode": direct_knowledge.get("mode") or "direct-knowledge-answer",
+                    "engine": "local-knowledge",
+                    "model": "",
+                    "freeOnlyRedirect": free_only_redirect,
+                    "route": route,
+                    "adminTopic": admin_topic,
+                },
+            )
+            if natural_self_repair:
+                json_line(self, {"type": "thought", "text": self_repair_receipt_note(natural_self_repair)})
+            json_line(self, {"type": "thought", "text": direct_knowledge.get("thought") or "Answering directly from local knowledge."})
+            emit_assistant_answer(
+                self,
+                messages,
+                route,
+                admin_topic,
+                direct_knowledge.get("answer") or "",
+                normalize=False,
+            )
+            json_line(self, {"type": "done", "returnCode": 0})
+            return
 
         if is_klipper_accel_rgb_tool_request(messages):
             self.send_response(200)
@@ -18707,7 +23670,7 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             json_line(self, {"type": "done", "returnCode": 0 if tool_result.get("ok") else 1})
             return
 
-        direct_fusion_export_answer = fusion_component_export_direct_answer(messages)
+        direct_fusion_export_answer = fusion_component_export_direct_answer(messages) or fusion_cam_stock_shoulder_direct_answer(messages)
         if direct_fusion_export_answer:
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
@@ -19273,16 +24236,24 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             json_line(self, {"type": "done", "returnCode": 0 if tool_result.get("ok") else 1})
             return
 
-        direct_printing_expert_answer = (
-            component_manual_direct_answer(messages)
-            or marlin_temperature_zero_diagnostic_answer(messages)
-            or temperature_tower_pressure_advance_direct_answer(messages)
-            or orca_calibration_visual_direct_answer(messages)
-            or temperature_tower_visual_direct_answer(messages)
-            or filament_profile_parameters_direct_answer(messages)
-            or filament_tuning_direct_answer(messages)
-            or printer_profile_direct_answer(messages)
-        )
+        direct_printing_expert_answer = None
+        if not research_apply_requested:
+            direct_printing_expert_answer = (
+                toolboard_upgrade_decision_direct_answer(messages)
+                or component_manual_direct_answer(messages)
+                or marlin_temperature_zero_diagnostic_answer(messages)
+                or orca_nozzle_visibility_direct_answer(messages)
+                or orca_http_405_direct_answer(messages)
+                or tinmanx_slice_stall_direct_answer(messages)
+                or orca_device_tab_control_direct_answer(messages)
+                or temperature_tower_pressure_advance_direct_answer(messages)
+                or orca_calibration_visual_direct_answer(messages)
+                or temperature_tower_visual_direct_answer(messages)
+                or orca_profile_creation_direct_answer(messages)
+                or filament_profile_parameters_direct_answer(messages)
+                or filament_tuning_direct_answer(messages)
+                or printer_profile_direct_answer(messages)
+            )
         if direct_printing_expert_answer:
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
@@ -19446,8 +24417,13 @@ class CodexUIHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
+        if natural_self_repair:
+            json_line(self, {"type": "thought", "text": self_repair_receipt_note(natural_self_repair)})
 
         if effective_profile in LOCAL_REVIEW_PROFILES:
+            review_model = local_review_model_for_profile(effective_profile)
+            review_predict = 4200 if effective_profile == "local-deep-review" else 1800
+            review_timeout = 420 if effective_profile == "local-deep-review" else 240
             json_line(
                 self,
                 {
@@ -19464,7 +24440,7 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                     "humorLevel": humor_level,
                     "mode": "local-review",
                     "engine": "local-review",
-                    "model": LOCAL_REVIEW_MODEL,
+                    "model": review_model,
                     "freeOnlyRedirect": free_only_redirect,
                     "route": route,
                     "adminTopic": admin_topic,
@@ -19486,6 +24462,9 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                     messages,
                     route,
                     emit=emit_local_review,
+                    num_predict=review_predict,
+                    model=review_model,
+                    timeout=review_timeout,
                     friendliness_level=friendliness_level,
                     humor_level=humor_level,
                 )
@@ -19600,6 +24579,108 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                     {
                         "type": "assistant",
                         "text": result.get("error", "Local Research returned no answer."),
+                    },
+                )
+                json_line(self, {"type": "done", "returnCode": 1})
+            return
+
+        if effective_profile in RESEARCH_APPLY_PROFILES:
+            json_line(
+                self,
+                {
+                    "type": "status",
+                    "message": "starting",
+                    "cwd": cwd,
+                    "profile": profile,
+                    "effectiveProfile": effective_profile,
+                    "accessLevel": "web+project-receipt",
+                    "reasoningLevel": reasoning_level,
+                    "webSearch": web_search,
+                    "managerDepth": manager_depth,
+                    "friendlinessLevel": friendliness_level,
+                    "humorLevel": humor_level,
+                    "mode": "research-apply",
+                    "engine": "research-apply",
+                    "model": LOCAL_RESEARCH_MODEL,
+                    "freeOnlyRedirect": free_only_redirect,
+                    "route": route,
+                    "adminTopic": admin_topic,
+                },
+            )
+            json_line(
+                self,
+                {
+                    "type": "thought",
+                    "text": f"Routed to {route.get('specialist', 'Research + Apply')} for {route.get('project', 'research')}.",
+                },
+            )
+
+            def emit_research_apply(text):
+                json_line(self, {"type": "thought", "text": text})
+
+            try:
+                result = run_research_apply(
+                    messages,
+                    route,
+                    web_search=web_search,
+                    cwd=cwd,
+                    emit=emit_research_apply,
+                    friendliness_level=friendliness_level,
+                    humor_level=humor_level,
+                )
+            except BrokenPipeError:
+                return
+            except Exception as exc:
+                result = {"error": f"Research + Apply failed: {exc}"}
+
+            if result.get("text"):
+                answer_text = result["text"]
+                receipt = result.get("receipt")
+                project_apply = result.get("projectApply")
+                if manager_mode:
+                    def emit_manager_research_apply(text):
+                        json_line(self, {"type": "thought", "text": text})
+
+                    try:
+                        manager_result = run_manager_review_and_polish(
+                            messages,
+                            route,
+                            answer_text,
+                            emit=emit_manager_research_apply,
+                            manager_depth=manager_depth,
+                            friendliness_level=friendliness_level,
+                            humor_level=humor_level,
+                        )
+                        answer_text = manager_result.get("text") or answer_text
+                    except Exception as exc:
+                        json_line(
+                            self,
+                            {
+                                "type": "thought",
+                                "text": f"Manager review failed, so I am returning the Research + Apply answer directly: {compact(exc, 120)}",
+                            },
+                        )
+                answer_text = attach_research_apply_receipt(answer_text, receipt)
+                answer_text = attach_project_apply_receipt(answer_text, project_apply)
+                answer_text = supervise_answer_before_emit(
+                    messages,
+                    route,
+                    admin_topic,
+                    answer_text,
+                    cwd=cwd,
+                    web_search=web_search,
+                    emit=emit_research_apply,
+                    friendliness_level=friendliness_level,
+                    humor_level=humor_level,
+                )
+                emit_assistant_answer(self, messages, route, admin_topic, answer_text)
+                json_line(self, {"type": "done", "returnCode": 0})
+            else:
+                json_line(
+                    self,
+                    {
+                        "type": "assistant",
+                        "text": result.get("error", "Research + Apply returned no answer."),
                     },
                 )
                 json_line(self, {"type": "done", "returnCode": 1})
@@ -20115,8 +25196,19 @@ class CodexUIHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class ReusableThreadingHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
 def main():
-    server = ThreadingHTTPServer((DEFAULT_HOST, DEFAULT_PORT), CodexUIHandler)
+    try:
+        server = ReusableThreadingHTTPServer((DEFAULT_HOST, DEFAULT_PORT), CodexUIHandler)
+    except OSError as exc:
+        if getattr(exc, "errno", None) == 48:
+            print(f"Codex CLI UI already running at http://{DEFAULT_HOST}:{DEFAULT_PORT}")
+            return
+        raise
     print(f"Codex CLI UI: http://{DEFAULT_HOST}:{DEFAULT_PORT}")
     print(f"Codex binary: {CODEX_BIN}")
     print(f"Profile: {DEFAULT_PROFILE}")

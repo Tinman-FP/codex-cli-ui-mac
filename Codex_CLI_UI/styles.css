@@ -1473,6 +1473,20 @@ h1 {
   background: #f7faff;
 }
 
+.message.user.steering .message-body {
+  border-color: #f2c97d;
+  background: #fff9ec;
+}
+
+.message.user.steering .message-role::after {
+  content: " steer";
+  display: block;
+  color: #9a650b;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .message-attachments {
   display: flex;
   flex-wrap: wrap;
@@ -1792,6 +1806,35 @@ h1 {
 
 .check-mark {
   flex: 0 0 auto;
+}
+
+.message-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.message-action-button {
+  border: 1px solid #cad8d0;
+  border-radius: 7px;
+  padding: 4px 8px;
+  background: #f7faf8;
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.message-action-button:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.message-action-button:disabled {
+  cursor: default;
+  opacity: 0.65;
 }
 
 .feedback-actions {
@@ -2343,17 +2386,16 @@ input:focus {
   font-size: 20px;
   font-weight: 800;
   box-shadow: var(--shadow);
-  pointer-events: none;
+  cursor: pointer;
 }
 
 .file-input-overlay {
   position: absolute;
-  inset: 0;
-  width: 36px;
-  height: 46px;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
   opacity: 0;
-  cursor: pointer;
-  z-index: 2;
+  pointer-events: none;
   font-size: 0;
 }
 
@@ -2362,11 +2404,7 @@ input:focus {
   color: var(--text);
 }
 
-.file-input-overlay:focus-visible {
-  outline: none;
-}
-
-.attach-picker:focus-within .attach-button {
+.attach-button:focus-visible {
   border-color: var(--accent);
   outline: 3px solid rgba(37, 99, 235, 0.16);
 }
@@ -2378,10 +2416,6 @@ input:focus {
 .icon-button:disabled,
 .switch-button:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.attach-picker:has(.file-input-overlay:disabled) .attach-button {
   opacity: 0.55;
 }
 
