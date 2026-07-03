@@ -21725,7 +21725,7 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             self.send_json(result)
             return
 
-        if parsed.path == "/api/files/upload":
+        if parsed.path in {"/api/files/upload", "/api/upload", "/api/attachments", "/api/files/attach", "/files/upload"}:
             length = int(self.headers.get("Content-Length", "0") or "0")
             try:
                 payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
