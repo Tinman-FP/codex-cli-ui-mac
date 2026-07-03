@@ -556,6 +556,11 @@ const ENGINEERING_PACKS = {
     action: "",
     toolIds: ["ast-grep", "tree-sitter-cli", "shellcheck", "hyperfine"],
   },
+  codeQuality: {
+    label: "Code Quality",
+    action: "",
+    toolIds: ["ruff", "pytest", "mypy"],
+  },
 };
 
 function capabilityTools() {
@@ -597,11 +602,12 @@ function renderEngineeringStatus() {
   const aero = engineeringPackState(ENGINEERING_PACKS.aero);
   const structural = engineeringPackState(ENGINEERING_PACKS.structural);
   const reasoning = engineeringPackState(ENGINEERING_PACKS.reasoning);
+  const codeQuality = engineeringPackState(ENGINEERING_PACKS.codeQuality);
   const combined = {
-    state: aero.state === "ready" && structural.state === "ready" && reasoning.state === "ready" ? "ready" : aero.installed + structural.installed + reasoning.installed ? "partial" : "missing",
-    installed: aero.installed + structural.installed + reasoning.installed,
-    total: aero.total + structural.total + reasoning.total,
-    missing: [...aero.missing, ...structural.missing, ...reasoning.missing],
+    state: aero.state === "ready" && structural.state === "ready" && reasoning.state === "ready" && codeQuality.state === "ready" ? "ready" : aero.installed + structural.installed + reasoning.installed + codeQuality.installed ? "partial" : "missing",
+    installed: aero.installed + structural.installed + reasoning.installed + codeQuality.installed,
+    total: aero.total + structural.total + reasoning.total + codeQuality.total,
+    missing: [...aero.missing, ...structural.missing, ...reasoning.missing, ...codeQuality.missing],
   };
   setPackChip(els.aeroPackStatus, els.aeroPackText, aero);
   setPackChip(els.structuralPackStatus, els.structuralPackText, structural);
