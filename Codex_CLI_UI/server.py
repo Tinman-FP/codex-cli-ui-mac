@@ -224,7 +224,8 @@ ADMIN_TAXONOMY = {
             "3d print", "3d printer", "bambu", "btt", "bigtreetech", "centauri", "creality", "ebb42",
             "filament", "gcode", "h2d", "hotend", "hotted", "k2 plus", "klipper", "mainsail", "moonraker",
             "nozzle", "orca", "orcaslicer", "print bed", "printer", "qidi",
-            "rat rig", "ratrig", "slicer", "snapmaker", "sovol", "spool", "sv08", "toolhead", "x1c",
+            "pctg", "pressure advance", "rat rig", "ratrig", "slicer", "snapmaker", "sovol",
+            "spool", "sv08", "temp tower", "temperature tower", "toolhead", "x1c",
         ),
         "routeProjects": ("printer-klipper-ops", "tinmanx-slicer-research", "orcaslicer-codex"),
         "folders": {
@@ -245,7 +246,7 @@ ADMIN_TAXONOMY = {
             "filament": {
                 "name": "Filament",
                 "triggers": (
-                    "asa", "filament", "material", "pa-cf", "pet-cf", "petg",
+                    "asa", "filament", "material", "pa-cf", "pctg", "pet-cf", "petg",
                     "pla", "polymer", "spool", "tpu",
                 ),
             },
@@ -254,7 +255,7 @@ ADMIN_TAXONOMY = {
                 "triggers": (
                     "anneal", "bed mesh", "calibration", "dry", "drying", "flow",
                     "heat soak", "layer", "process", "speed", "temperature", "tune",
-                    "warping",
+                    "temp tower", "temperature tower", "pressure advance", "warping",
                 ),
             },
         },
@@ -2794,7 +2795,28 @@ def admin_preference_boosts(query):
 
 def route_admin_topic(messages, route=None):
     query = latest_query_lower(messages)
+    context_query = "\n".join(
+        str(message.get("text", ""))
+        for message in (messages or [])[-6:]
+        if str(message.get("role", "")).lower() == "user"
+    ).lower()
     project_boosts, folder_boosts = admin_preference_boosts(query)
+    printing_context_terms = (
+        "pctg",
+        "temp tower",
+        "temperature tower",
+        "pressure advance",
+        "flow ratio",
+        "max volumetric",
+        "retraction",
+        "input shaping",
+        "vfa",
+        "tolerance calibration",
+    )
+    if text_has_any(context_query, printing_context_terms):
+        project_boosts["3d-printers"] = project_boosts.get("3d-printers", 0) + 50
+        folder_id = "filament" if text_has_any(context_query, ("pctg", "filament", "spool", "pla", "petg", "asa", "abs")) else "processes"
+        folder_boosts[("3d-printers", folder_id)] = folder_boosts.get(("3d-printers", folder_id), 0) + 50
     scored = []
     for project_id, project in ADMIN_TAXONOMY.items():
         score, matched = admin_project_score(project_id, project, query, route or {})
@@ -6011,6 +6033,102 @@ def temperature_tower_visual_direct_answer(messages):
     )
 
 
+def temperature_section_from_query(query):
+    match = re.search(r"\b(2[0-9]{2})\s*(?:c|C|°c|°C)?\b", str(query or ""))
+    return match.group(1) if match else ""
+
+
+def has_temperature_tower_context(messages):
+    history = "\n".join(str(message.get("text", "")) for message in (messages or [])[-8:]).lower()
+    return bool(
+        image_attachments(messages)
+        and text_has_any(
+            history,
+            (
+                "temp tower",
+                "temperature tower",
+                "best temp",
+                "best temperature",
+                "pctg",
+                "petg",
+                "pla",
+            ),
+        )
+    )
+
+
+def is_pressure_advance_test_prompt(query):
+    text = str(query or "").lower()
+    return text_has_any(
+        text,
+        (
+            "pressure advance test",
+            "pressure advance tower",
+            "pressure advance line",
+            "pressure advance pattern",
+            "pa tower",
+            "pa line",
+            "pa pattern",
+            "pa calibration",
+            "k factor",
+            "k-factor",
+            "linear advance",
+        ),
+    )
+
+
+def is_temperature_tower_pressure_advance_followup(messages):
+    query = latest_user_text(messages).lower()
+    if not query:
+        return False
+    mentions_pa = "pressure advance" in query or re.search(r"\bpa\b", query)
+    if not mentions_pa or is_pressure_advance_test_prompt(query):
+        return False
+    if not has_temperature_tower_context(messages):
+        return False
+    followup_terms = (
+        "based on",
+        "section",
+        "band",
+        "look",
+        "looks",
+        "how does",
+        "how is",
+        "from the print",
+        "from this print",
+        "on the print",
+    )
+    return bool(temperature_section_from_query(query) or text_has_any(query, followup_terms))
+
+
+def temperature_tower_pressure_advance_direct_answer(messages):
+    if not is_temperature_tower_pressure_advance_followup(messages):
+        return ""
+    query = latest_user_text(messages)
+    section = temperature_section_from_query(query)
+    section_label = f"the {section} C section" if section else "that temp-tower section"
+    images = image_attachments(messages)
+    image_note = ""
+    if images:
+        image = images[-1]
+        name = image.get("name") or Path(str(image.get("path") or "")).name or "attached image"
+        image_note = f" I used `{name}` as the same temp-tower image context."
+    return "\n\n".join(
+        [
+            f"Based on {section_label}, pressure advance looks close, maybe a touch low. I would not make a big PA change from this tower alone.",
+            (
+                "This is why: the corners/text and the right circular feature look a little rounded or puffy, not thin or gapped. "
+                "That points more toward slightly under-advanced PA than over-advanced PA, but a temp tower is a weak PA diagnostic because it is mainly testing temperature, stringing, bridges, and layer bonding."
+                + image_note
+            ),
+            (
+                "You should also consider: after settling on 245-250 C, run Orca's dedicated pressure-advance line/pattern test. "
+                "If you adjust from this clue only, bump PA one small step and verify that corners sharpen without creating gaps at line starts."
+            ),
+        ]
+    )
+
+
 ORCA_CALIBRATION_KIND_ALIASES = (
     (
         "temperature",
@@ -6201,6 +6319,8 @@ def classify_orca_calibration_query(messages):
 def is_orca_calibration_image_question(messages):
     query = latest_user_text(messages).lower()
     if not query:
+        return False
+    if is_temperature_tower_pressure_advance_followup(messages):
         return False
     kind = classify_orca_calibration_query(messages)
     if not kind:
@@ -14042,6 +14162,48 @@ def package_health_report():
         add("tools:temp-tower-image-direct-answer", "fail", str(exc))
 
     try:
+        tower_followup_messages = [
+            {
+                "role": "user",
+                "text": "What is the best temp for this PCTG based on the image?",
+                "attachments": [
+                    {
+                        "name": "IMG_4772.jpeg",
+                        "path": str(UPLOAD_DIR / "IMG_4772.jpeg"),
+                        "type": "image/jpeg",
+                        "size": 2800000,
+                    }
+                ],
+            },
+            {
+                "role": "assistant",
+                "text": "Best pick from this PCTG temp tower: start at 250 C.",
+            },
+            {
+                "role": "user",
+                "text": "Based on the 245 section of the print, how does the pressure advance look?",
+            },
+        ]
+        followup_answer = temperature_tower_pressure_advance_direct_answer(tower_followup_messages)
+        ok = (
+            is_temperature_tower_pressure_advance_followup(tower_followup_messages)
+            and not is_orca_calibration_image_question(tower_followup_messages)
+            and not is_cad_design_request(tower_followup_messages)
+            and "245 C section" in followup_answer
+            and "touch low" in followup_answer
+            and "temp tower is a weak PA diagnostic" in followup_answer
+            and "PA/K value" not in followup_answer
+            and "Fusion 360" not in followup_answer
+        )
+        add(
+            "tools:temp-tower-pressure-advance-followup",
+            "pass" if ok else "fail",
+            "temp-tower PA follow-ups answer the image context instead of generic PA calibration",
+        )
+    except Exception as exc:
+        add("tools:temp-tower-pressure-advance-followup", "fail", str(exc))
+
+    try:
         stale_cad_context = {
             "role": "assistant",
             "text": "Fusion 360 script: stale_cad.py\nOpenSCAD model: stale.scad",
@@ -16993,6 +17155,7 @@ class CodexUIHandler(BaseHTTPRequestHandler):
 
         direct_printing_expert_answer = (
             component_manual_direct_answer(messages)
+            or temperature_tower_pressure_advance_direct_answer(messages)
             or orca_calibration_visual_direct_answer(messages)
             or temperature_tower_visual_direct_answer(messages)
             or filament_profile_parameters_direct_answer(messages)
