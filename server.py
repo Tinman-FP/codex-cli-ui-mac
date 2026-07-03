@@ -2157,6 +2157,48 @@ FREE_TOOL_MANIFEST = {
         "free": True,
         "autoInstall": True,
     },
+    "ruff": {
+        "label": "Ruff",
+        "commands": ["ruff"],
+        "pythonModules": ["ruff"],
+        "pip": ["ruff"],
+        "estimatedBytes": 60 * MIB,
+        "capabilities": [
+            "fast Python linting",
+            "import and syntax cleanup",
+            "self-repair validation for Python code",
+        ],
+        "free": True,
+        "autoInstall": True,
+    },
+    "pytest": {
+        "label": "pytest",
+        "commands": ["pytest"],
+        "pythonModules": ["pytest"],
+        "pip": ["pytest"],
+        "estimatedBytes": 80 * MIB,
+        "capabilities": [
+            "Python regression tests",
+            "self-repair verification",
+            "golden test execution",
+        ],
+        "free": True,
+        "autoInstall": True,
+    },
+    "mypy": {
+        "label": "mypy",
+        "commands": ["mypy"],
+        "pythonModules": ["mypy"],
+        "pip": ["mypy"],
+        "estimatedBytes": 100 * MIB,
+        "capabilities": [
+            "Python static typing checks",
+            "interface drift detection",
+            "large refactor validation",
+        ],
+        "free": True,
+        "autoInstall": True,
+    },
     "dspy": {
         "label": "DSPy",
         "commands": [],
@@ -2382,6 +2424,7 @@ COMMAND_TO_FREE_TOOL = {
     for command in manifest.get("commands", [])
 }
 REASONING_TOOL_IDS = ["ast-grep", "tree-sitter-cli", "shellcheck", "hyperfine"]
+CODE_QUALITY_TOOL_IDS = ["ruff", "pytest", "mypy"]
 OPTIONAL_REASONING_TOOL_IDS = ["dspy", "lancedb", "mlx-lm"]
 
 
@@ -13175,6 +13218,9 @@ IMPORTANT_PYTHON_MODULES = [
     "dspy",
     "lancedb",
     "mlx_lm",
+    "ruff",
+    "pytest",
+    "mypy",
     "pandas",
     "openpyxl",
     "docx",
@@ -18147,6 +18193,18 @@ def package_health_report():
             "tools:optional-reasoning-stack",
             "pass",
             f"{len(optional)}/{len(OPTIONAL_REASONING_TOOL_IDS)} optional Python/RAG tools installed",
+        )
+        quality_installed = [
+            tool_id for tool_id in CODE_QUALITY_TOOL_IDS if by_id.get(tool_id, {}).get("installed")
+        ]
+        quality_missing = [
+            tool_id for tool_id in CODE_QUALITY_TOOL_IDS if not by_id.get(tool_id, {}).get("installed")
+        ]
+        add(
+            "tools:code-quality-pack",
+            "pass" if not quality_missing else "fail",
+            f"{len(quality_installed)}/{len(CODE_QUALITY_TOOL_IDS)} ready"
+            + (f"; missing {', '.join(quality_missing)}" if quality_missing else ""),
         )
     except Exception as exc:
         add("tools:reasoning-pack", "fail", str(exc))
