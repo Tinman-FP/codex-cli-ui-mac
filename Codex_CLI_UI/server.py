@@ -133,6 +133,9 @@ WEB_SEARCH_LEVELS = {"live", "disabled"}
 MANAGER_DEPTH_LEVELS = {"fast", "balanced", "full"}
 FRIENDLINESS_LEVELS = {"focused", "warm", "high"}
 HUMOR_LEVELS = {"off", "light", "playful"}
+LIVE_STEERING_LOCK = threading.Lock()
+LIVE_STEERING_BY_RUN = {}
+LIVE_STEERING_TTL_SECONDS = 60 * 60
 QUALITY_FEEDBACK_MAX_CONTEXT = 6
 HISTORY_MAX_DOCS = 6
 HISTORY_MAX_CHARS = 9000
@@ -2363,6 +2366,58 @@ def compact(text, limit=1400):
     if len(text) > limit:
         return text[:limit].rstrip() + "..."
     return text
+
+
+def safe_run_id(value):
+    run_id = re.sub(r"[^A-Za-z0-9_.:-]", "", str(value or ""))[:96]
+    return run_id
+
+
+def prune_live_steering(now=None):
+    now = now or time.time()
+    with LIVE_STEERING_LOCK:
+        stale = [
+            run_id
+            for run_id, state in LIVE_STEERING_BY_RUN.items()
+            if now - float(state.get("updatedAt", 0) or 0) > LIVE_STEERING_TTL_SECONDS
+        ]
+        for run_id in stale:
+            LIVE_STEERING_BY_RUN.pop(run_id, None)
+
+
+def add_live_steering(run_id, text):
+    run_id = safe_run_id(run_id)
+    note = compact(text, 1600)
+    if not run_id:
+        raise ValueError("Missing runId")
+    if not note:
+        raise ValueError("Missing steering text")
+    now = time.time()
+    prune_live_steering(now)
+    with LIVE_STEERING_LOCK:
+        state = LIVE_STEERING_BY_RUN.setdefault(run_id, {"notes": [], "createdAt": now, "updatedAt": now})
+        state["notes"].append({"text": note, "createdAt": now})
+        state["notes"] = state["notes"][-12:]
+        state["updatedAt"] = now
+        return len(state["notes"])
+
+
+def live_steering_notes(run_id):
+    run_id = safe_run_id(run_id)
+    if not run_id:
+        return []
+    prune_live_steering()
+    with LIVE_STEERING_LOCK:
+        state = LIVE_STEERING_BY_RUN.get(run_id) or {}
+        return [str(item.get("text") or "").strip() for item in state.get("notes", []) if str(item.get("text") or "").strip()]
+
+
+def finish_live_steering(run_id):
+    run_id = safe_run_id(run_id)
+    if not run_id:
+        return
+    with LIVE_STEERING_LOCK:
+        LIVE_STEERING_BY_RUN.pop(run_id, None)
 
 
 def redact_quality_text(text):
@@ -20385,7 +20440,113 @@ def format_contract_gate_blocker(messages, route, answer, contract, gate):
     )
 
 
+def messages_with_live_steering(messages, notes):
+    if not notes:
+        return messages
+    note_lines = "\n".join(f"- {note}" for note in notes)
+    return list(messages or []) + [
+        {
+            "role": "user",
+            "text": "Live steering from Tinman while the run was in progress:\n" + note_lines,
+            "steering": True,
+        }
+    ]
+
+
+def live_steering_revision_prompt(messages, route, candidate_answer, notes, friendliness_level=None, humor_level=None):
+    clean_messages = []
+    for message in (messages or [])[-12:]:
+        role = str(message.get("role", "")).strip().lower()
+        text = str(message.get("text", "")).strip()
+        if role in {"user", "assistant"} and text:
+            clean_messages.append((role, text))
+
+    blocks = [
+        "You are Tinman's local final-answer editor.",
+        build_assistant_style_context(friendliness_level, humor_level).strip(),
+        build_response_quality_context(messages, route or {}).strip(),
+        "Tinman sent live steering while the answer was being generated.",
+        "Revise the candidate answer to follow Tinman's steering before final delivery.",
+        "If the steering corrects scope, assumptions, tone, format, or priority, apply it.",
+        "Preserve verified facts, file paths, command results, sources, and caveats from the candidate answer.",
+        "Do not invent new facts, tests, files, tool results, product specs, prices, or machine access claims.",
+        "Return only the final answer for Tinman. Do not mention this editor or hidden reasoning.",
+        "",
+        format_manager_context(route or {}).strip(),
+        "",
+    ]
+    if clean_messages:
+        blocks.append("Conversation context:")
+        for role, text in clean_messages:
+            label = "User" if role == "user" else "Assistant"
+            blocks.append(f"{label}:\n{text}")
+            blocks.append("")
+    blocks.extend(
+        [
+            "Live steering notes:",
+            "\n".join(f"- {note}" for note in notes),
+            "",
+            "Candidate answer:",
+            str(candidate_answer or "").strip(),
+            "",
+            "Final answer:",
+        ]
+    )
+    return "\n".join(block for block in blocks if block is not None).strip()
+
+
+def apply_live_steering_to_answer(messages, route, answer, run_id, emit=None, friendliness_level=None, humor_level=None):
+    notes = live_steering_notes(run_id)
+    if not notes or not str(answer or "").strip():
+        return answer, messages
+    steered_messages = messages_with_live_steering(messages, notes)
+    if emit:
+        emit(f"Tinman's live steering arrived; applying {len(notes)} note{'s' if len(notes) != 1 else ''} before final delivery.")
+    try:
+        result = run_ollama_generate(
+            live_steering_revision_prompt(
+                steered_messages,
+                route or {},
+                answer,
+                notes,
+                friendliness_level=friendliness_level,
+                humor_level=humor_level,
+            ),
+            model=MANAGER_POLISH_MODEL,
+            timeout=180,
+            num_predict=1800,
+            num_ctx=12000,
+        )
+        revised = strip_thinking_markup(result.get("text") or "").strip()
+        if revised:
+            if emit:
+                emit("Live steering was applied to the final answer.")
+            return revised, steered_messages
+        if emit:
+            emit("Live steering pass returned no usable text, so I kept the best available answer.")
+    except Exception as exc:
+        if emit:
+            emit(f"Live steering pass failed, so I kept the best available answer: {compact(exc, 120)}")
+    return answer, steered_messages
+
+
 def emit_assistant_answer(handler, messages, route, admin_topic, text, normalize=True):
+    run_id = getattr(handler, "current_run_id", "")
+    if run_id and not getattr(handler, "current_run_steering_applied", False) and not (admin_topic or {}).get("testRun"):
+        def emit_steering_note(note):
+            json_line(handler, {"type": "thought", "text": note})
+
+        text, messages = apply_live_steering_to_answer(
+            messages,
+            route or {},
+            text,
+            run_id,
+            emit=emit_steering_note,
+            friendliness_level=getattr(handler, "current_friendliness_level", None),
+            humor_level=getattr(handler, "current_humor_level", None),
+        )
+        handler.current_run_steering_applied = True
+        finish_live_steering(run_id)
     answer = normalize_direct_answer_shape(messages, route, text) if normalize else strip_thinking_markup(text)
     package = response_package(messages, route or {}, answer)
     answer = package["text"]
@@ -21701,6 +21862,21 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             self.send_json(result)
             return
 
+        if parsed.path == "/api/run/steer":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self.send_json({"ok": False, "error": "Invalid JSON"}, status=400)
+                return
+            try:
+                count = add_live_steering(payload.get("runId"), payload.get("text") or payload.get("message") or "")
+            except ValueError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
+                return
+            self.send_json({"ok": True, "count": count})
+            return
+
         if parsed.path == "/api/tools/aero-cfd-preflight":
             length = int(self.headers.get("Content-Length", "0") or "0")
             try:
@@ -21898,6 +22074,11 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             HUMOR_LEVELS,
             safe_choice(DEFAULT_HUMOR_LEVEL, HUMOR_LEVELS, "light"),
         )
+        run_id = safe_run_id(payload.get("runId"))
+        self.current_run_id = run_id
+        self.current_run_steering_applied = False
+        self.current_friendliness_level = friendliness_level
+        self.current_humor_level = humor_level
         free_only_redirect = None
         if FREE_ONLY and profile in CLOUD_PROFILES:
             free_only_redirect = profile

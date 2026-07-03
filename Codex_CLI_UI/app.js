@@ -124,6 +124,7 @@ let config = {
   admin: null,
 };
 let activeController = null;
+let activeRun = null;
 let pendingAttachments = [];
 const MAX_BROWSER_UPLOAD_BYTES = 250 * 1024 * 1024;
 const nativeFilePickers = new Map();
@@ -234,13 +235,17 @@ function currentThread() {
 }
 
 function setRunning(isRunning) {
-  els.sendButton.disabled = isRunning;
+  const canSteer = Boolean(isRunning && activeRun);
+  els.sendButton.disabled = isRunning && !canSteer;
   els.attachButton.disabled = isRunning;
   els.fileInput.disabled = isRunning;
   if (els.runDeeperButton) els.runDeeperButton.disabled = isRunning;
   if (els.runAeroButton) els.runAeroButton.disabled = isRunning;
   if (els.runStructuralButton) els.runStructuralButton.disabled = isRunning;
-  els.promptInput.disabled = isRunning;
+  els.promptInput.disabled = isRunning && !canSteer;
+  els.promptInput.placeholder = canSteer ? "Steer Codex while he works" : "Ask Codex";
+  els.sendButton.title = canSteer ? "Send steering note" : "Send";
+  els.sendButton.setAttribute("aria-label", canSteer ? "Send steering note" : "Send");
   els.newThreadButton.disabled = isRunning;
   els.adminNavButton.disabled = isRunning;
   els.modeSelect.disabled = isRunning;
@@ -260,7 +265,7 @@ function setRunning(isRunning) {
   if (els.selfHealButton) els.selfHealButton.disabled = isRunning;
   if (els.refreshPrintingPackButton) els.refreshPrintingPackButton.disabled = isRunning;
   if (isRunning) {
-    els.runState.textContent = "Running";
+    els.runState.textContent = canSteer ? "Running · steer ready" : "Running";
     els.runState.className = "run-state warning";
   }
 }
@@ -1278,7 +1283,7 @@ function renderMessages() {
       touchedIds = true;
     }
     const node = document.createElement("article");
-    node.className = `message ${message.role}${message.running ? " running" : ""}`;
+    node.className = `message ${message.role}${message.running ? " running" : ""}${message.steering ? " steering" : ""}`;
     const role = document.createElement("div");
     role.className = "message-role";
     role.textContent = message.role === "user" ? "You" : "Codex";
@@ -2971,11 +2976,69 @@ function workingIntroForPrompt(text, attachments = []) {
   return "I’m on it, Tinman. I’ll check the right path and bring back the answer in plain English.";
 }
 
+async function sendLiveSteer() {
+  const thread = currentThread();
+  const text = els.promptInput.value.trim();
+  if (!thread || !activeRun || !text) return;
+  const pending = activeRun.pending;
+  const steerMessage = {
+    id: crypto.randomUUID(),
+    role: "user",
+    text: `Steer while working: ${text}`,
+    steering: true,
+    createdAt: new Date().toISOString(),
+  };
+  const pendingIndex = findMessageIndexById(thread, pending?.id);
+  if (pendingIndex >= 0) {
+    thread.messages.splice(pendingIndex, 0, steerMessage);
+  } else {
+    thread.messages.push(steerMessage);
+  }
+  pending.steeringNotes = pending.steeringNotes || [];
+  pending.steeringNotes.push(text);
+  if (pending.steeringNotes.length > 8) pending.steeringNotes.splice(0, pending.steeringNotes.length - 8);
+  els.promptInput.value = "";
+  autoSizeTextarea();
+  thread.updatedAt = new Date().toISOString();
+  addThought(pending, `Tinman steering received: ${compactLabel(text, 160)}`);
+  render();
+  saveState();
+
+  try {
+    const response = await fetch("/api/run/steer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        runId: activeRun.id,
+        text,
+        threadId: thread.id,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || `steer ${response.status}`);
+    }
+    els.runState.textContent = "Steer sent";
+    els.runState.className = "run-state warning";
+    appendLog("event", `live steer sent: ${compactLabel(text, 120)}`);
+  } catch (error) {
+    pending.steeringFailed = true;
+    addThought(pending, `Steering note could not reach the worker: ${error.message}`);
+    els.runState.textContent = "Steer failed";
+    els.runState.className = "run-state error";
+    appendLog("error", `live steer failed: ${error.message}`);
+  }
+}
+
 async function sendPrompt() {
+  if (activeController) {
+    await sendLiveSteer();
+    return;
+  }
   const thread = currentThread();
   const text = els.promptInput.value.trim();
   let attachments = pendingAttachments.slice();
-  if (!thread || (!text && !attachments.length) || activeController) return;
+  if (!thread || (!text && !attachments.length)) return;
   let editingIndex = -1;
   let editingMessage = null;
   if (composerIntent.kind === "edit" && composerIntent.messageId) {
@@ -3012,7 +3075,6 @@ async function sendPrompt() {
   autoSizeTextarea();
   renderAttachmentTray();
   render();
-  setRunning(true);
 
   const pending = {
     id: crypto.randomUUID(),
@@ -3022,6 +3084,14 @@ async function sendPrompt() {
     thoughts: [],
   };
   thread.messages.push(pending);
+  const runId = crypto.randomUUID();
+  activeRun = {
+    id: runId,
+    threadId: thread.id,
+    pending,
+    startedAt: new Date().toISOString(),
+  };
+  setRunning(true);
   renderMessages();
 
   activeController = new AbortController();
@@ -3040,6 +3110,7 @@ async function sendPrompt() {
         friendlinessLevel: thread.friendlinessLevel,
         humorLevel: thread.humorLevel,
         webSearch: thread.webSearch,
+        runId,
         messages: thread.messages.filter((message) => !message.running),
       }),
       signal: activeController.signal,
@@ -3062,6 +3133,7 @@ async function sendPrompt() {
     els.runState.className = "run-state warning";
   } finally {
     activeController = null;
+    activeRun = null;
     thread.updatedAt = new Date().toISOString();
     await refreshAdmin();
     setRunning(false);
