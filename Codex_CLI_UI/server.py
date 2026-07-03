@@ -2426,9 +2426,15 @@ def is_cad_design_request(messages):
         is_cpap_hose_spec_question(messages)
         or is_cooling_duct_research_request(messages)
         or is_cad_reference_question(messages)
+        or is_orca_calibration_image_question(messages)
+        or is_temperature_tower_image_question(messages)
     ):
         return False
-    text = "\n".join(str(message.get("text", "")) for message in messages[-4:]).lower()
+    text = "\n".join(
+        str(message.get("text", ""))
+        for message in messages[-6:]
+        if str(message.get("role", "")).lower() == "user"
+    ).lower()
     if not text_has_any(text, CAD_DESIGN_TERMS):
         return False
     deliverable_terms = (
@@ -4943,16 +4949,10 @@ ORCA_TUNING_WORKFLOW = [
         "save": "filament temperature range and preferred nozzle temp per printer/nozzle",
     },
     {
-        "id": "flow-rate-pass-1",
-        "name": "Flow Rate Pass 1",
-        "goal": "Get the first coarse extrusion multiplier from top-surface quality.",
-        "save": "coarse flow ratio",
-    },
-    {
-        "id": "flow-rate-pass-2",
-        "name": "Flow Rate Pass 2",
-        "goal": "Refine flow after pass 1 so walls/top layers are not under/over-extruded.",
-        "save": "final flow ratio",
+        "id": "max-volumetric-speed",
+        "name": "Max Volumetric Speed",
+        "goal": "Find the reliable flow ceiling before under-extrusion or weak layers.",
+        "save": "max volumetric speed with safety margin",
     },
     {
         "id": "pressure-advance",
@@ -4961,10 +4961,10 @@ ORCA_TUNING_WORKFLOW = [
         "save": "PA/K value for printer, nozzle, filament, and speed range",
     },
     {
-        "id": "max-volumetric-speed",
-        "name": "Max volumetric speed",
-        "goal": "Find the reliable flow ceiling before under-extrusion or weak layers.",
-        "save": "max volumetric speed with safety margin",
+        "id": "flow-rate",
+        "name": "Flow rate",
+        "goal": "Set the extrusion multiplier from top-surface and wall quality.",
+        "save": "final flow ratio",
     },
     {
         "id": "retraction",
@@ -4973,10 +4973,28 @@ ORCA_TUNING_WORKFLOW = [
         "save": "retraction length/speed and wipe settings",
     },
     {
+        "id": "cornering",
+        "name": "Cornering",
+        "goal": "Tune jerk or junction-deviation behavior for cleaner corners.",
+        "save": "cornering/JD/jerk value that keeps corners sharp without ringing",
+    },
+    {
+        "id": "input-shaping",
+        "name": "Input Shaping",
+        "goal": "Reduce ringing/ghosting from mechanical vibration.",
+        "save": "shaper type and frequency or printer-specific input-shaping result",
+    },
+    {
         "id": "vfa-speed",
         "name": "VFA/speed test",
         "goal": "Find cosmetic speed bands and avoid resonance/vertical-fine-artifact zones.",
         "save": "preferred outer-wall, inner-wall, and travel speed bands",
+    },
+    {
+        "id": "tolerance",
+        "name": "Tolerance",
+        "goal": "Check dimensional fit/clearance so parts mate correctly.",
+        "save": "fit clearance and dimensional compensation notes",
     },
 ]
 
@@ -5905,13 +5923,373 @@ def filament_profile_parameters_direct_answer(messages):
     return "\n\n".join(sections)
 
 
+IMAGE_FILE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".heic", ".webp", ".tif", ".tiff")
+
+
+def image_attachments(messages):
+    images = []
+    for attachment in message_attachments(messages):
+        name = str(attachment.get("name") or "")
+        path = str(attachment.get("path") or "")
+        content_type = str(attachment.get("type") or attachment.get("contentType") or "").lower()
+        if content_type.startswith("image/") or name.lower().endswith(IMAGE_FILE_EXTENSIONS) or path.lower().endswith(IMAGE_FILE_EXTENSIONS):
+            images.append(attachment)
+    return images
+
+
+def is_temperature_tower_image_question(messages):
+    query = latest_user_text(messages).lower()
+    if not query:
+        return False
+    image_context = image_attachments(messages) or text_has_any(query, ("image", "photo", "picture", "jpeg", "jpg", "png"))
+    if not image_context:
+        return False
+    temp_terms = (
+        "temp tower",
+        "temperature tower",
+        "best temp",
+        "best temperature",
+        "what temp",
+        "which temp",
+        "filament temp",
+        "tower",
+    )
+    material_terms = (
+        "pctg",
+        "petg",
+        "pla",
+        "asa",
+        "abs",
+        "pet-cf",
+        "pet cf",
+        "pa-cf",
+        "nylon",
+        "filament",
+    )
+    return text_has_any(query, temp_terms) and text_has_any(query, material_terms)
+
+
+def temperature_tower_visual_direct_answer(messages):
+    if not is_temperature_tower_image_question(messages):
+        return ""
+    query = latest_user_text(messages)
+    material_key = profile_query_material_key(query.lower()) or "filament"
+    material = PRINTING_MATERIAL_LIBRARY.get(material_key, {})
+    material_name = material.get("name") or material_key.upper()
+    images = image_attachments(messages)
+    image_note = ""
+    if images:
+        image = images[-1]
+        name = image.get("name") or Path(str(image.get("path") or "")).name or "attached image"
+        image_note = f" I used the attached image `{name}` as the visual evidence."
+    if material_key == "pctg":
+        return "\n\n".join(
+            [
+                "Best pick from this PCTG temp tower: start at 250 C.",
+                (
+                    "This is why: the 245-250 C bands look like the cleanest compromise in the photo. "
+                    "The hotter lower bands show more stringing/soft sag, and 240 C may be a little cool if you care about layer bonding. "
+                    "250 C gives you the safer bond side of that clean range." + image_note
+                ),
+                (
+                    "You should also consider: run a small strength/finish confirmation at 245 C and 250 C, then tune flow and pressure advance. "
+                    "If the part is cosmetic, 245 C may be cleaner; if it is functional, I would start at 250 C."
+                ),
+            ]
+        )
+    fallback = PRINTING_PROFILE_PARAMETER_STARTS.get(material_key, {})
+    baseline = fallback.get("nozzleTemp") or "the middle of the cleanest band"
+    return "\n\n".join(
+        [
+            f"From the temp-tower image, pick the cleanest middle band for {material_name}; if I need a starting point, use {baseline}.",
+            (
+                "This is why: a temperature tower should be judged by stringing, bridge sag, corner sharpness, surface consistency, and whether the low-temperature bands look under-bonded."
+                + image_note
+            ),
+            "You should also consider: after choosing the visual temp, confirm with a small functional print and then tune flow, pressure advance, and max volumetric speed.",
+        ]
+    )
+
+
+ORCA_CALIBRATION_KIND_ALIASES = (
+    (
+        "temperature",
+        (
+            "temperature tower",
+            "temp tower",
+            "best temp",
+            "best temperature",
+            "what temp",
+            "which temp",
+            "nozzle temperature",
+        ),
+    ),
+    (
+        "max-volumetric-speed",
+        (
+            "max volumetric",
+            "volumetric speed",
+            "volumetric flow",
+            "max flow",
+            "flowrate",
+            "flow rate test",
+            "mvs",
+        ),
+    ),
+    (
+        "pressure-advance",
+        (
+            "pressure advance",
+            "adaptive pressure advance",
+            "pa tower",
+            "pa line",
+            "k factor",
+            "k-factor",
+            "linear advance",
+        ),
+    ),
+    (
+        "flow-rate",
+        (
+            "flow rate",
+            "flow ratio",
+            "flow calibration",
+            "extrusion multiplier",
+            "extrusion rate",
+            "over extrusion",
+            "under extrusion",
+        ),
+    ),
+    (
+        "retraction",
+        (
+            "retraction",
+            "stringing",
+            "retract",
+            "ooze",
+            "wisps",
+        ),
+    ),
+    (
+        "cornering",
+        (
+            "cornering",
+            "junction deviation",
+            "jerk",
+            "corner bulge",
+            "corner rounding",
+        ),
+    ),
+    (
+        "input-shaping",
+        (
+            "input shaping",
+            "input shaper",
+            "shaper",
+            "ringing",
+            "ghosting",
+            "resonance tower",
+        ),
+    ),
+    (
+        "vfa-speed",
+        (
+            "vfa",
+            "vertical fine artifact",
+            "vertical fine artifacts",
+            "speed test",
+            "resonance speed",
+            "speed band",
+        ),
+    ),
+    (
+        "tolerance",
+        (
+            "tolerance",
+            "clearance",
+            "fit test",
+            "hole compensation",
+            "xy compensation",
+            "dimensional accuracy",
+        ),
+    ),
+)
+
+
+ORCA_CALIBRATION_VISUAL_GUIDES = {
+    "temperature": {
+        "name": "temperature tower",
+        "pick": "pick the cleanest temperature band that still has strong layer bonding.",
+        "why": "judge the tower by stringing, bridge sag, overhangs, surface consistency, corner sharpness, and whether the cooler bands look under-bonded.",
+        "save": "save the preferred nozzle temperature for this exact printer, nozzle, filament brand, and drying condition.",
+        "consider": "for structural parts, favor the warmer clean band; for cosmetic parts, favor the cooler clean band if bonding is still good.",
+    },
+    "max-volumetric-speed": {
+        "name": "max volumetric speed test",
+        "pick": "pick the highest flow segment just before visible under-extrusion starts, then back off 10-15%.",
+        "why": "the first rough, matte, thin, gapped, or weak-looking section is where the hotend can no longer melt and push that filament reliably.",
+        "save": "save that backed-off value as the filament max volumetric speed.",
+        "consider": "abrasive, filled, wet, or high-temperature filaments usually need a lower ceiling than the same printer can run with PLA.",
+    },
+    "pressure-advance": {
+        "name": "pressure advance test",
+        "pick": "pick the PA/K value where corners and line starts look sharp without corner blobs or gaps.",
+        "why": "too little pressure advance leaves fat corners and end blobs; too much creates thinned corners, gaps, or weak line starts.",
+        "save": "save the PA/K value per printer, extruder, nozzle size, filament, and speed range.",
+        "consider": "if flow is wrong, pressure advance lies to you, so rerun it after flow changes or major temperature changes.",
+    },
+    "flow-rate": {
+        "name": "flow-rate calibration",
+        "pick": "pick the patch with the smoothest top surface: no raised ridges, no plowed edges, and no gaps between lines.",
+        "why": "over-flow shows as ridging and rough top skin; under-flow shows as gaps, weak seams, and thin walls.",
+        "save": "save the resulting flow ratio or extrusion multiplier in the filament profile.",
+        "consider": "run Orca flow pass 1 first, then pass 2 for the fine adjustment if the material needs it.",
+    },
+    "retraction": {
+        "name": "retraction test",
+        "pick": "pick the smallest retraction setting that removes strings without adding blobs, scars, grinding, or jams.",
+        "why": "too little retraction leaves strings and ooze; too much retraction can pull heat-softened filament too far and create defects or reliability problems.",
+        "save": "save retraction length, speed, wipe, and z-hop notes for this toolhead and filament.",
+        "consider": "dry the filament before judging stringing, especially PETG/PCTG, nylon, TPU, and filled materials.",
+    },
+    "cornering": {
+        "name": "cornering calibration",
+        "pick": "pick the jerk or junction-deviation value with square corners, minimal bulge, and no extra ringing after direction changes.",
+        "why": "too aggressive cornering rounds or bulges corners and can excite vibration; too conservative cornering slows prints and may leave inconsistent corner pressure.",
+        "save": "save the cornering/JD/jerk value for the printer motion profile.",
+        "consider": "cornering interacts with acceleration and pressure advance, so do not judge it from one tiny feature alone.",
+    },
+    "input-shaping": {
+        "name": "input-shaping test",
+        "pick": "pick the shaper/frequency result with the least ringing or ghosting while keeping edges crisp.",
+        "why": "input shaping is trying to cancel mechanical vibration; the right result reduces repeated echoes after corners without making details mushy.",
+        "save": "save the shaper type and frequency, then validate with a normal print at real speeds.",
+        "consider": "belt tension, loose hardware, toolhead mass, and bed slop can make the measured result change, so fix mechanics before trusting numbers.",
+    },
+    "vfa-speed": {
+        "name": "VFA speed test",
+        "pick": "pick the speed bands with the least vertical fine artifacts and avoid the bands where repeating vertical texture gets worse.",
+        "why": "VFA is usually speed/resonance related, so the answer is often a clean speed window rather than one universal speed.",
+        "save": "save preferred outer-wall, inner-wall, and top-surface speed bands.",
+        "consider": "use the cleanest speeds for visible walls and reserve rougher-but-fast bands for infill or hidden features.",
+    },
+    "tolerance": {
+        "name": "tolerance calibration",
+        "pick": "pick the smallest clearance that moves or fits reliably without force.",
+        "why": "too-tight tolerance causes stuck parts and undersized holes; too-loose tolerance makes assemblies sloppy.",
+        "save": "save fit clearance, XY compensation, hole compensation, and any material shrink notes.",
+        "consider": "tolerance is part geometry and material dependent, so confirm with the real fastener, bearing, shaft, or printed mating part.",
+    },
+}
+
+
+def classify_orca_calibration_query(messages):
+    query = latest_user_text(messages).lower()
+    if not query:
+        return ""
+    for kind, aliases in ORCA_CALIBRATION_KIND_ALIASES:
+        if text_has_any(query, aliases):
+            return kind
+    if text_has_any(query, ("calibration", "calibrate", "orca", "orcaslicer", "test print")):
+        if text_has_any(query, ("temperature", "temp")):
+            return "temperature"
+        if "flow" in query:
+            return "flow-rate"
+    return ""
+
+
+def is_orca_calibration_image_question(messages):
+    query = latest_user_text(messages).lower()
+    if not query:
+        return False
+    kind = classify_orca_calibration_query(messages)
+    if not kind:
+        return False
+    result_context = image_attachments(messages) or text_has_any(
+        query,
+        (
+            "image",
+            "photo",
+            "picture",
+            "attached",
+            "jpeg",
+            "jpg",
+            "png",
+            "result",
+            "which",
+            "best",
+            "pick",
+            "choose",
+            "read",
+            "analyze",
+            "calibration",
+            "test",
+            "tower",
+        ),
+    )
+    return bool(result_context)
+
+
+def orca_calibration_material_key(query, kind):
+    text = str(query or "").lower()
+    material_key = profile_query_material_key(text)
+    if kind == "pressure-advance" and material_key in {"pa", "nylon"}:
+        explicit_nylon_terms = ("nylon", "polyamide", "pa6", "pa12", "pa612")
+        pressure_advance_pa_terms = (
+            "pa value",
+            "pa tower",
+            "pa line",
+            "pa test",
+            "pa setting",
+            "pa calibration",
+            "pressure advance",
+        )
+        if text_has_any(text, pressure_advance_pa_terms) and not text_has_any(text, explicit_nylon_terms):
+            return ""
+    return material_key
+
+
+def orca_calibration_visual_direct_answer(messages):
+    if not is_orca_calibration_image_question(messages):
+        return ""
+    kind = classify_orca_calibration_query(messages)
+    if kind == "temperature" and is_temperature_tower_image_question(messages):
+        return temperature_tower_visual_direct_answer(messages)
+    guide = ORCA_CALIBRATION_VISUAL_GUIDES.get(kind)
+    if not guide:
+        return ""
+    images = image_attachments(messages)
+    image_note = ""
+    if images:
+        image = images[-1]
+        name = image.get("name") or Path(str(image.get("path") or "")).name or "attached image"
+        image_note = f" I used `{name}` as the visual evidence."
+    material_key = orca_calibration_material_key(latest_user_text(messages), kind)
+    material_note = ""
+    if material_key:
+        material = PRINTING_MATERIAL_LIBRARY.get(material_key, {})
+        material_name = material.get("name") or material_key.upper()
+        material_note = f" For {material_name}, make sure the filament is dry before trusting the result."
+    return "\n\n".join(
+        [
+            f"For this Orca {guide['name']}, {guide['pick']}",
+            f"This is why: {guide['why']}{image_note}{material_note}",
+            f"Save this: {guide['save']}",
+            f"You should also consider: {guide['consider']}",
+        ]
+    )
+
+
 def wants_printing_expert_context(messages):
     text = printing_query_text(messages)
     terms = (
         "3d print", "3d printer", "bambu", "x1c", "h2d", "creality", "k2 plus",
         "qidi", "snapmaker", "rat rig", "ratrig", "sovol", "sv08", "centauri",
-        "filament", "orca", "orcaslicer", "tune", "calibration", "pressure advance",
-        "flow rate", "max volumetric", "btt", "bigtreetech", "ebb42", "klipper",
+        "filament", "pctg", "petg", "pla", "asa", "abs", "temp tower", "temperature tower",
+        "orca", "orcaslicer", "tune", "calibration", "pressure advance",
+        "flow rate", "flow ratio", "max volumetric", "retraction", "stringing",
+        "cornering", "junction deviation", "input shaping", "input shaper",
+        "vfa", "tolerance", "btt", "bigtreetech", "ebb42", "klipper",
     )
     return any(term in text for term in terms)
 
@@ -5928,7 +6306,7 @@ def build_3d_printing_expert_context(messages):
         "3D Printing Expert Pack:",
         f"- Local source vault: {summary['cachedSourceCount']}/{summary['sourceSeedCount']} seeded sources cached at `{summary['vaultPath']}`.",
         "- Use cached manuals/specs first when present. Refresh official/public sources only for current specs, new manuals, prices, availability, firmware changes, or missing cache.",
-        "- For filament tuning in OrcaSlicer, use this order: temperature tower, flow rate pass 1, flow rate pass 2, pressure advance, max volumetric speed, retraction/stringing, VFA/speed.",
+        "- For filament tuning in OrcaSlicer, use this order: temperature, max volumetric speed, pressure advance, flow, retraction, cornering, input shaping, VFA, then tolerance when fit matters.",
         "- Save tuned results per printer, nozzle, filament brand/material, and drying condition; do not treat one printer/nozzle result as universal.",
         "- Platform rule: classify the printer architecture before choosing tools. Bambu/Creality/Snapmaker/ELEGOO appliance workflows are not automatically Klipper. Rat Rig custom and Qidi Plus 4 can be Klipper/Moonraker when local evidence confirms it.",
     ]
@@ -5973,7 +6351,7 @@ def filament_tuning_direct_answer(messages):
     )
     return "\n\n".join(
         [
-            "Tune it in OrcaSlicer in this order: temperature, flow, pressure advance, max volumetric speed, retraction, then VFA/speed.",
+            "Tune it in OrcaSlicer in this order: temperature, max volumetric speed, pressure advance, flow, retraction, cornering, input shaping, VFA, then tolerance when fit matters.",
             f"This is why: each later test depends on the earlier one. If flow is wrong, pressure advance lies to you; if max flow is unknown, speed profiles can silently under-extrude.{profile_line}{material_line}",
             "Orca tuning workflow:\n" + steps,
             "You should also consider: dry the filament before testing, record printer/nozzle/brand/spool condition, and keep separate profiles for abrasive CF materials, enclosed high-temp materials, and flexible TPU.",
@@ -13630,6 +14008,93 @@ def package_health_report():
         add("tools:orca-filament-tuning-coach", "fail", str(exc))
 
     try:
+        tower_messages = [
+            {"role": "assistant", "text": "Fusion 360 script: stale_cad.py\nOpenSCAD model: stale.scad"},
+            {
+                "role": "user",
+                "text": "what is the best temp for this PCTG from this image?",
+                "attachments": [
+                    {
+                        "name": "IMG_4772.jpeg",
+                        "path": str(UPLOAD_DIR / "IMG_4772.jpeg"),
+                        "type": "image/jpeg",
+                        "size": 2800000,
+                    }
+                ],
+            },
+        ]
+        tower_answer = temperature_tower_visual_direct_answer(tower_messages)
+        ok = (
+            is_temperature_tower_image_question(tower_messages)
+            and not is_cad_design_request(tower_messages)
+            and not is_cad_artifact_tool_request(tower_messages)
+            and "PCTG" in tower_answer
+            and "250 C" in tower_answer
+            and "Fusion 360" not in tower_answer
+            and "OpenSCAD" not in tower_answer
+        )
+        add(
+            "tools:temp-tower-image-direct-answer",
+            "pass" if ok else "fail",
+            "PCTG temp-tower image questions answer as filament tuning, not CAD artifacts",
+        )
+    except Exception as exc:
+        add("tools:temp-tower-image-direct-answer", "fail", str(exc))
+
+    try:
+        stale_cad_context = {
+            "role": "assistant",
+            "text": "Fusion 360 script: stale_cad.py\nOpenSCAD model: stale.scad",
+        }
+        calibration_cases = [
+            ("temperature", "Attached is my PLA temp tower image. Which temperature should I use?", "temperature"),
+            ("max-volumetric-speed", "Attached is my Orca max volumetric speed result for PETG. Which value should I choose?", "back off"),
+            ("pressure-advance", "Can you read this pressure advance tower image and tell me the best PA value?", "PA/K"),
+            ("flow-rate", "Can you analyze this Orca flow ratio calibration patch and tell me what to save?", "flow ratio"),
+            ("retraction", "This is my retraction stringing test photo. What setting should I pick?", "retraction"),
+            ("cornering", "Can you read this cornering calibration result and tell me the value to use?", "cornering"),
+            ("input-shaping", "This is my input shaping ringing tower photo. What shaper result should I use?", "shaper"),
+            ("vfa-speed", "Can you analyze this VFA speed test image and pick the clean speed band?", "speed bands"),
+            ("tolerance", "This is my Orca tolerance calibration result. What clearance should I use?", "clearance"),
+        ]
+        failed_cases = []
+        for expected_kind, prompt, expected_text in calibration_cases:
+            messages = [
+                stale_cad_context,
+                {
+                    "role": "user",
+                    "text": prompt,
+                    "attachments": [
+                        {
+                            "name": f"{expected_kind}.jpg",
+                            "path": str(UPLOAD_DIR / f"{expected_kind}.jpg"),
+                            "type": "image/jpeg",
+                            "size": 100000,
+                        }
+                    ],
+                },
+            ]
+            answer = orca_calibration_visual_direct_answer(messages)
+            if not (
+                classify_orca_calibration_query(messages) == expected_kind
+                and is_orca_calibration_image_question(messages)
+                and not is_cad_design_request(messages)
+                and expected_text.lower() in answer.lower()
+                and "Fusion 360" not in answer
+                and "OpenSCAD" not in answer
+            ):
+                failed_cases.append(expected_kind)
+        add(
+            "tools:orca-calibration-result-reader",
+            "pass" if not failed_cases else "fail",
+            "all official Orca calibration result prompts route to 3D printing analysis"
+            if not failed_cases
+            else "failed cases: " + ", ".join(failed_cases),
+        )
+    except Exception as exc:
+        add("tools:orca-calibration-result-reader", "fail", str(exc))
+
+    try:
         profile_answer_06 = filament_profile_parameters_direct_answer(
             [
                 {
@@ -16528,6 +16993,8 @@ class CodexUIHandler(BaseHTTPRequestHandler):
 
         direct_printing_expert_answer = (
             component_manual_direct_answer(messages)
+            or orca_calibration_visual_direct_answer(messages)
+            or temperature_tower_visual_direct_answer(messages)
             or filament_profile_parameters_direct_answer(messages)
             or filament_tuning_direct_answer(messages)
             or printer_profile_direct_answer(messages)
