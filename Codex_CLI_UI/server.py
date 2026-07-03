@@ -952,6 +952,9 @@ GOLDEN_TESTS = [
         "directAnswer": True,
         "directTerms": ["19 mm", "about 19 mm", "15 mm"],
         "requiredTerms": ["this is why", "you should also consider"],
+        "expectedContractKind": "Direct answer",
+        "expectedContractGate": "pass",
+        "requiredContractProof": ["direct answer", "why/caveat"],
         "forbiddenTerms": ["fusion 360 script", "openscad model", "staged", "cad package"],
         "minAnalyticalScore": 82,
         "goal": "Answer the hose-size question directly instead of staging CAD artifacts.",
@@ -968,6 +971,9 @@ GOLDEN_TESTS = [
         "directAnswer": True,
         "directTerms": [".f3d", ".f3z", ".step"],
         "requiredTerms": [".f3d", ".f3z", ".step", "stl"],
+        "expectedContractKind": "CAD reference",
+        "expectedContractGate": "pass",
+        "requiredContractProof": ["direct format recommendation", "why/caveat"],
         "forbiddenTerms": ["fusion 360 script:", "openscad model:", "staged a first-pass"],
         "minAnalyticalScore": 82,
         "goal": "Answer the CAD reference question without creating unrelated artifacts.",
@@ -1117,6 +1123,8 @@ GOLDEN_TESTS = [
         "expectedProjectId": "cad-modeling-projects",
         "expectedEngine": "local",
         "requiredTerms": ["fusion 360", "18", "12-15 cfm", "cfd", "validation"],
+        "expectedContractKind": "CAD/design deliverable",
+        "requiredContractProof": ["clickable CAD/script/readme files", "assumptions", "fit/validation"],
         "anyTerms": ["duct", "plenum", "outlet", "airflow", "artifact"],
         "forbiddenTerms": ["moonraker", "unreachable", "printer status", "qidi plus 4", "nozzle temperature"],
         "minAnalyticalScore": 82,
@@ -1149,6 +1157,9 @@ GOLDEN_TESTS = [
         "expectedProjectId": "cad-modeling-projects",
         "directAnswer": True,
         "requiredTerms": ["did not find a readable stl", "attach the stl", "stopped before generating fake duct geometry"],
+        "expectedContractKind": "STL/CAD deliverable",
+        "expectedContractGate": "pass",
+        "requiredContractProof": ["source STL status", "missing-attachment blocker", "validation limits"],
         "forbiddenTerms": ["i generated an inferred", "duct stl:", "airway stl", "fusion 360 script", "openscad model"],
         "minAnalyticalScore": 82,
         "goal": "If macOS pasted only an STL filename, stop before inventing geometry and ask for the actual file.",
@@ -1166,6 +1177,13 @@ HARD_CASE_GOLDEN_TEST_IDS = {
     "hard-pctg-temp-tower-pa-followup",
     "hard-cpap-duct-design-not-status",
     "hard-cpap-duct-wall-thickness",
+    "hard-stl-filename-missing-attachment",
+}
+
+CONTRACT_GATE_GOLDEN_TEST_IDS = {
+    "hard-cpap-hose-id",
+    "hard-fusion-component-format",
+    "hard-cpap-duct-design-not-status",
     "hard-stl-filename-missing-attachment",
 }
 
@@ -1265,9 +1283,88 @@ DOMAIN_SAMPLE_QUESTION_GROUPS = {
 }
 
 
+FUSION_ORCA_SAMPLE_QUESTION_GROUPS = {
+    "Fusion 360": {
+        "project": "cad-modeling-projects",
+        "questions": (
+            "How do I export a STEP file while keeping component and body names useful?",
+            "How should I set up user parameters for a printed bracket so I can resize it later?",
+            "Why did my Fusion sketch turn under-constrained, and how do I fix it cleanly?",
+            "When should I use joints instead of align or move/copy in an assembly?",
+            "How much clearance should I model between a printed peg and hole for FDM?",
+            "How do I turn an STL mesh into an editable solid without destroying the geometry?",
+            "How should I set the origin and axes before exporting a part for CNC or 3D printing?",
+            "How do I use construction planes to make accurate angled features?",
+            "Why does my loft or sweep twist, fail, or create ugly geometry?",
+            "How do I prepare a modeled part for CAM toolpaths in the Manufacture workspace?",
+            "What are good Fusion 360 practices for fillets and chamfers on 3D printed parts?",
+            "How do I make a drawing with useful dimensions and tolerances from a Fusion model?",
+            "How should I split a body so a large part prints cleanly without support?",
+            "How should I model heat-set inserts, screw bosses, and threaded holes?",
+            "How do I export STL or 3MF with the right units, orientation, and resolution?",
+            "What information do you need from me before making a parametric Fusion 360 script?",
+            "How do I diagnose a timeline feature that broke after I changed an early sketch?",
+            "How should I organize components, bodies, sketches, and construction geometry in a real assembly?",
+            "How do I design snap fits or tabs that will survive repeated use?",
+            "How do I check whether a Fusion model is manufacturable before I print or machine it?",
+        ),
+    },
+    "OrcaSlicer Codex App": {
+        "project": "orcaslicer-codex",
+        "questions": (
+            "How do I fix a missing custom preset after updating Orca Slicer?",
+            "How do I copy a preset safely without overwriting the system profile?",
+            "How do I troubleshoot a printer host mapping that does not persist after restart?",
+            "How do I back up Orca user presets before editing them?",
+            "How do I compare two Orca profiles and find the setting that changed?",
+            "How do I verify the installed app sees a new preset after I add it?",
+            "How do I safely edit OrcaSlicer.conf without the app overwriting it?",
+            "How do I diagnose an Orca printer host mapping that keeps reconnecting or disappearing?",
+        ),
+    },
+    "Orca Profile Workflow": {
+        "project": "tinmanx-slicer-research",
+        "questions": (
+            "How do I tell whether Orca is using the machine profile, filament profile, or process profile for a setting?",
+            "Why does Orca show my filament but not the printer or nozzle I expect?",
+            "What do machine, filament, and process profiles each control when tuning a filament in Orca?",
+            "How do I keep custom printer, filament, and process profiles organized for Orca calibration across machines?",
+            "What should I check when the prepare tab and device tab disagree about printer or filament state?",
+        ),
+    },
+    "Orca Filament Calibration": {
+        "project": "tinmanx-slicer-research",
+        "questions": (
+            "What order should I run Orca filament calibration tests for a brand-new material?",
+            "How do I tune filament flow ratio in Orca without hiding an extrusion problem?",
+            "How do I read a filament temperature tower and choose the best nozzle temperature?",
+            "How do I tune filament pressure advance or K value from an Orca calibration print?",
+            "How do I create a PET-CF filament profile for a 0.6 nozzle on my Qidi Plus 4?",
+            "What filament settings matter most for ASA warping and corner lift in Orca?",
+            "How should I set filament max volumetric speed for a new high-flow material?",
+            "How do I decide filament part cooling for PLA, ABS, ASA, PCTG, and PET-CF?",
+            "How should I set filament retraction for a direct-drive printer in Orca?",
+            "How do I copy a filament profile across machines, nozzle sizes, and material variants?",
+            "How do I tune PET-CF without accidentally using PETG-CF assumptions?",
+            "How do I use shrinkage compensation or XY compensation for dimensionally accurate parts?",
+            "How should I tune supports for easy removal without ruining overhang quality?",
+            "How should I set filament bed, nozzle, and chamber temperatures for nylon or polycarbonate?",
+            "How should I save Orca calibration results per filament profile, material, nozzle size, and speed range?",
+            "How do I diagnose stringing if temperature, retraction, and filament dryness all interact?",
+            "How do I decide whether a bad print is caused by filament settings, process settings, or machine limits?",
+        ),
+    },
+}
+
+
 def domain_sample_test_id(category, index):
     clean = re.sub(r"[^a-z0-9]+", "-", category.lower()).strip("-")
     return f"domain-sample-{clean}-{index:02d}"
+
+
+def fusion_orca_sample_test_id(category, index):
+    clean = re.sub(r"[^a-z0-9]+", "-", category.lower()).strip("-")
+    return f"fusion-orca-sample-{clean}-{index:02d}"
 
 
 def domain_sample_golden_tests():
@@ -1302,6 +1399,48 @@ def domain_sample_golden_tests():
                     "minAnalyticalScore": 74,
                     "goal": "Curated real-world domain sample: route to the right expert lane and answer in Tinman's direct why/consider style.",
                     "source": "domain-sample",
+                }
+            )
+    return tests
+
+
+def fusion_orca_sample_golden_tests():
+    tests = []
+    for category, info in FUSION_ORCA_SAMPLE_QUESTION_GROUPS.items():
+        project_id = info["project"]
+        for index, question in enumerate(info["questions"], 1):
+            prompt = f"{category}: {question}"
+            tests.append(
+                {
+                    "id": fusion_orca_sample_test_id(category, index),
+                    "name": prompt if len(prompt) <= 58 else prompt[:46].rstrip() + " [truncated]",
+                    "group": "Fusion & Orca Samples",
+                    "prompt": prompt,
+                    "profile": "manager",
+                    "managerDepth": "fast",
+                    "webSearch": "disabled",
+                    "expectedProjectId": project_id,
+                    "directAnswer": True,
+                    "directTerms": [],
+                    "requiredTerms": ["this is why", "you should also consider"],
+                    "forbiddenTerms": [
+                        "run failed",
+                        "no final message returned",
+                        "no response",
+                        "load failed",
+                        "recovery plan:",
+                        "printer status",
+                        "fusion 360 script:",
+                        "openscad model:",
+                        "staged a first-pass cad package",
+                        "machine specs only",
+                        "i do not have access",
+                        "i don't have access",
+                        "you can check it yourself",
+                    ],
+                    "minAnalyticalScore": 72,
+                    "goal": "Common Fusion 360 and Orca Slicer sample: route correctly, answer directly, and avoid wrong-tool or file-receipt detours.",
+                    "source": "fusion-orca-sample",
                 }
             )
     return tests
@@ -1425,6 +1564,7 @@ SCENARIO_GOLDEN_TESTS = [
 
 
 GOLDEN_TESTS.extend(domain_sample_golden_tests())
+GOLDEN_TESTS.extend(fusion_orca_sample_golden_tests())
 GOLDEN_TESTS.extend(manufacturing_sample_golden_tests())
 GOLDEN_TESTS.extend(SCENARIO_GOLDEN_TESTS)
 
@@ -1684,6 +1824,19 @@ def hard_case_golden_tests_synthetic_check():
     return True
 
 
+def contract_gate_golden_tests_synthetic_check():
+    by_id = {test.get("id"): test for test in golden_tests()}
+    if not CONTRACT_GATE_GOLDEN_TEST_IDS.issubset(by_id):
+        return False
+    for test_id in CONTRACT_GATE_GOLDEN_TEST_IDS:
+        test = by_id[test_id]
+        if not test.get("expectedContractKind"):
+            return False
+        if not test.get("requiredContractProof"):
+            return False
+    return True
+
+
 def domain_sample_golden_tests_synthetic_check():
     expected_count = sum(len(info["questions"]) for info in DOMAIN_SAMPLE_QUESTION_GROUPS.values())
     tests = [test for test in golden_tests() if test.get("source") == "domain-sample"]
@@ -1702,6 +1855,35 @@ def domain_sample_golden_tests_synthetic_check():
         if "this is why" not in test.get("requiredTerms", []):
             return False
     return True
+
+
+def fusion_orca_sample_golden_tests_synthetic_check():
+    expected_count = sum(len(info["questions"]) for info in FUSION_ORCA_SAMPLE_QUESTION_GROUPS.values())
+    tests = [test for test in golden_tests() if test.get("source") == "fusion-orca-sample"]
+    if len(tests) != expected_count:
+        return False
+    seen = {category: 0 for category in FUSION_ORCA_SAMPLE_QUESTION_GROUPS}
+    for test in tests:
+        prompt = str(test.get("prompt") or "")
+        category = prompt.split(":", 1)[0]
+        info = FUSION_ORCA_SAMPLE_QUESTION_GROUPS.get(category)
+        if not info:
+            return False
+        seen[category] += 1
+        route = route_manager(
+            [{"role": "user", "text": prompt}],
+            requested_profile="manager",
+            web_search="disabled",
+        )
+        if route.get("projectId") != info.get("project"):
+            return False
+        if test.get("group") != "Fusion & Orca Samples":
+            return False
+        if "this is why" not in test.get("requiredTerms", []):
+            return False
+        if "you should also consider" not in test.get("requiredTerms", []):
+            return False
+    return all(seen[category] == len(info["questions"]) for category, info in FUSION_ORCA_SAMPLE_QUESTION_GROUPS.items())
 
 
 def manufacturing_sample_golden_tests_synthetic_check():
@@ -5547,6 +5729,7 @@ def build_analytical_context(messages, route=None, web_search="live", local_tool
         return ""
     profile = detected_domain_profile(messages, route or {})
     core = analytical_core_profile(messages, route or {}, web_search=web_search, local_tools=local_tools)
+    contract = task_contract(messages, route or {})
     decision = core.get("decisionFrame") or {}
     lines = [
         "Analytical operating system:",
@@ -5569,7 +5752,18 @@ def build_analytical_context(messages, route=None, web_search="live", local_tool
         f"- Analytical mode: {core.get('mode')} ({core.get('complexity')} complexity, {core.get('riskLevel')} risk).",
         f"- Actual objective: {core.get('objective')}.",
         f"- Done means: {core.get('doneMeans')}.",
+        "",
+        "Task contract gate:",
+        f"- Task type: {contract.get('kind')}.",
+        f"- Done means: {contract.get('doneMeans')}.",
     ]
+    if contract.get("mustDo"):
+        lines.append(f"- Must do before final: {', '.join(contract.get('mustDo')[:8])}.")
+    if contract.get("requiredProof"):
+        lines.append(f"- Required proof: {', '.join(contract.get('requiredProof')[:8])}.")
+    if contract.get("rejectIf"):
+        lines.append(f"- Reject the answer if: {', '.join(contract.get('rejectIf')[:8])}.")
+    lines.append("")
     if core.get("explicitConstraints"):
         lines.append(f"- Explicit constraints to preserve: {', '.join(core.get('explicitConstraints')[:8])}.")
     if decision.get("criteria"):
@@ -5889,8 +6083,10 @@ def build_direct_answer_context(messages, route):
         "what is",
         "what are",
         "what is the best",
+        "what information",
         "what file",
         "what format",
+        "what do",
         "best all around",
         "best first step",
         "can you tell me",
@@ -5898,9 +6094,15 @@ def build_direct_answer_context(messages, route):
         "how much",
         "how many",
         "which",
+        "how do i",
+        "how should i",
         "how do i stop",
         "what action should",
         "what should i do",
+        "when should i",
+        "why does",
+        "why did",
+        "why is",
         "do you know",
     )
     if not any(trigger in lower for trigger in direct_triggers):
@@ -6818,7 +7020,89 @@ def is_filament_profile_pull_request(messages):
     text = query.lower()
     if not query or not text_has_any(text, PROFILE_PULL_TERMS):
         return False
+    if text_has_any(text, ("fusion 360", "fusion", "cad", "sketch", "user parameter", "user parameters")) and not text_has_any(
+        text,
+        (
+            "orca",
+            "orcaslicer",
+            "tinmanx",
+            "tinmanx1",
+            "filament profile",
+            "process profile",
+            "machine profile",
+            "printer profile",
+            "current profile",
+            "current settings",
+            "pull",
+        ),
+    ):
+        return False
     if text_has_any(text, PROFILE_CREATION_TERMS) and not text_has_any(text, PROFILE_PULL_INTENT_TERMS):
+        return False
+    specific_profile_target = bool(
+        matching_printer_profiles(text)
+        or matching_materials(text)
+        or text_has_any(
+            text,
+            (
+                "qidi",
+                "bambu",
+                "creality",
+                "sovol",
+                "rat rig",
+                "ratrig",
+                "snapmaker",
+                "centauri",
+                "x1c",
+                "h2d",
+                "k2 plus",
+                "plus 4",
+                "sv08",
+            ),
+        )
+    )
+    strong_pull_intent = text_has_any(
+        text,
+        (
+            "pull",
+            "current",
+            "existing",
+            "actual local",
+            "local slicer profile",
+            "profile data",
+            "read the profile",
+            "show me the profile",
+        ),
+    )
+    explicit_specific_parameters = specific_profile_target and text_has_any(
+        text,
+        (
+            "filament profile parameters",
+            "filament profile settings",
+            "filament settings",
+            "profile parameters",
+            "profile settings",
+        ),
+    )
+    conceptual_profile_question = text_has_any(
+        text,
+        (
+            "how do i tell whether",
+            "how do i decide whether",
+            "what do machine",
+            "what do filament",
+            "what do process",
+            "what controls",
+            "which profile controls",
+            "what settings matter",
+            "settings matter most",
+            "what filament settings matter",
+            "bad print is caused by",
+        ),
+    )
+    if conceptual_profile_question and not strong_pull_intent:
+        return False
+    if not specific_profile_target and not strong_pull_intent and not explicit_specific_parameters:
         return False
     profile_context = (
         "orca",
@@ -7218,7 +7502,7 @@ def slicer_profile_roots():
         ("TinManX1 user app profile library", home / "Applications/TinManX1.app/Contents/Resources/profiles", 106),
         ("OrcaSlicer", home / "Library/Application Support/OrcaSlicer/user", 95),
         ("Desktop 3D Printing profiles", home / "Desktop/3D Printing", 85),
-        ("Generated Orca profiles", home / "Applications/generated_orca_profiles", 75),
+        ("Generated Orca profiles", home / "Applications" / "generated_orca_profiles", 75),
         ("PrusaSlicer", home / "Library/Application Support/PrusaSlicer", 45),
     ]
 
@@ -10722,6 +11006,10 @@ def local_tool_catalog():
             "check": "POST /api/tools/autonomy-supervisor",
             "description": "Check whether a draft answer needs help, web evidence, tools, artifacts, or a hard-boundary question before finalizing.",
         },
+        "taskContractGate": {
+            "check": "POST /api/tools/task-contract",
+            "description": "Classify what done means for a request, list required proof/reject conditions, and optionally score a draft answer against the contract.",
+        },
         "klipperConfigDiscovery": {
             "list": "GET /api/tools/klipper-configs?hint=qidi",
             "legacyList": "GET /api/tools/printer-configs?hint=ratrig",
@@ -10762,6 +11050,7 @@ def build_local_tools_context():
             "- To install a free allowlisted missing tool, call `POST http://127.0.0.1:8765/api/tools/install-free-tool` with JSON like `{\"tool\":\"jq\",\"reason\":\"parse printer API JSON\"}`.",
             "- To recover from a failure, call `POST http://127.0.0.1:8765/api/tools/recover` with the original messages, cwd, and error text. Use its recovery status before giving up.",
             "- To check whether a draft answer needs help before finalizing, call `POST http://127.0.0.1:8765/api/tools/autonomy-supervisor` with the messages, route, answerText, cwd, and webSearch.",
+            "- To define done before acting or to grade a draft against done, call `POST http://127.0.0.1:8765/api/tools/task-contract` with messages, route, optional answerText, and webSearch.",
             "- To classify a hard task or score a draft answer, call `POST http://127.0.0.1:8765/api/tools/analytical-core` with messages, route, answerText, and webSearch. Use it to fix wrong-objective, missing-constraint, no-decision, no-validation, and weak-evidence failures.",
             "- If the install response says `needsApproval`, ask Tinman before downloading. Do this for storage pressure, large installs, unknown tools, or anything not confirmed free.",
             "- After a successful install, retry the original task instead of stopping at `command not found`.",
@@ -18339,6 +18628,15 @@ def package_health_report():
         add("response:examples-library", "fail", str(exc))
 
     try:
+        add(
+            "response:task-contract-gate",
+            "pass" if task_contract_gate_synthetic_check() else "fail",
+            "blocks fake hard-task completion, accepts honest blockers, and requires source/artifact proof",
+        )
+    except Exception as exc:
+        add("response:task-contract-gate", "fail", str(exc))
+
+    try:
         LOCAL_CAD_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="health-package-", dir=str(LOCAL_CAD_OUTPUT_DIR)) as tmp_dir:
             package_messages = [
@@ -18427,6 +18725,15 @@ def package_health_report():
         add("analysis:hard-case-golden-tests", "fail", str(exc))
 
     try:
+        add(
+            "analysis:contract-gate-golden-tests",
+            "pass" if contract_gate_golden_tests_synthetic_check() else "fail",
+            f"{len(CONTRACT_GATE_GOLDEN_TEST_IDS)} contract-aware golden tests installed",
+        )
+    except Exception as exc:
+        add("analysis:contract-gate-golden-tests", "fail", str(exc))
+
+    try:
         domain_count = sum(len(info["questions"]) for info in DOMAIN_SAMPLE_QUESTION_GROUPS.values())
         add(
             "analysis:domain-sample-golden-tests",
@@ -18435,6 +18742,16 @@ def package_health_report():
         )
     except Exception as exc:
         add("analysis:domain-sample-golden-tests", "fail", str(exc))
+
+    try:
+        fusion_orca_count = sum(len(info["questions"]) for info in FUSION_ORCA_SAMPLE_QUESTION_GROUPS.values())
+        add(
+            "analysis:fusion-orca-sample-golden-tests",
+            "pass" if fusion_orca_sample_golden_tests_synthetic_check() else "fail",
+            f"{fusion_orca_count} Fusion 360 and Orca Slicer guardrails installed",
+        )
+    except Exception as exc:
+        add("analysis:fusion-orca-sample-golden-tests", "fail", str(exc))
 
     try:
         manufacturing_count = len(load_manufacturing_question_bank())
@@ -18678,6 +18995,9 @@ def normalize_direct_answer_shape(messages, route, text):
     replacements = (
         (r"(?i)\bwhy it fits\s*:", "This is why:"),
         (r"(?i)\bwhy this fits\s*:", "This is why:"),
+        (r"(?i)\bwhy this happens\s*:", "This is why:"),
+        (r"(?i)\bwhy this matters\s*:", "This is why:"),
+        (r"(?i)\bwhy it matters\s*:", "This is why:"),
         (r"(?i)\bwhy it works\s*:", "This is why:"),
         (r"(?i)(?<!this is )\bwhy\s*:", "This is why:"),
         (r"(?i)(?<!should )\balso consider\s*:", "You should also consider:"),
@@ -18817,43 +19137,91 @@ def task_contract(messages, route=None):
     route_engine = route.get("engine", "")
     kind = "General help"
     done = "Answer the actual question in plain language and include the useful next step."
+    must_do = ["answer the actual request"]
+    required_proof = ["plain-language final answer"]
+    reject_if = ["answers a different question", "uses the wrong domain/tool family", "claims work that did not happen"]
+    hard_gate = False
     if is_cad_reference_question(messages):
         kind = "CAD reference"
         done = "Give the format/spec answer directly; do not create CAD artifacts."
+        must_do = ["answer the CAD/export reference directly", "avoid unrelated file generation"]
+        required_proof = ["direct format recommendation", "why/caveat explanation"]
+        reject_if.append("stages Fusion/OpenSCAD artifacts for a reference question")
     elif is_engineering_diagram_request(messages):
         kind = "Engineering diagram"
         done = "Create editable block/wiring diagram artifacts, label paths, list assumptions, and flag missing ratings or code-sensitive details."
+        must_do = ["create editable diagram artifacts", "label power/signal/safety paths", "flag missing ratings"]
+        required_proof = ["clickable diagram/report files", "assumption or rule-check ledger"]
+        reject_if.extend(["only describes a diagram in prose", "omits safety/protection paths"])
+        hard_gate = True
     elif is_stl_cfd_duct_design_request(messages):
         kind = "STL/CAD deliverable"
         done = "Find or confirm the STL, generate usable design artifacts, list clickable paths, and state validation limits."
+        must_do = ["confirm the actual STL is readable", "inspect mesh/ports before geometry", "generate or honestly block artifacts"]
+        required_proof = ["source STL status", "clickable CAD/CFD files or explicit missing-attachment blocker", "validation limits"]
+        reject_if.extend(["invents duct geometry without the STL", "claims CFD solved when only preflight ran"])
+        hard_gate = True
     elif is_aero_cfd_analysis_request(messages):
         kind = "Aero/CFD preflight"
         done = "Resolve geometry, inspect mesh readiness, stage OpenFOAM-ready analysis files, and clearly separate preflight from solved CFD."
+        must_do = ["resolve geometry", "stage solver/preflight files", "separate preflight from solved CFD"]
+        required_proof = ["geometry status", "OpenFOAM/solver-case files", "validation limits"]
+        reject_if.extend(["claims CFD results without a solver run", "omits boundary-condition assumptions"])
+        hard_gate = True
     elif is_structural_mechanical_design_request(messages):
         kind = "Mechanical/structural preflight"
         done = "Identify loads, constraints, material/process assumptions, failure modes, and stage CalculiX-ready files without claiming final strength."
+        must_do = ["identify loads/constraints/material", "stage or run FEA preflight", "state failure modes and safety factor basis"]
+        required_proof = ["load/material assumptions", "FEA/report files or explicit missing-geometry blocker", "validation limits"]
+        reject_if.extend(["claims strength without load/material proof", "omits safety-factor basis"])
+        hard_gate = True
     elif is_cad_design_request(messages) or is_cad_artifact_tool_request(messages):
         kind = "CAD/design deliverable"
         done = "Create or specify importable CAD artifacts, explain design choices, list assumptions, and state validation status."
+        must_do = ["produce or specify importable CAD artifacts", "preserve dimensional constraints", "state validation status"]
+        required_proof = ["clickable CAD/script/readme files", "assumptions", "fit/validation caveats"]
+        reject_if.extend(["only gives a file receipt", "omits geometry reasoning", "claims validation without checks"])
+        hard_gate = True
     elif is_read_only_printer_status_query(messages):
         kind = "Printer status"
         done = "Report current read-only status from the configured endpoint or say exactly why it is unreachable."
+        must_do = ["use read-only status path", "identify the configured endpoint or unreachable blocker"]
+        required_proof = ["endpoint/status wording", "no generic no-access fallback"]
+        reject_if.extend(["tells Tinman to check it himself", "uses generic OctoPrint advice for a configured printer"])
     elif route_engine in {"local-research", "openai"} or wants_research_quality_context(messages) or wants_web_context(messages):
         kind = "Research"
         done = "Use current evidence, make a clear recommendation, reject weak matches, and cite source URLs."
+        must_do = ["use current/source-backed evidence", "make a clear recommendation", "reject weak matches"]
+        required_proof = ["source URL", "operating-point or spec caveat"]
+        reject_if.extend(["claims current price/spec without a source", "accepts nominal labels without checking the target requirement"])
     elif text_has_any(query, ("write code", "python", "javascript", "c++", "cpp", "klipper", "gcode", "macro", "script", "config")):
         kind = "Code/config"
         done = "Produce the code/config, validate syntax when possible, and explain where to save or run it."
+        must_do = ["produce the code/config", "validate syntax or explain why validation cannot run"]
+        required_proof = ["code/config output", "quality-gate or syntax-check note"]
+        reject_if.extend(["returns only advice when code was requested", "claims validation without running or naming the check"])
+        hard_gate = True
     elif text_has_any(query, ("create", "make", "build", "save", "write", "upload", "find the folder", "local folder")):
         kind = "File/action"
         done = "Perform the local action when safe, list changed/created files, and verify the result."
+        must_do = ["perform the safe local action or state the blocker", "list changed/created files"]
+        required_proof = ["file path or blocker", "verification note"]
+        reject_if.extend(["claims a file was saved without a path", "changes a live machine without verified standby"])
+        hard_gate = True
     elif text_has_any(query, ("what is", "which", "what file", "can you tell", "best", "?")):
         kind = "Direct answer"
         done = "Answer first, then explain why and what to consider."
+        must_do = ["answer in the first paragraph", "include why and what to consider when useful"]
+        required_proof = ["direct answer", "why/caveat shape"]
+        reject_if.extend(["starts with a recovery plan", "buries the answer"])
     style = response_role_style(route)
     return {
         "kind": kind,
         "doneMeans": done,
+        "mustDo": must_do,
+        "requiredProof": required_proof,
+        "rejectIf": reject_if[:10],
+        "hardGate": hard_gate,
         "role": style["title"],
         "projectId": route.get("projectId", "general"),
         "engine": route.get("engine", "local"),
@@ -18939,17 +19307,212 @@ def extract_assumption_ledger(messages, route, answer, contract=None):
     return ledger
 
 
+def answer_has_honest_blocker(answer):
+    lower = str(answer or "").lower()
+    blocker_terms = (
+        "did not find",
+        "could not find",
+        "not attached",
+        "attach the",
+        "unreachable",
+        "offline",
+        "blocked",
+        "cannot complete",
+        "can't complete",
+        "need the actual",
+        "missing",
+    )
+    return any(term in lower for term in blocker_terms)
+
+
+def answer_claims_solved_cfd(answer):
+    lower = str(answer or "").lower()
+    if text_has_any(lower, ("no full cfd", "no cfd solver", "not a completed cfd", "not solved cfd", "cfd preflight")):
+        return False
+    return bool(re.search(r"\b(cfd|openfoam|su2)\b[^.\n]{0,80}\b(ran|solved|completed|finished|validated|converged)\b", lower))
+
+
+def answer_claims_final_strength(answer):
+    lower = str(answer or "").lower()
+    if text_has_any(lower, ("preflight", "not final", "not validated", "before final use", "validation limits")):
+        return False
+    return bool(re.search(r"\b(strong enough|will hold|safe to use|passes|validated)\b", lower))
+
+
+def answer_claims_generated_cad_geometry(answer):
+    raw = str(answer or "")
+    lower = raw.lower()
+    geometry_labels = (
+        "fusion 360 script:",
+        "openscad model:",
+        "editable scad:",
+        "duct stl:",
+        "airway stl:",
+        "i generated an inferred",
+        "i made the first-pass cad",
+        "i staged a first-pass cad",
+        "i prepared a first-pass cad",
+    )
+    if any(label in lower for label in geometry_labels):
+        return True
+    if text_has_any(lower, ("paths checked:", "preflight folder:")) and text_has_any(
+        lower,
+        ("did not find", "not attached", "attach the stl", "missing"),
+    ):
+        return False
+    return bool(
+        re.search(
+            r"/(?:Users|Applications|Volumes|private/tmp|tmp|var/folders)/[^\n`'\"<>]+"
+            r"(?:_fusion360\.py|\.scad|\.stl|\.step|\.stp)",
+            raw,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def task_contract_gate(messages, route, answer, contract=None, deliverables=None, assumptions=None, web_search="live"):
+    text = str(answer or "")
+    lower = text.lower()
+    contract = contract or task_contract(messages, route or {})
+    kind = contract.get("kind") or "General help"
+    deliverables = deliverables if deliverables is not None else extract_response_deliverables(text)
+    assumptions = assumptions if assumptions is not None else extract_assumption_ledger(messages, route or {}, text, contract)
+    blocker = answer_has_honest_blocker(text)
+    checks = []
+
+    def add(label, passed, detail="", severity="medium"):
+        checks.append(
+            {
+                "label": label,
+                "passed": bool(passed),
+                "detail": compact(detail, 200),
+                "severity": severity,
+            }
+        )
+
+    first = next((part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()), "")
+    hard_kinds = {
+        "CAD/design deliverable",
+        "STL/CAD deliverable",
+        "Aero/CFD preflight",
+        "Mechanical/structural preflight",
+        "Engineering diagram",
+        "File/action",
+        "Code/config",
+    }
+
+    add("Objective match", bool(first) and not first.lower().startswith(("recovery plan", "working notes")), "Answer starts with the requested outcome, not internal process.")
+
+    if kind in {"Direct answer", "CAD reference", "Printer status"}:
+        add(
+            "Direct answer shape",
+            "this is why:" in lower and "you should also consider:" in lower,
+            "Direct questions need answer/why/consider unless the user asked for a terse command output.",
+        )
+
+    if kind in hard_kinds:
+        deliverable_or_blocker = bool(deliverables) or blocker
+        add(
+            "Required artifact/action proof",
+            deliverable_or_blocker,
+            "Hard tasks need clickable outputs or an explicit blocker before final.",
+            "hard",
+        )
+
+    if kind in {"CAD/design deliverable", "STL/CAD deliverable", "Aero/CFD preflight", "Mechanical/structural preflight", "Engineering diagram"}:
+        add(
+            "Assumptions and validation",
+            bool(assumptions) or blocker,
+            "Engineering tasks need assumptions, limits, validation, or a clear blocker.",
+            "hard",
+        )
+
+    if kind == "STL/CAD deliverable":
+        fake_geometry = answer_claims_generated_cad_geometry(text) and text_has_any(
+            lower,
+            ("did not find a readable stl", "attach the stl", "not attached"),
+        )
+        add(
+            "No fake STL geometry",
+            not fake_geometry,
+            "Do not generate CAD geometry when the STL is missing.",
+            "hard",
+        )
+
+    if kind == "Research" and web_search == "live":
+        add(
+            "Source evidence",
+            answer_has_source_url(text),
+            "Research/current/spec/price answers need source URLs.",
+            "hard",
+        )
+
+    if kind == "CAD reference":
+        add(
+            "No artifact detour",
+            not answer_has_cad_artifact(text),
+            "Reference questions should not stage CAD files.",
+            "hard",
+        )
+
+    if kind == "Aero/CFD preflight":
+        add(
+            "No false CFD claim",
+            not answer_claims_solved_cfd(text) or bool(deliverables),
+            "Only claim solved CFD when solver output/report files are present.",
+            "hard",
+        )
+
+    if kind == "Mechanical/structural preflight":
+        has_strength_basis = text_has_any(lower, ("safety factor", "calculix", "load", "constraint", "stress", "deflection", "not final"))
+        add(
+            "Strength basis",
+            (not answer_claims_final_strength(text)) or has_strength_basis,
+            "Strength claims need load/material/safety-factor basis.",
+            "hard",
+        )
+
+    if kind == "Code/config":
+        add(
+            "Validation named",
+            text_has_any(lower, ("validated", "syntax", "quality-gate", "py_compile", "node --check", "klipper", "not run")),
+            "Code/config answers should name validation or why it could not run.",
+            "medium",
+        )
+
+    failed = [check for check in checks if not check.get("passed")]
+    hard_failed = [check for check in failed if check.get("severity") == "hard" or contract.get("hardGate")]
+    status = "block" if hard_failed else "review" if failed else "pass"
+    return {
+        "status": status,
+        "checks": checks,
+        "failed": failed,
+        "requiredProof": contract.get("requiredProof", []),
+        "rejectIf": contract.get("rejectIf", []),
+    }
+
+
 def response_scorecard(messages, route, answer, contract=None, deliverables=None, assumptions=None):
     text = str(answer or "").strip()
     lower = text.lower()
     contract = contract or task_contract(messages, route)
     deliverables = deliverables if deliverables is not None else extract_response_deliverables(text)
     assumptions = assumptions if assumptions is not None else extract_assumption_ledger(messages, route, text, contract)
+    gate = task_contract_gate(messages, route or {}, text, contract, deliverables, assumptions)
     first = next((part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()), "")
     checks = []
 
     def add(label, passed, detail=""):
         checks.append({"label": label, "passed": bool(passed), "detail": compact(detail, 180)})
+
+    def add_gate(check):
+        checks.append(
+            {
+                "label": f"Contract: {check.get('label')}",
+                "passed": bool(check.get("passed")),
+                "detail": compact(check.get("detail", ""), 180),
+            }
+        )
 
     add(
         "Answer first",
@@ -18979,8 +19542,11 @@ def response_scorecard(messages, route, answer, contract=None, deliverables=None
         analytical.get("score", 0) >= 82,
         "Answer should solve the actual problem, preserve constraints, use the right evidence/tools, and include a decision path.",
     )
+    for check in gate.get("checks", []):
+        add_gate(check)
     score = int(round(100 * sum(1 for check in checks if check["passed"]) / max(1, len(checks))))
-    return {"score": score, "status": "pass" if score >= 80 else "review", "checks": checks}
+    status = "review" if gate.get("status") == "block" else "pass" if score >= 80 and gate.get("status") == "pass" else "review"
+    return {"score": score, "status": status, "checks": checks, "contractGate": gate}
 
 
 def response_coach_answer(messages, route, answer):
@@ -19002,6 +19568,8 @@ def response_package(messages, route, answer):
     assumptions = extract_assumption_ledger(messages, route or {}, coached, contract)
     scorecard = response_scorecard(messages, route or {}, coached, contract, deliverables, assumptions)
     analytical = analytical_answer_score(messages, route or {}, coached)
+    gate = scorecard.get("contractGate") or task_contract_gate(messages, route or {}, coached, contract, deliverables, assumptions)
+    contract = {**contract, "gateStatus": gate.get("status"), "gateFailures": gate.get("failed", [])[:6]}
     return {
         "text": coached,
         "taskContract": contract,
@@ -19009,8 +19577,83 @@ def response_package(messages, route, answer):
         "deliverables": deliverables,
         "assumptions": assumptions,
         "scorecard": scorecard,
+        "contractGate": gate,
         "analyticalCore": analytical,
     }
+
+
+def task_contract_gate_synthetic_check():
+    cad_messages = [{"role": "user", "text": "Design a CPAP cooling duct in CAD for Fusion 360 with an 18mm inlet."}]
+    cad_route = {"projectId": "cad-modeling-projects", "engine": "local"}
+    fake_cad = task_contract_gate(cad_messages, cad_route, "I staged a CAD package for it.", web_search="disabled")
+
+    reference_messages = [{"role": "user", "text": "what file type from fusion preserves component names?"}]
+    reference_route = {"projectId": "cad-modeling-projects", "engine": "local"}
+    wrong_reference = task_contract_gate(
+        reference_messages,
+        reference_route,
+        "Fusion 360 script: `/Users/example/generated/fusion360.py`\nOpenSCAD model: `/Users/example/generated/model.scad`",
+        web_search="disabled",
+    )
+
+    missing_stl_messages = [
+        {
+            "role": "user",
+            "text": "missing-test.stl I need a CPAP duct designed from the attached STL with 1.5mm clearance.",
+        }
+    ]
+    missing_stl = task_contract_gate(
+        missing_stl_messages,
+        cad_route,
+        "I did not find a readable STL. Attach the STL file and I will inspect the mesh before generating duct geometry.",
+        web_search="disabled",
+    )
+
+    research_messages = [{"role": "user", "text": "Search the web for a 300 RPM wind generator under $500."}]
+    research_route = {"projectId": "energy-power-research", "engine": "local-research"}
+    sourceless = task_contract_gate(
+        research_messages,
+        research_route,
+        "Best pick is a 96V permanent magnet generator under $500.",
+        web_search="live",
+    )
+
+    good_cad = task_contract_gate(
+        cad_messages,
+        cad_route,
+        "Fusion 360 script: `/Users/example/generated/duct_fusion360.py`\n\nThis is why: the model preserves the 18mm inlet and keeps validation limits explicit.\n\nYou should also consider: no full CFD was run.",
+        deliverables=[{"path": "/Users/example/generated/duct_fusion360.py", "exists": True}],
+        assumptions=[{"kind": "Validation", "text": "No full CFD was run.", "status": "limited"}],
+        web_search="disabled",
+    )
+
+    return (
+        fake_cad.get("status") == "block"
+        and wrong_reference.get("status") == "block"
+        and missing_stl.get("status") == "pass"
+        and sourceless.get("status") == "block"
+        and good_cad.get("status") == "pass"
+    )
+
+
+def format_contract_gate_blocker(messages, route, answer, contract, gate):
+    failures = gate.get("failed", []) if isinstance(gate, dict) else []
+    missing = ", ".join(check.get("label", "required proof") for check in failures[:4]) or "required proof"
+    must_do = ", ".join((contract or {}).get("mustDo", [])[:3]) or "complete the required tool/evidence path"
+    proof = ", ".join((contract or {}).get("requiredProof", [])[:3]) or "verifiable output"
+    return "\n\n".join(
+        [
+            "I’m not going to call this done yet, Tinman.",
+            (
+                f"This is why: the task contract is `{(contract or {}).get('kind', 'unknown')}` and done means "
+                f"{(contract or {}).get('doneMeans', 'the requested work is complete')}. The draft is missing: {missing}."
+            ),
+            (
+                f"You should also consider: the next pass needs to {must_do}. Required proof before final answer: {proof}. "
+                "I can keep working through that path instead of giving you a polished but incomplete answer."
+            ),
+        ]
+    )
 
 
 def emit_assistant_answer(handler, messages, route, admin_topic, text, normalize=True):
@@ -19030,6 +19673,7 @@ def emit_assistant_answer(handler, messages, route, admin_topic, text, normalize
             "deliverables": package["deliverables"],
             "assumptions": package["assumptions"],
             "scorecard": package["scorecard"],
+            "contractGate": package["contractGate"],
             "analyticalCore": package["analyticalCore"],
         },
     )
@@ -19087,6 +19731,13 @@ def supervise_answer_before_emit(
         except Exception as exc:
             if emit:
                 emit(f"Analytical Core correction pass failed, keeping the best available answer: {compact(exc, 120)}")
+    contract = task_contract(messages, route or {})
+    package = response_package(messages, route or {}, recovered or answer)
+    gate = package.get("contractGate") or {}
+    if gate.get("status") == "block":
+        if emit:
+            emit("Task Contract Gate blocked the draft from being marked complete.")
+        return format_contract_gate_blocker(messages, route or {}, recovered or answer, contract, gate)
     return recovered or answer
 
 
@@ -19985,6 +20636,42 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             profile = analytical_core_profile(messages, route, web_search=web_search, local_tools=True)
             score = analytical_answer_score(messages, route, answer_text, web_search=web_search) if answer_text else None
             self.send_json({"ok": True, "profile": profile, "score": score, "route": route})
+            return
+
+        if parsed.path == "/api/tools/task-contract":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self.send_error(400, "Invalid JSON")
+                return
+            messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+            if not messages:
+                prompt = str(payload.get("prompt") or payload.get("text") or "").strip()
+                if prompt:
+                    messages = [{"role": "user", "text": prompt}]
+            web_search = safe_choice(payload.get("webSearch") or "live", WEB_SEARCH_LEVELS, "live")
+            route = payload.get("route") if isinstance(payload.get("route"), dict) else route_manager(
+                messages,
+                requested_profile="manager",
+                web_search=web_search,
+            )
+            answer_text = payload.get("answerText") or payload.get("answer") or ""
+            contract = task_contract(messages, route)
+            gate = None
+            package = None
+            if answer_text:
+                package = response_package(messages, route, answer_text)
+                gate = package.get("contractGate")
+            self.send_json(
+                {
+                    "ok": True,
+                    "route": route,
+                    "contract": contract,
+                    "gate": gate,
+                    "scorecard": (package or {}).get("scorecard"),
+                }
+            )
             return
 
         if parsed.path == "/api/tools/quality-gate":

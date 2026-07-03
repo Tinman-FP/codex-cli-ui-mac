@@ -151,6 +151,9 @@ def run_test(server, test, args):
         "route": {},
         "answer": "",
         "analyticalCore": {},
+        "taskContract": {},
+        "contractGate": {},
+        "scorecard": {},
         "returnCode": None,
         "thoughts": [],
         "warnings": [],
@@ -163,6 +166,9 @@ def run_test(server, test, args):
         elif event_type == "assistant":
             run["answer"] = event.get("text") or ""
             run["analyticalCore"] = event.get("analyticalCore") or {}
+            run["taskContract"] = event.get("taskContract") or {}
+            run["contractGate"] = event.get("contractGate") or {}
+            run["scorecard"] = event.get("scorecard") or {}
         elif event_type == "thought":
             run["thoughts"].append(event.get("text") or "")
         elif event_type in {"warning", "error"}:
@@ -177,6 +183,9 @@ def evaluate_test(test, run):
     answer = str(run.get("answer") or "").strip()
     lower = answer.lower()
     route = run.get("route") or {}
+    task_contract = run.get("taskContract") or {}
+    contract_gate = run.get("contractGate") or {}
+    scorecard = run.get("scorecard") or {}
     checks = []
 
     def add(label, passed, detail=""):
@@ -221,6 +230,25 @@ def evaluate_test(test, run):
     if test.get("minAnalyticalScore"):
         score = float((run.get("analyticalCore") or {}).get("score") or 0)
         add("analytical", score >= float(test["minAnalyticalScore"]), f"score {score}")
+    if test.get("expectedContractKind"):
+        add(
+            "contract-kind",
+            task_contract.get("kind") == test["expectedContractKind"],
+            f"expected {test['expectedContractKind']}; got {task_contract.get('kind') or 'none'}",
+        )
+    if test.get("expectedContractGate"):
+        add(
+            "contract-gate",
+            contract_gate.get("status") == test["expectedContractGate"],
+            f"expected {test['expectedContractGate']}; got {contract_gate.get('status') or 'none'}",
+        )
+    if test.get("requiredContractProof"):
+        proof_text = " ".join(str(item) for item in (task_contract.get("requiredProof") or [])).lower()
+        missing = [term for term in test["requiredContractProof"] if term.lower() not in proof_text]
+        add("contract-proof", not missing, "missing: " + ", ".join(missing) if missing else "contract proof terms found")
+    if test.get("minScorecard"):
+        score = float(scorecard.get("score") or 0)
+        add("scorecard", score >= float(test["minScorecard"]), f"score {score}")
     return checks
 
 
@@ -262,6 +290,9 @@ def main():
             "durationMs": run.get("durationMs"),
             "route": run.get("route"),
             "analyticalCore": run.get("analyticalCore"),
+            "taskContract": run.get("taskContract"),
+            "contractGate": run.get("contractGate"),
+            "scorecard": run.get("scorecard"),
             "answerPreview": str(run.get("answer") or "")[:1200],
             "warnings": run.get("warnings"),
         }

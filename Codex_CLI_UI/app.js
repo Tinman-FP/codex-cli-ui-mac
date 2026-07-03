@@ -1357,6 +1357,7 @@ function buildResponsePackagePanel(message) {
   const deliverables = responsePackageItems(message, "deliverables");
   const assumptions = responsePackageItems(message, "assumptions");
   const contract = message.taskContract || null;
+  const contractGate = message.contractGate || message.scorecard?.contractGate || null;
   const roleStyle = message.roleStyle || null;
   const scorecard = message.scorecard || null;
   if (!deliverables.length && !assumptions.length && !contract && !roleStyle && !scorecard) return null;
@@ -1407,10 +1408,13 @@ function buildResponsePackagePanel(message) {
     const summary = document.createElement("summary");
     const summaryTitle = document.createElement("span");
     summaryTitle.className = "answer-check-title";
-    summaryTitle.textContent = "Answer check";
+    summaryTitle.textContent = "Task contract";
     const score = document.createElement("span");
     score.className = `score-pill ${scorecard?.status || "pass"}`;
-    score.textContent = Number.isFinite(scorecard?.score) ? `${scorecard.score}%` : "Ready";
+    const gateText = contractGate?.status ? `${contractGate.status}` : "";
+    score.textContent = Number.isFinite(scorecard?.score)
+      ? `${scorecard.score}%${gateText ? ` · ${gateText}` : ""}`
+      : gateText || "Ready";
     summary.append(summaryTitle, score);
     details.appendChild(summary);
 
@@ -1419,6 +1423,16 @@ function buildResponsePackagePanel(message) {
       grid.className = "answer-check-grid";
       if (contract?.kind) grid.appendChild(buildAnswerCheckFact("Task", contract.kind));
       if (contract?.doneMeans) grid.appendChild(buildAnswerCheckFact("Done means", contract.doneMeans));
+      if (Array.isArray(contract?.mustDo) && contract.mustDo.length) {
+        grid.appendChild(buildAnswerCheckFact("Must do", contract.mustDo.join(", ")));
+      }
+      if (Array.isArray(contract?.requiredProof) && contract.requiredProof.length) {
+        grid.appendChild(buildAnswerCheckFact("Required proof", contract.requiredProof.join(", ")));
+      }
+      if (Array.isArray(contract?.rejectIf) && contract.rejectIf.length) {
+        grid.appendChild(buildAnswerCheckFact("Reject if", contract.rejectIf.slice(0, 4).join(", ")));
+      }
+      if (contractGate?.status) grid.appendChild(buildAnswerCheckFact("Gate", contractGate.status));
       if (contract?.role || roleStyle?.title) grid.appendChild(buildAnswerCheckFact("Role", contract?.role || roleStyle.title));
       if (roleStyle?.voice) grid.appendChild(buildAnswerCheckFact("Voice", roleStyle.voice));
       if (Array.isArray(roleStyle?.checklist) && roleStyle.checklist.length) {
@@ -3042,6 +3056,7 @@ async function runDeeperAnalysis(kind = "auto") {
     pending.deliverables = Array.isArray(payload.deliverables) ? payload.deliverables : [];
     pending.assumptions = Array.isArray(payload.assumptions) ? payload.assumptions : [];
     pending.scorecard = payload.scorecard || null;
+    pending.contractGate = payload.contractGate || null;
     pending.thoughts = Array.isArray(payload.thoughts) && payload.thoughts.length
       ? payload.thoughts
       : pending.thoughts;
@@ -3213,6 +3228,9 @@ async function runGoldenTest(test, signal) {
     warnings: [],
     logs: [],
     analyticalCore: null,
+    taskContract: null,
+    contractGate: null,
+    scorecard: null,
   };
   const response = await fetch("/api/run", {
     method: "POST",
@@ -3243,6 +3261,9 @@ async function runGoldenTest(test, signal) {
     if (event.type === "assistant") {
       run.answer = event.text || "";
       run.analyticalCore = event.analyticalCore || null;
+      run.taskContract = event.taskContract || null;
+      run.contractGate = event.contractGate || null;
+      run.scorecard = event.scorecard || null;
     }
     if (event.type === "thought") run.thoughts.push(event.text || "");
     if (event.type === "warning" || event.type === "error") run.warnings.push(event.text || event.type);
@@ -3277,6 +3298,9 @@ function evaluateGoldenTest(test, run) {
   const answer = String(run.answer || "").trim();
   const lower = answer.toLowerCase();
   const route = run.route || {};
+  const taskContract = run.taskContract || {};
+  const contractGate = run.contractGate || {};
+  const scorecard = run.scorecard || {};
   const checks = [];
 
   checks.push({
@@ -3365,6 +3389,41 @@ function evaluateGoldenTest(test, run) {
     });
   }
 
+  if (test.expectedContractKind) {
+    checks.push({
+      label: "contract-kind",
+      passed: taskContract.kind === test.expectedContractKind,
+      detail: `Expected ${test.expectedContractKind}; got ${taskContract.kind || "none"}.`,
+    });
+  }
+
+  if (test.expectedContractGate) {
+    checks.push({
+      label: "contract-gate",
+      passed: contractGate.status === test.expectedContractGate,
+      detail: `Expected ${test.expectedContractGate}; got ${contractGate.status || "none"}.`,
+    });
+  }
+
+  if (test.requiredContractProof?.length) {
+    const proofText = (taskContract.requiredProof || []).join(" ").toLowerCase();
+    const missing = test.requiredContractProof.filter((term) => !proofText.includes(term.toLowerCase()));
+    checks.push({
+      label: "contract-proof",
+      passed: missing.length === 0,
+      detail: missing.length ? `Missing: ${missing.join(", ")}` : "Contract proof terms found.",
+    });
+  }
+
+  if (test.minScorecard) {
+    const score = Number(scorecard.score || 0);
+    checks.push({
+      label: "scorecard",
+      passed: score >= Number(test.minScorecard),
+      detail: `Expected response scorecard >= ${test.minScorecard}; got ${score || "none"}.`,
+    });
+  }
+
   const passed = checks.every((check) => check.passed);
   return {
     status: passed ? "pass" : "fail",
@@ -3374,6 +3433,9 @@ function evaluateGoldenTest(test, run) {
     route,
     returnCode: run.returnCode,
     analyticalCore: run.analyticalCore,
+    taskContract: run.taskContract,
+    contractGate: run.contractGate,
+    scorecard: run.scorecard,
     thoughts: run.thoughts,
     warnings: run.warnings,
   };
@@ -3396,6 +3458,7 @@ function handleEvent(event, pending) {
     pending.deliverables = Array.isArray(event.deliverables) ? event.deliverables : [];
     pending.assumptions = Array.isArray(event.assumptions) ? event.assumptions : [];
     pending.scorecard = event.scorecard || null;
+    pending.contractGate = event.contractGate || null;
     renderMessages();
     return;
   }

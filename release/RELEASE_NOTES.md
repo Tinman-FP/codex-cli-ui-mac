@@ -14,6 +14,9 @@ Unzip it, then open the included DMG or double-click `install/Install Codex CLI 
 
 ## Fixed
 
+- Task Contract Gate now blocks hard-task answers from being marked complete unless required proof, artifacts, source evidence, or an honest blocker are present.
+- Fusion 360 user-parameter questions no longer get mistaken for Orca pressure-advance or slicer-profile pulls.
+- Conceptual Orca filament/profile questions now answer the workflow directly instead of dumping unrelated local profile data.
 - Printer/material/component knowledge questions now answer directly instead of falling into generic CAD, Moonraker, or printer-status fallbacks.
 - Package health now catches 3D-printing expert-pack, Orca tuning, and printer-profile regressions before release.
 - CAD and CNC knowledge questions now route to manufacturing expertise instead of generic CAD artifact staging.
@@ -22,6 +25,8 @@ Unzip it, then open the included DMG or double-click `install/Install Codex CLI 
 
 ## Added
 
+- Public 50-question Fusion & Orca Samples golden-test bank covering Fusion 360 CAD/CAM workflows, OrcaSlicer Codex app/preset repair, Orca profile workflow, and Orca filament calibration.
+- Task Contract Gate API and scorecard fields for defining done, required proof, reject conditions, and gate status on responses.
 - Public 100-question Manufacturing Samples golden-test bank: 50 CAD questions and 50 CNC machining questions.
 - TinmanX1/Polymaker/Fiberon workflow scenario covering test-bank import, Steer/Edit UI, self-healing, GitHub release, and zip packaging behavior.
 - `Edit question` message action for user prompts. It reloads the question into the composer and reruns from that point.
