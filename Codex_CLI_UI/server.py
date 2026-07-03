@@ -87,6 +87,7 @@ DEFAULT_OPENAI_MODEL = os.environ.get("OPENAI_RESEARCH_MODEL", "gpt-5.5")
 LOCAL_RESEARCH_MODEL = os.environ.get("LOCAL_RESEARCH_MODEL", "gpt-oss-20b")
 LOCAL_CODER_MODEL = os.environ.get("LOCAL_CODER_MODEL", "qwen2.5-coder-7b")
 LOCAL_REVIEW_MODEL = os.environ.get("LOCAL_REVIEW_MODEL", "deepseek-r1-8b")
+LOCAL_DEEP_REVIEW_MODEL = os.environ.get("LOCAL_DEEP_REVIEW_MODEL", "qwen3.6:27b")
 MANAGER_POLISH_MODEL = os.environ.get("MANAGER_POLISH_MODEL", LOCAL_RESEARCH_MODEL)
 FREE_ONLY = os.environ.get("CODEX_FREE_ONLY", "1").strip().lower() not in {
     "0",
@@ -115,6 +116,7 @@ PROFILE_LEVELS = {
     "local-oss",
     "local-coder",
     "local-review",
+    "local-deep-review",
     "local-research",
     "research-apply",
     "cloud-research",
@@ -127,7 +129,7 @@ CODEX_PROFILE_MODELS = {
 CLOUD_PROFILES = {"cloud-research"}
 LOCAL_RESEARCH_PROFILES = {"local-research"}
 RESEARCH_APPLY_PROFILES = {"research-apply"}
-LOCAL_REVIEW_PROFILES = {"local-review"}
+LOCAL_REVIEW_PROFILES = {"local-review", "local-deep-review"}
 MANAGER_PROFILES = {"manager"}
 WEB_SEARCH_LEVELS = {"live", "disabled"}
 MANAGER_DEPTH_LEVELS = {"fast", "balanced", "full"}
@@ -2410,7 +2412,7 @@ def is_fast_mode(profile, reasoning_level):
 def default_reasoning_for_profile(profile):
     if profile == "local-fast":
         return "low"
-    if profile in {"local-review", "local-research", "research-apply", "cloud-research"}:
+    if profile in (LOCAL_REVIEW_PROFILES | {"local-research", "research-apply", "cloud-research"}):
         return "high"
     return DEFAULT_REASONING_LEVEL
 
@@ -17844,8 +17846,14 @@ def run_ollama_generate(
             data = json.loads(response.read().decode("utf-8"))
     except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
         return {"error": f"Ollama local model request failed: {exc}"}
-    text = str(data.get("response", "")).strip()
+    text = strip_thinking_markup(data.get("response", ""))
     if not text:
+        thinking_len = len(str(data.get("thinking") or ""))
+        if thinking_len:
+            reason = "Ollama returned hidden reasoning but no final response."
+            if str(data.get("done_reason") or "") == "length":
+                reason += " The model used the output budget before producing a final answer; retry with a larger num_predict budget."
+            return {"error": reason}
         return {"error": "Ollama returned no final response. The local model may need a larger output budget or a restart."}
     return {"text": text}
 
@@ -17946,7 +17954,7 @@ def warm_ollama_model(model):
         return {"ok": False, "error": f"Ollama warmup failed: {exc}"}
     return {
         "ok": bool(data.get("done", True)),
-        "text": str(data.get("response") or data.get("thinking") or "").strip(),
+        "text": strip_thinking_markup(data.get("response") or data.get("thinking") or ""),
         "doneReason": data.get("done_reason", ""),
     }
 
@@ -17996,6 +18004,7 @@ def ollama_model_alias_audit():
         LOCAL_RESEARCH_MODEL,
         LOCAL_CODER_MODEL,
         LOCAL_REVIEW_MODEL,
+        LOCAL_DEEP_REVIEW_MODEL,
         MANAGER_POLISH_MODEL,
         *CODEX_PROFILE_MODELS.values(),
     }
@@ -18141,6 +18150,30 @@ def package_health_report():
         )
     except Exception as exc:
         add("tools:reasoning-pack", "fail", str(exc))
+
+    try:
+        add(
+            "quality:thinking-output-sanitizer",
+            "pass" if thinking_output_sanitizer_synthetic_check() else "fail",
+            "removes hidden-reasoning markup, Qwen-style thinking blocks, and terminal control codes",
+        )
+    except Exception as exc:
+        add("quality:thinking-output-sanitizer", "fail", str(exc))
+
+    try:
+        ok = (
+            "local-deep-review" in PROFILE_LEVELS
+            and "local-deep-review" in LOCAL_REVIEW_PROFILES
+            and local_review_model_for_profile("local-deep-review") == LOCAL_DEEP_REVIEW_MODEL
+            and LOCAL_DEEP_REVIEW_MODEL
+        )
+        add(
+            "tools:deep-review-profile",
+            "pass" if ok else "fail",
+            f"Deep Review uses {LOCAL_DEEP_REVIEW_MODEL}",
+        )
+    except Exception as exc:
+        add("tools:deep-review-profile", "fail", str(exc))
 
     try:
         add(
@@ -19561,7 +19594,15 @@ def package_health_report():
         f"{health.get('modelCount', 0)} model tags, {health.get('loadedCount', 0)} loaded",
     )
     available_names = [model.get("name", "") for model in health.get("models", [])]
-    for model in sorted({LOCAL_RESEARCH_MODEL, LOCAL_CODER_MODEL, LOCAL_REVIEW_MODEL, *CODEX_PROFILE_MODELS.values()}):
+    for model in sorted(
+        {
+            LOCAL_RESEARCH_MODEL,
+            LOCAL_CODER_MODEL,
+            LOCAL_REVIEW_MODEL,
+            LOCAL_DEEP_REVIEW_MODEL,
+            *CODEX_PROFILE_MODELS.values(),
+        }
+    ):
         add(
             f"ollama:model:{model}",
             "pass" if model_available(model, available_names) else "fail",
@@ -19664,6 +19705,8 @@ def package_health_report():
 def fallback_model_for_profile(profile):
     if profile == "local-coder":
         return LOCAL_CODER_MODEL
+    if profile == "local-deep-review":
+        return LOCAL_DEEP_REVIEW_MODEL
     if profile == "local-review":
         return LOCAL_REVIEW_MODEL
     return LOCAL_RESEARCH_MODEL
@@ -19806,8 +19849,61 @@ def local_review_prompt(messages, route, friendliness_level=None, humor_level=No
     return "\n".join(blocks).strip()
 
 
+def strip_terminal_control_sequences(text):
+    clean = str(text or "")
+    clean = re.sub(
+        r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))",
+        "",
+        clean,
+    )
+    clean = clean.replace("\r", "\n")
+    while "\b" in clean:
+        next_clean = re.sub(r".\x08", "", clean)
+        if next_clean == clean:
+            clean = clean.replace("\b", "")
+            break
+        clean = next_clean
+    return clean
+
+
 def strip_thinking_markup(text):
-    return re.sub(r"(?is)<think>.*?</think>", "", str(text or "")).strip()
+    clean = strip_terminal_control_sequences(text)
+    clean = re.sub(r"(?is)<think\b[^>]*>.*?</think\s*>", "", clean)
+    clean = re.sub(
+        r"(?is)(?:^|\n)[^\w\n]{0,24}\s*Thinking\s*\.\.\.\s*.*?\.\.\.\s*done thinking\.?\s*",
+        "\n",
+        clean,
+    )
+    clean = re.sub(r"(?im)^\s*(?:thinking|done thinking)\.?\s*$", "", clean)
+    clean = re.sub(r"\n{3,}", "\n\n", clean)
+    return clean.strip()
+
+
+def thinking_output_sanitizer_synthetic_check():
+    samples = [
+        (
+            "<think>work Tinman should not see</think>\nFinal answer.",
+            ("Final answer.",),
+            ("<think>", "work Tinman should not see"),
+        ),
+        (
+            "\x1b[?25lThinking...\nI should reason privately.\n...done thinking.\n\nUse the smoother duct path first.",
+            ("Use the smoother duct path first.",),
+            ("Thinking", "done thinking", "reason privately", "\x1b"),
+        ),
+        (
+            "\n  Thinking...\ninternal checklist\n...done thinking.\n\nBest answer: 250 C.",
+            ("Best answer: 250 C.",),
+            ("internal checklist", "Thinking"),
+        ),
+    ]
+    for raw, required_terms, forbidden_terms in samples:
+        clean = strip_thinking_markup(raw)
+        if not all(term in clean for term in required_terms):
+            return False
+        if any(term in clean for term in forbidden_terms):
+            return False
+    return True
 
 
 def normalize_direct_answer_shape(messages, route, text):
@@ -20776,28 +20872,37 @@ def supervise_answer_before_emit(
     return recovered or answer
 
 
+def local_review_model_for_profile(profile=None):
+    if profile == "local-deep-review":
+        return LOCAL_DEEP_REVIEW_MODEL
+    return LOCAL_REVIEW_MODEL
+
+
 def run_local_review(
     messages,
     route,
     emit=None,
     num_predict=1800,
+    model=None,
+    timeout=240,
     friendliness_level=None,
     humor_level=None,
 ):
     prompt = local_review_prompt(messages, route, friendliness_level, humor_level)
     if not prompt:
         return {"error": "Review needs a user request or answer to inspect."}
+    selected_model = model or LOCAL_REVIEW_MODEL
     if emit:
-        emit(f"Asking local `{LOCAL_REVIEW_MODEL}` for a second pass.")
+        emit(f"Asking local `{selected_model}` for a second pass.")
     result = run_ollama_generate(
         prompt,
-        model=LOCAL_REVIEW_MODEL,
-        timeout=240,
+        model=selected_model,
+        timeout=timeout,
         num_predict=num_predict,
         num_ctx=12000,
     )
     if result.get("text"):
-        return {"text": strip_thinking_markup(result["text"]), "model": LOCAL_REVIEW_MODEL}
+        return {"text": strip_thinking_markup(result["text"]), "model": selected_model}
     return result
 
 
@@ -21001,7 +21106,13 @@ def run_manager_review_and_polish(
             emit("Manager speed is Fast; skipping review and polish for this run.")
         return {"text": primary_answer, "review": "", "polished": False}
 
-    review_predict = 1100 if manager_depth == "balanced" else 1800
+    review_model = LOCAL_REVIEW_MODEL
+    review_timeout = 240
+    review_predict = 1100
+    if manager_depth == "full":
+        review_model = LOCAL_DEEP_REVIEW_MODEL
+        review_timeout = 420
+        review_predict = 4200
     polish_predict = 1500 if manager_depth == "balanced" else 2200
 
     review_messages = list(messages) + [{"role": "assistant", "text": primary_answer}]
@@ -21014,6 +21125,8 @@ def run_manager_review_and_polish(
             route,
             emit=emit,
             num_predict=review_predict,
+            model=review_model,
+            timeout=review_timeout,
             friendliness_level=friendliness_level,
             humor_level=humor_level,
         )
@@ -21457,6 +21570,7 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                     "localResearchModel": LOCAL_RESEARCH_MODEL,
                     "localCoderModel": LOCAL_CODER_MODEL,
                     "localReviewModel": LOCAL_REVIEW_MODEL,
+                    "localDeepReviewModel": LOCAL_DEEP_REVIEW_MODEL,
                     "managerPolishModel": MANAGER_POLISH_MODEL,
                     "freeOnly": FREE_ONLY,
                     "localResearchCache": str(LOCAL_RESEARCH_CACHE_PATH),
@@ -21518,6 +21632,14 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                             "reasoningLevel": "high",
                             "model": LOCAL_REVIEW_MODEL,
                             "description": "Free local DeepSeek R1 reviewer through direct Ollama for second opinions.",
+                        },
+                        {
+                            "id": "local-deep-review",
+                            "label": "Deep Review",
+                            "engine": "local-review",
+                            "reasoningLevel": "high",
+                            "model": LOCAL_DEEP_REVIEW_MODEL,
+                            "description": "Slow free local Qwen deep reviewer for hard analytical second opinions.",
                         },
                         {
                             "id": "local-research",
@@ -23122,6 +23244,9 @@ class CodexUIHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
         if effective_profile in LOCAL_REVIEW_PROFILES:
+            review_model = local_review_model_for_profile(effective_profile)
+            review_predict = 4200 if effective_profile == "local-deep-review" else 1800
+            review_timeout = 420 if effective_profile == "local-deep-review" else 240
             json_line(
                 self,
                 {
@@ -23138,7 +23263,7 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                     "humorLevel": humor_level,
                     "mode": "local-review",
                     "engine": "local-review",
-                    "model": LOCAL_REVIEW_MODEL,
+                    "model": review_model,
                     "freeOnlyRedirect": free_only_redirect,
                     "route": route,
                     "adminTopic": admin_topic,
@@ -23160,6 +23285,9 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                     messages,
                     route,
                     emit=emit_local_review,
+                    num_predict=review_predict,
+                    model=review_model,
+                    timeout=review_timeout,
                     friendliness_level=friendliness_level,
                     humor_level=humor_level,
                 )

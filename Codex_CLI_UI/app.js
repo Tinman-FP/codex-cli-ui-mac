@@ -2225,7 +2225,7 @@ function switchMonitorStage(stage) {
 
 function trackMonitorThought(text) {
   const lower = String(text || "").toLowerCase();
-  if (lower.includes("review pass") || lower.includes("deepseek-r1")) {
+  if (lower.includes("review pass") || lower.includes("deepseek-r1") || lower.includes("qwen3.6")) {
     if (monitor.activeStage !== "review") switchMonitorStage("review");
   } else if (lower.includes("polishing the final answer") || lower.includes("polish")) {
     if (monitor.activeStage !== "polish") switchMonitorStage("polish");
