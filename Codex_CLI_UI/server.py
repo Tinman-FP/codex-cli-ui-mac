@@ -915,6 +915,44 @@ GOLDEN_TESTS = [
         "goal": "Treat temp tower images as filament tuning, not CAD or generic chat.",
     },
     {
+        "id": "hard-pctg-temp-tower-pa-followup",
+        "name": "Temp Tower PA Follow-Up",
+        "group": "Hard Cases",
+        "prompt": "Based on the 245 section of the print, how does the pressure advance look?",
+        "messages": [
+            {
+                "role": "user",
+                "text": "IMG_4772.jpeg What is the best temp for this PCTG based on the image?",
+                "attachments": [
+                    {
+                        "name": "IMG_4772.jpeg",
+                        "path": str(UPLOAD_DIR / "IMG_4772.jpeg"),
+                        "type": "image/jpeg",
+                        "size": 2800000,
+                    }
+                ],
+            },
+            {
+                "role": "assistant",
+                "text": "Best pick from this PCTG temp tower: start at 250 C.",
+            },
+            {
+                "role": "user",
+                "text": "Based on the 245 section of the print, how does the pressure advance look?",
+            },
+        ],
+        "profile": "manager",
+        "managerDepth": "fast",
+        "webSearch": "disabled",
+        "expectedProjectId": "tinmanx-slicer-research",
+        "directAnswer": True,
+        "directTerms": ["pressure advance looks close", "touch low"],
+        "requiredTerms": ["245 c section", "temp tower is a weak pa diagnostic", "this is why", "you should also consider"],
+        "forbiddenTerms": ["pa/k value where corners", "fusion 360", "cad package", "machine specs"],
+        "minAnalyticalScore": 82,
+        "goal": "Use the prior temp-tower image context for PA follow-ups instead of returning generic PA calibration advice.",
+    },
+    {
         "id": "hard-cpap-duct-design-not-status",
         "name": "CPAP Duct Design Not Status",
         "group": "Hard Cases",
@@ -968,6 +1006,7 @@ HARD_CASE_GOLDEN_TEST_IDS = {
     "hard-marlin-diagnostic",
     "hard-orca-filament-profile",
     "hard-pctg-temp-tower-image",
+    "hard-pctg-temp-tower-pa-followup",
     "hard-cpap-duct-design-not-status",
     "hard-cpap-duct-wall-thickness",
     "hard-stl-filename-missing-attachment",
@@ -6784,7 +6823,7 @@ def temperature_tower_pressure_advance_direct_answer(messages):
         image_note = f" I used `{name}` as the same temp-tower image context."
     return "\n\n".join(
         [
-            f"Based on {section_label}, pressure advance looks close, maybe a touch low. I would not make a big PA change from this tower alone.",
+            f"My recommendation: based on {section_label}, pressure advance looks close, maybe a touch low. I would not make a big PA change from this tower alone.",
             (
                 "This is why: the corners/text and the right circular feature look a little rounded or puffy, not thin or gapped. "
                 "That points more toward slightly under-advanced PA than over-advanced PA, but a temp tower is a weak PA diagnostic because it is mainly testing temperature, stringing, bridges, and layer bonding."

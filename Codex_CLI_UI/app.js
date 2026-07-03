@@ -1131,7 +1131,7 @@ function renderTestBench() {
 
     const prompt = document.createElement("p");
     prompt.className = "test-prompt";
-    prompt.textContent = test.prompt;
+    prompt.textContent = testPromptText(test);
 
     const goal = document.createElement("div");
     goal.className = "test-goal";
@@ -3140,6 +3140,28 @@ function allGoldenTests() {
   return config.goldenTests || [];
 }
 
+function testMessages(test) {
+  if (Array.isArray(test?.messages) && test.messages.length) {
+    return test.messages
+      .filter((message) => message && typeof message === "object")
+      .map((message) => ({
+        ...message,
+        role: message.role || "user",
+        text: String(message.text || ""),
+      }));
+  }
+  return [{ role: "user", text: String(test?.prompt || "") }];
+}
+
+function testPromptText(test) {
+  const messages = testMessages(test);
+  if (messages.length <= 1) return String(test?.prompt || messages[0]?.text || "");
+  return messages
+    .map((message) => `${message.role || "user"}: ${String(message.text || "").trim()}`)
+    .filter(Boolean)
+    .join("\n");
+}
+
 async function runGoldenTest(test, signal) {
   const run = {
     answer: "",
@@ -3165,7 +3187,7 @@ async function runGoldenTest(test, signal) {
       webSearch: test.webSearch || "disabled",
       testRun: true,
       benchmarkRun: Boolean(test.benchmarkRun),
-      messages: [{ role: "user", text: test.prompt }],
+      messages: testMessages(test),
     }),
     signal,
   });
