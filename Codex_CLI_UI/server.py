@@ -2645,6 +2645,9 @@ def is_cad_design_request(messages):
         or is_temperature_tower_image_question(messages)
     ):
         return False
+    latest = latest_user_text(messages).lower()
+    if is_direct_factual_question_without_artifact_action(latest):
+        return False
     text = "\n".join(
         str(message.get("text", ""))
         for message in messages[-6:]
@@ -2952,6 +2955,44 @@ def load_stable_knowledge():
 def text_has_any(text, terms):
     lower = str(text or "").lower()
     return any(term in lower for term in terms)
+
+
+DIRECT_FACTUAL_QUESTION_TERMS = (
+    "what is",
+    "what are",
+    "which",
+    "what file",
+    "what format",
+    "how much",
+    "how many",
+    "can you tell me",
+    "do you know",
+)
+ARTIFACT_ACTION_TERMS = (
+    "design",
+    "designed",
+    "create",
+    "make",
+    "build",
+    "model",
+    "generate",
+    "draw",
+    "draft",
+    "save",
+    "write",
+    "stage",
+    "import",
+    "imported",
+    "export",
+)
+
+
+def is_direct_factual_question_without_artifact_action(text):
+    lower = str(text or "").lower().strip()
+    if not lower:
+        return False
+    question_like = lower.endswith("?") or text_has_any(lower, DIRECT_FACTUAL_QUESTION_TERMS)
+    return bool(question_like and not text_has_any(lower, ARTIFACT_ACTION_TERMS))
 
 
 def latest_query_lower(messages):
@@ -16210,6 +16251,35 @@ def package_health_report():
         )
     except Exception as exc:
         add("tools:fusion-export-reference-direct", "fail", str(exc))
+
+    try:
+        factual_messages = [
+            {
+                "role": "user",
+                "text": "What is the wall thickness I should use for a 3D printed CPAP duct?",
+            }
+        ]
+        design_messages = [
+            {
+                "role": "user",
+                "text": "Design a 3D printed CPAP duct in CAD that can be imported into Fusion 360.",
+            }
+        ]
+        ok = (
+            is_direct_factual_question_without_artifact_action(latest_user_text(factual_messages))
+            and not is_cad_design_request(factual_messages)
+            and not is_cad_artifact_tool_request(factual_messages)
+            and not is_direct_factual_question_without_artifact_action(latest_user_text(design_messages))
+            and is_cad_design_request(design_messages)
+            and is_cad_artifact_tool_request(design_messages)
+        )
+        add(
+            "routing:direct-cad-question-veto",
+            "pass" if ok else "fail",
+            "factual CAD-ish questions answer directly while real design requests still stage artifacts",
+        )
+    except Exception as exc:
+        add("routing:direct-cad-question-veto", "fail", str(exc))
 
     try:
         research_messages = [
