@@ -37,6 +37,10 @@ const els = {
   benchmarkSummaryGrid: document.getElementById("benchmarkSummaryGrid"),
   benchmarkList: document.getElementById("benchmarkList"),
   packageHealthList: document.getElementById("packageHealthList"),
+  engineeringAdminGrid: document.getElementById("engineeringAdminGrid"),
+  refreshPrintingPackButton: document.getElementById("refreshPrintingPackButton"),
+  printingPackSummaryGrid: document.getElementById("printingPackSummaryGrid"),
+  printingPackList: document.getElementById("printingPackList"),
   improvementSummaryGrid: document.getElementById("improvementSummaryGrid"),
   improvementList: document.getElementById("improvementList"),
   selfHealingSummaryGrid: document.getElementById("selfHealingSummaryGrid"),
@@ -52,6 +56,16 @@ const els = {
   attachButton: document.getElementById("attachButton"),
   fileInput: document.getElementById("fileInput"),
   attachmentTray: document.getElementById("attachmentTray"),
+  engineeringStrip: document.getElementById("engineeringStrip"),
+  aeroPackStatus: document.getElementById("aeroPackStatus"),
+  aeroPackText: document.getElementById("aeroPackText"),
+  structuralPackStatus: document.getElementById("structuralPackStatus"),
+  structuralPackText: document.getElementById("structuralPackText"),
+  toolPackStatus: document.getElementById("toolPackStatus"),
+  toolPackText: document.getElementById("toolPackText"),
+  runDeeperButton: document.getElementById("runDeeperButton"),
+  runAeroButton: document.getElementById("runAeroButton"),
+  runStructuralButton: document.getElementById("runStructuralButton"),
   modeSelect: document.getElementById("modeSelect"),
   managerDepthSelect: document.getElementById("managerDepthSelect"),
   accessSelect: document.getElementById("accessSelect"),
@@ -110,6 +124,7 @@ let config = {
 };
 let activeController = null;
 let pendingAttachments = [];
+let composerIntent = { kind: "", messageId: "" };
 const testBench = {
   running: false,
   activeId: "",
@@ -219,6 +234,9 @@ function setRunning(isRunning) {
   els.sendButton.disabled = isRunning;
   els.attachButton.disabled = isRunning;
   els.fileInput.disabled = isRunning;
+  if (els.runDeeperButton) els.runDeeperButton.disabled = isRunning;
+  if (els.runAeroButton) els.runAeroButton.disabled = isRunning;
+  if (els.runStructuralButton) els.runStructuralButton.disabled = isRunning;
   els.promptInput.disabled = isRunning;
   els.newThreadButton.disabled = isRunning;
   els.adminNavButton.disabled = isRunning;
@@ -237,6 +255,7 @@ function setRunning(isRunning) {
   if (els.runBenchmarkButton) els.runBenchmarkButton.disabled = isRunning;
   if (els.packageHealthButton) els.packageHealthButton.disabled = isRunning;
   if (els.selfHealButton) els.selfHealButton.disabled = isRunning;
+  if (els.refreshPrintingPackButton) els.refreshPrintingPackButton.disabled = isRunning;
   if (isRunning) {
     els.runState.textContent = "Running";
     els.runState.className = "run-state warning";
@@ -268,6 +287,7 @@ function render() {
   renderSidebarMode();
   renderMessages();
   renderAttachmentTray();
+  renderEngineeringStatus();
   renderRunControls();
   renderLogs();
   renderMonitorSummary();
@@ -395,6 +415,8 @@ function renderAdmin() {
   renderAdminNav(projects);
   renderBenchmarkPanel();
   renderPackageHealth();
+  renderEngineeringAdmin();
+  renderPrintingExpertPack(admin.printingExpertPack || {});
   renderImprovementLab(improvement);
   renderSelfHealing(selfHealing);
   renderAdminProjectTree(projects);
@@ -507,6 +529,187 @@ function renderPackageHealth() {
     detail.textContent = check.detail || "";
     row.append(label, status, detail);
     els.packageHealthList.appendChild(row);
+  });
+}
+
+const ENGINEERING_PACKS = {
+  aero: {
+    label: "Aero Analysis",
+    action: "Aero",
+    toolIds: ["openvsp", "xfoil", "su2", "docker-openfoam", "gmsh", "paraview", "python-aero-stack", "qblade-linux"],
+  },
+  structural: {
+    label: "Structural FEA",
+    action: "FEA",
+    toolIds: ["calculix", "gmsh", "freecad", "paraview", "openscad"],
+  },
+};
+
+function capabilityTools() {
+  return Array.isArray(config.capabilityManager?.tools) ? config.capabilityManager.tools : [];
+}
+
+function capabilityById(id) {
+  return capabilityTools().find((tool) => tool.id === id) || null;
+}
+
+function engineeringPackState(pack) {
+  const tools = (pack.toolIds || []).map((id) => capabilityById(id)).filter(Boolean);
+  const installed = tools.filter((tool) => tool.installed).length;
+  const total = pack.toolIds.length || tools.length || 1;
+  const missing = (pack.toolIds || [])
+    .map((id) => capabilityById(id) || { id, label: id, installed: false })
+    .filter((tool) => !tool.installed);
+  const state = installed === total ? "ready" : installed ? "partial" : "missing";
+  return { state, installed, total, missing, tools };
+}
+
+function shortPackText(status) {
+  if (status.state === "ready") return "Ready";
+  if (status.state === "partial") return `${status.installed}/${status.total}`;
+  return "Missing";
+}
+
+function setPackChip(element, textElement, status) {
+  if (!element || !textElement) return;
+  element.classList.remove("ready", "partial", "missing");
+  element.classList.add(status.state);
+  textElement.textContent = shortPackText(status);
+  element.title = status.missing.length
+    ? `Missing: ${status.missing.map((tool) => tool.label || tool.id).join(", ")}`
+    : "All required tools are visible.";
+}
+
+function renderEngineeringStatus() {
+  const aero = engineeringPackState(ENGINEERING_PACKS.aero);
+  const structural = engineeringPackState(ENGINEERING_PACKS.structural);
+  const combined = {
+    state: aero.state === "ready" && structural.state === "ready" ? "ready" : aero.installed + structural.installed ? "partial" : "missing",
+    installed: aero.installed + structural.installed,
+    total: aero.total + structural.total,
+    missing: [...aero.missing, ...structural.missing],
+  };
+  setPackChip(els.aeroPackStatus, els.aeroPackText, aero);
+  setPackChip(els.structuralPackStatus, els.structuralPackText, structural);
+  setPackChip(els.toolPackStatus, els.toolPackText, combined);
+}
+
+function renderEngineeringAdmin() {
+  if (!els.engineeringAdminGrid) return;
+  els.engineeringAdminGrid.textContent = "";
+  Object.entries(ENGINEERING_PACKS).forEach(([kind, pack]) => {
+    const status = engineeringPackState(pack);
+    const card = document.createElement("article");
+    card.className = `engineering-pack-card ${status.state}`;
+    const header = document.createElement("div");
+    header.className = "engineering-pack-card-header";
+    const title = document.createElement("strong");
+    title.textContent = pack.label;
+    const pill = document.createElement("span");
+    pill.className = `test-status ${status.state === "ready" ? "pass" : status.state === "partial" ? "running" : "fail"}`;
+    pill.textContent = `${status.installed}/${status.total}`;
+    header.append(title, pill);
+
+    const toolList = document.createElement("div");
+    toolList.className = "engineering-tool-list";
+    (pack.toolIds || []).forEach((id) => {
+      const tool = capabilityById(id) || { id, label: id, installed: false };
+      const item = document.createElement("span");
+      item.className = `engineering-tool-chip ${tool.installed ? "ready" : "missing"}`;
+      item.textContent = tool.label || id;
+      item.title = tool.installed ? "Available" : "Missing";
+      toolList.appendChild(item);
+    });
+
+    const action = document.createElement("button");
+    action.className = "icon-text-button";
+    action.type = "button";
+    action.disabled = Boolean(activeController);
+    action.innerHTML = `<span>${kind === "aero" ? "⇥" : "⌁"}</span><span>Run ${pack.action}</span>`;
+    action.addEventListener("click", () => runDeeperAnalysis(kind));
+
+    card.append(header, toolList, action);
+    els.engineeringAdminGrid.appendChild(card);
+  });
+}
+
+function renderPrintingExpertPack(pack) {
+  if (els.printingPackSummaryGrid) {
+    els.printingPackSummaryGrid.textContent = "";
+    [
+      ["Printers", `${pack.printerProfileCount || 0}`],
+      ["Materials", `${pack.materialCount || 0}`],
+      ["Tuning Steps", `${pack.tuningStepCount || 0}`],
+      ["Source Seeds", `${pack.sourceSeedCount || 0}`],
+      ["Cached", `${pack.cachedSourceCount || 0}`],
+      ["Components", `${pack.componentCount || 0}`],
+    ].forEach(([label, value]) => {
+      const item = document.createElement("div");
+      item.className = "admin-summary-item";
+      const small = document.createElement("span");
+      small.textContent = label;
+      const strong = document.createElement("strong");
+      strong.textContent = value;
+      item.append(small, strong);
+      els.printingPackSummaryGrid.appendChild(item);
+    });
+  }
+
+  if (!els.printingPackList) return;
+  els.printingPackList.textContent = "";
+  if (!pack.printers && !pack.materials && !pack.components) {
+    const empty = document.createElement("div");
+    empty.className = "admin-empty";
+    empty.textContent = "3D printing expert pack status is loading.";
+    els.printingPackList.appendChild(empty);
+    return;
+  }
+
+  const sections = [
+    {
+      title: "Printer Knowledge",
+      meta: `${pack.printerProfileCount || 0} machines`,
+      detail: "Architecture, limitations, and source-backed spec references for the shop printer fleet.",
+      chips: (pack.printers || []).map((item) => item.name || item.id).slice(0, 10),
+    },
+    {
+      title: "Filament & Orca Tuning",
+      meta: `${pack.materialCount || 0} materials · ${pack.tuningStepCount || 0} Orca steps`,
+      detail: "Temperature, flow, pressure advance, retraction, max volumetric speed, drying, and use-case notes.",
+      chips: (pack.materials || []).map((item) => item.label || item.id).slice(0, 12),
+    },
+    {
+      title: "Manual Source Vault",
+      meta: `${pack.cachedSourceCount || 0}/${pack.sourceSeedCount || 0} cached`,
+      detail: pack.vaultPath || "Local manuals and source extracts are stored under the app data vault.",
+      chips: (pack.components || []).map((item) => item.label || item.id).concat(["Orca guide", "Printer specs", "Material guides"]).slice(0, 10),
+    },
+  ];
+
+  sections.forEach((section) => {
+    const row = document.createElement("article");
+    row.className = "printing-pack-row";
+
+    const copy = document.createElement("div");
+    copy.className = "printing-pack-copy";
+    const title = document.createElement("strong");
+    title.textContent = section.title;
+    const meta = document.createElement("span");
+    meta.textContent = section.meta;
+    const detail = document.createElement("p");
+    detail.textContent = section.detail;
+    copy.append(title, meta, detail);
+
+    const chips = document.createElement("div");
+    chips.className = "printing-pack-tags";
+    section.chips.forEach((label) => {
+      const chip = document.createElement("span");
+      chip.textContent = label;
+      chips.appendChild(chip);
+    });
+
+    row.append(copy, chips);
+    els.printingPackList.appendChild(row);
   });
 }
 
@@ -929,7 +1132,7 @@ function renderTestBench() {
 
     const prompt = document.createElement("p");
     prompt.className = "test-prompt";
-    prompt.textContent = test.prompt;
+    prompt.textContent = testPromptText(test);
 
     const goal = document.createElement("div");
     goal.className = "test-goal";
@@ -1103,6 +1306,9 @@ function renderMessages() {
     answer.className = "answer-text";
     renderMessageText(answer, message);
     body.appendChild(answer);
+    if (message.role === "user" && !message.running && String(message.text || "").trim()) {
+      body.appendChild(buildUserMessageActions(message));
+    }
     const responsePackage = buildResponsePackagePanel(message);
     if (responsePackage) body.appendChild(responsePackage);
     const thoughts = buildThoughtsCard(message);
@@ -1151,6 +1357,7 @@ function buildResponsePackagePanel(message) {
   const deliverables = responsePackageItems(message, "deliverables");
   const assumptions = responsePackageItems(message, "assumptions");
   const contract = message.taskContract || null;
+  const contractGate = message.contractGate || message.scorecard?.contractGate || null;
   const roleStyle = message.roleStyle || null;
   const scorecard = message.scorecard || null;
   if (!deliverables.length && !assumptions.length && !contract && !roleStyle && !scorecard) return null;
@@ -1201,10 +1408,13 @@ function buildResponsePackagePanel(message) {
     const summary = document.createElement("summary");
     const summaryTitle = document.createElement("span");
     summaryTitle.className = "answer-check-title";
-    summaryTitle.textContent = "Answer check";
+    summaryTitle.textContent = "Task contract";
     const score = document.createElement("span");
     score.className = `score-pill ${scorecard?.status || "pass"}`;
-    score.textContent = Number.isFinite(scorecard?.score) ? `${scorecard.score}%` : "Ready";
+    const gateText = contractGate?.status ? `${contractGate.status}` : "";
+    score.textContent = Number.isFinite(scorecard?.score)
+      ? `${scorecard.score}%${gateText ? ` · ${gateText}` : ""}`
+      : gateText || "Ready";
     summary.append(summaryTitle, score);
     details.appendChild(summary);
 
@@ -1213,6 +1423,16 @@ function buildResponsePackagePanel(message) {
       grid.className = "answer-check-grid";
       if (contract?.kind) grid.appendChild(buildAnswerCheckFact("Task", contract.kind));
       if (contract?.doneMeans) grid.appendChild(buildAnswerCheckFact("Done means", contract.doneMeans));
+      if (Array.isArray(contract?.mustDo) && contract.mustDo.length) {
+        grid.appendChild(buildAnswerCheckFact("Must do", contract.mustDo.join(", ")));
+      }
+      if (Array.isArray(contract?.requiredProof) && contract.requiredProof.length) {
+        grid.appendChild(buildAnswerCheckFact("Required proof", contract.requiredProof.join(", ")));
+      }
+      if (Array.isArray(contract?.rejectIf) && contract.rejectIf.length) {
+        grid.appendChild(buildAnswerCheckFact("Reject if", contract.rejectIf.slice(0, 4).join(", ")));
+      }
+      if (contractGate?.status) grid.appendChild(buildAnswerCheckFact("Gate", contractGate.status));
       if (contract?.role || roleStyle?.title) grid.appendChild(buildAnswerCheckFact("Role", contract?.role || roleStyle.title));
       if (roleStyle?.voice) grid.appendChild(buildAnswerCheckFact("Voice", roleStyle.voice));
       if (Array.isArray(roleStyle?.checklist) && roleStyle.checklist.length) {
@@ -1264,6 +1484,19 @@ function buildResponsePackagePanel(message) {
   return wrap.childElementCount ? wrap : null;
 }
 
+function buildUserMessageActions(message) {
+  const actions = document.createElement("div");
+  actions.className = "message-actions";
+  const edit = document.createElement("button");
+  edit.className = "message-action-button";
+  edit.type = "button";
+  edit.dataset.editMessageId = message.id;
+  edit.textContent = "Edit question";
+  edit.disabled = Boolean(activeController);
+  actions.appendChild(edit);
+  return actions;
+}
+
 function buildAnswerCheckFact(label, value) {
   const item = document.createElement("div");
   item.className = "answer-check-fact";
@@ -1285,7 +1518,7 @@ function buildFeedbackActions(message) {
   } else if (message.feedback === "good") {
     status.textContent = "Marked good";
   } else if (message.feedback === "fix") {
-    status.textContent = "Lesson saved";
+    status.textContent = message.feedbackSelfHealing ? "Lesson saved + self-heal" : message.feedbackGoldenTest ? "Lesson saved + test" : "Lesson saved";
   } else if (message.feedback === "error") {
     status.textContent = "Feedback not saved";
   }
@@ -1306,7 +1539,14 @@ function buildFeedbackActions(message) {
   fix.textContent = "Fix this";
   fix.disabled = message.feedback === "saving";
 
-  actions.append(good, fix);
+  const steer = document.createElement("button");
+  steer.className = "feedback-button";
+  steer.type = "button";
+  steer.dataset.steerMessageId = message.id;
+  steer.textContent = "Steer";
+  steer.disabled = message.feedback === "saving";
+
+  actions.append(good, fix, steer);
   if (status.textContent) actions.appendChild(status);
   return actions;
 }
@@ -1321,7 +1561,7 @@ function renderMessageText(container, message) {
   container.textContent = text;
 }
 
-const LOCAL_PATH_INLINE_PATTERN = /(\/(?:Users|Applications|Volumes|private\/tmp|tmp|var\/folders)\/[^`"'<>]*?\.(?:py|scad|stl|step|stp|f3d|f3z|json|md|cfg|ini|txt|gcode|3mf|pdf|png|jpg|jpeg|csv|log|sh|command|cpp|cxx|cc|c|h|hpp|js|html|css|yaml|yml|toml|plist))(?=[$\s\]\),.;:]|$)|(\/(?:Users|Applications|Volumes|private\/tmp|tmp|var\/folders)\/[^\s`"'<>),;]+)/g;
+const LOCAL_PATH_INLINE_PATTERN = /(\/(?:Users|Applications|Volumes|private\/tmp|tmp|var\/folders)\/[^`"'<>]*?\.(?:py|scad|stl|step|stp|f3d|f3z|json|md|cfg|ini|txt|gcode|3mf|pdf|png|jpg|jpeg|csv|log|sh|command|cpp|cxx|cc|c|h|hpp|js|html|css|yaml|yml|toml|plist|inp|msh|dat|frd|geo))(?=[$\s\]\),.;:]|$)|(\/(?:Users|Applications|Volumes|private\/tmp|tmp|var\/folders)\/[^\s`"'<>),;]+)/g;
 
 function looksLikeLocalPath(value) {
   return /^\/(?:Users|Applications|Volumes|private\/tmp|tmp|var\/folders)\//.test(String(value || "").trim());
@@ -1757,6 +1997,39 @@ async function runPackageHealth() {
     appendLog("warning", `Package health check failed: ${error.message}`);
   } finally {
     if (els.packageHealthButton) els.packageHealthButton.disabled = Boolean(activeController);
+  }
+}
+
+async function refreshPrintingPackSources() {
+  if (activeController) return;
+  if (els.refreshPrintingPackButton) els.refreshPrintingPackButton.disabled = true;
+  els.runState.textContent = "Refreshing 3D sources";
+  els.runState.className = "run-state warning";
+  try {
+    const response = await fetch("/api/3d-printing/refresh-sources", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 10 }),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) {
+      throw new Error(result.error || `source refresh ${response.status}`);
+    }
+    config.admin = config.admin || {};
+    if (result.expertPack) {
+      config.admin.printingExpertPack = result.expertPack;
+    }
+    appendLog("event", `3D source vault ${result.okCount || 0}/${result.refreshed || 0} refreshed`);
+    await refreshAdmin();
+    renderAdmin();
+    els.runState.textContent = "3D sources refreshed";
+    els.runState.className = "run-state ok";
+  } catch (error) {
+    appendLog("warning", `3D source refresh failed: ${error.message}`);
+    els.runState.textContent = "3D source refresh failed";
+    els.runState.className = "run-state error";
+  } finally {
+    if (els.refreshPrintingPackButton) els.refreshPrintingPackButton.disabled = Boolean(activeController);
   }
 }
 
@@ -2416,14 +2689,16 @@ function renderRunControls() {
   els.managerDepthSelect.title = managerSelected
     ? "Controls how much local review and polish Manager runs"
     : "Only affects Manager mode";
-  const sandboxlessMode = engine === "openai" || engine === "local-research" || engine === "local-review";
+  const sandboxlessMode = engine === "openai" || engine === "local-research" || engine === "research-apply" || engine === "local-review";
   els.accessSelect.disabled = Boolean(activeController) || sandboxlessMode;
   els.accessSelect.title = sandboxlessMode
     ? engine === "openai"
       ? "Cloud Research does not use local filesystem sandbox access"
       : engine === "local-review"
         ? "Review uses direct local Ollama, not the Codex sandbox"
-        : "Local Research uses public web fetches and Ollama, not the Codex sandbox"
+        : engine === "research-apply"
+          ? "Research + Apply uses public web fetches, Ollama, and local receipt files"
+          : "Local Research uses public web fetches and Ollama, not the Codex sandbox"
     : "";
   const webEnabled = normalizeWebSearch(thread.webSearch || config.webSearch) === "live";
   els.webAccessToggle.setAttribute("aria-checked", String(webEnabled));
@@ -2469,6 +2744,7 @@ function routeLabel(route) {
   const engineLabels = {
     cloud: "cloud",
     "local-research": "local research",
+    "research-apply": "research + apply",
     "local-review": "local review",
     "local-rule": "local rule",
     "local-status": "local status",
@@ -2620,8 +2896,21 @@ function workingIntroForPrompt(text, attachments = []) {
 async function sendPrompt() {
   const thread = currentThread();
   const text = els.promptInput.value.trim();
-  const attachments = pendingAttachments.slice();
+  let attachments = pendingAttachments.slice();
   if (!thread || (!text && !attachments.length) || activeController) return;
+  let editingIndex = -1;
+  let editingMessage = null;
+  if (composerIntent.kind === "edit" && composerIntent.messageId) {
+    editingIndex = findMessageIndexById(thread, composerIntent.messageId);
+    editingMessage = editingIndex >= 0 ? thread.messages[editingIndex] : null;
+    if (editingMessage?.role !== "user") {
+      editingIndex = -1;
+      editingMessage = null;
+    }
+    if (editingMessage && !attachments.length && Array.isArray(editingMessage.attachments)) {
+      attachments = editingMessage.attachments.slice();
+    }
+  }
 
   thread.cwd = els.cwdInput.value.trim() || config.cwd;
   thread.profile = thread.profile || config.profile;
@@ -2631,12 +2920,16 @@ async function sendPrompt() {
   thread.friendlinessLevel = normalizeFriendliness(thread.friendlinessLevel || config.friendlinessLevel);
   thread.humorLevel = normalizeHumor(thread.humorLevel || config.humorLevel);
   thread.webSearch = normalizeWebSearch(thread.webSearch || config.webSearch);
+  if (editingIndex >= 0) {
+    thread.messages = thread.messages.slice(0, editingIndex);
+  }
   thread.messages.push({ id: crypto.randomUUID(), role: "user", text, attachments });
   if (isUntitledThread(thread)) {
     thread.title = (text || attachments[0]?.name || "Attached file").split(/\s+/).slice(0, 7).join(" ");
   }
   thread.updatedAt = new Date().toISOString();
   pendingAttachments = [];
+  composerIntent = { kind: "", messageId: "" };
   els.promptInput.value = "";
   autoSizeTextarea();
   renderAttachmentTray();
@@ -2689,6 +2982,97 @@ async function sendPrompt() {
     await recoverRunFailure(thread, pending, error);
     els.runState.textContent = "Recovered";
     els.runState.className = "run-state warning";
+  } finally {
+    activeController = null;
+    thread.updatedAt = new Date().toISOString();
+    await refreshAdmin();
+    setRunning(false);
+    render();
+  }
+}
+
+function analysisKindLabel(kind) {
+  if (kind === "aero") return "Aero";
+  if (kind === "structural") return "Structural FEA";
+  return "deeper engineering";
+}
+
+async function runDeeperAnalysis(kind = "auto") {
+  const thread = currentThread();
+  if (!thread || activeController) return;
+  thread.cwd = els.cwdInput.value.trim() || config.cwd;
+  const label = analysisKindLabel(kind);
+  let text = els.promptInput.value.trim();
+  const attachments = pendingAttachments.slice();
+  if (!text && attachments.length) {
+    text = `Run ${label} analysis on the attached file${attachments.length === 1 ? "" : "s"}.`;
+  }
+  if (text || attachments.length) {
+    thread.messages.push({ id: crypto.randomUUID(), role: "user", text, attachments });
+    if (isUntitledThread(thread)) {
+      thread.title = (text || attachments[0]?.name || label).split(/\s+/).slice(0, 7).join(" ");
+    }
+    pendingAttachments = [];
+    els.promptInput.value = "";
+    autoSizeTextarea();
+    renderAttachmentTray();
+  }
+  const messages = thread.messages.filter((message) => !message.running);
+  if (!messages.length) {
+    els.runState.textContent = "Attach or ask first";
+    els.runState.className = "run-state warning";
+    return;
+  }
+
+  const pending = {
+    id: crypto.randomUUID(),
+    role: "assistant",
+    text: `I’m on it, Tinman. I’ll run the ${label} path and bring back the report files, result summary, and caveats.`,
+    running: true,
+    thoughts: [`Starting ${label} analysis from the current thread context.`],
+  };
+  thread.messages.push(pending);
+  thread.updatedAt = new Date().toISOString();
+  render();
+  setRunning(true);
+  activeController = new AbortController();
+  appendLog("event", `${label} analysis started`);
+
+  try {
+    const response = await fetch("/api/tools/deeper-analysis", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind,
+        cwd: thread.cwd,
+        messages,
+      }),
+      signal: activeController.signal,
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || `analysis ${response.status}`);
+    pending.text = payload.text || payload.error || "The deeper analysis finished without a final message.";
+    pending.route = payload.route || null;
+    pending.adminTopic = payload.adminTopic || null;
+    pending.taskContract = payload.taskContract || null;
+    pending.roleStyle = payload.roleStyle || null;
+    pending.deliverables = Array.isArray(payload.deliverables) ? payload.deliverables : [];
+    pending.assumptions = Array.isArray(payload.assumptions) ? payload.assumptions : [];
+    pending.scorecard = payload.scorecard || null;
+    pending.contractGate = payload.contractGate || null;
+    pending.thoughts = Array.isArray(payload.thoughts) && payload.thoughts.length
+      ? payload.thoughts
+      : pending.thoughts;
+    pending.running = false;
+    els.runState.textContent = payload.ok ? "Analysis complete" : "Analysis needs review";
+    els.runState.className = payload.ok ? "run-state ok" : "run-state warning";
+    appendLog("event", `${payload.label || label} analysis ${payload.ok ? "complete" : "needs review"}`);
+  } catch (error) {
+    pending.running = false;
+    pending.text = `The ${label} analysis did not finish.\n\nThis is why: ${error.message}\n\nYou should also consider: attach the geometry file and try the dedicated FEA or Aero button.`;
+    els.runState.textContent = "Analysis failed";
+    els.runState.className = "run-state error";
+    appendLog("error", `${label} analysis failed: ${error.message}`);
   } finally {
     activeController = null;
     thread.updatedAt = new Date().toISOString();
@@ -2815,6 +3199,28 @@ function allGoldenTests() {
   return config.goldenTests || [];
 }
 
+function testMessages(test) {
+  if (Array.isArray(test?.messages) && test.messages.length) {
+    return test.messages
+      .filter((message) => message && typeof message === "object")
+      .map((message) => ({
+        ...message,
+        role: message.role || "user",
+        text: String(message.text || ""),
+      }));
+  }
+  return [{ role: "user", text: String(test?.prompt || "") }];
+}
+
+function testPromptText(test) {
+  const messages = testMessages(test);
+  if (messages.length <= 1) return String(test?.prompt || messages[0]?.text || "");
+  return messages
+    .map((message) => `${message.role || "user"}: ${String(message.text || "").trim()}`)
+    .filter(Boolean)
+    .join("\n");
+}
+
 async function runGoldenTest(test, signal) {
   const run = {
     answer: "",
@@ -2824,6 +3230,10 @@ async function runGoldenTest(test, signal) {
     thoughts: [],
     warnings: [],
     logs: [],
+    analyticalCore: null,
+    taskContract: null,
+    contractGate: null,
+    scorecard: null,
   };
   const response = await fetch("/api/run", {
     method: "POST",
@@ -2839,7 +3249,7 @@ async function runGoldenTest(test, signal) {
       webSearch: test.webSearch || "disabled",
       testRun: true,
       benchmarkRun: Boolean(test.benchmarkRun),
-      messages: [{ role: "user", text: test.prompt }],
+      messages: testMessages(test),
     }),
     signal,
   });
@@ -2851,7 +3261,13 @@ async function runGoldenTest(test, signal) {
       run.statusEvent = event;
       if (event.route) run.route = event.route;
     }
-    if (event.type === "assistant") run.answer = event.text || "";
+    if (event.type === "assistant") {
+      run.answer = event.text || "";
+      run.analyticalCore = event.analyticalCore || null;
+      run.taskContract = event.taskContract || null;
+      run.contractGate = event.contractGate || null;
+      run.scorecard = event.scorecard || null;
+    }
     if (event.type === "thought") run.thoughts.push(event.text || "");
     if (event.type === "warning" || event.type === "error") run.warnings.push(event.text || event.type);
     if (event.type === "log") run.logs.push(event.text || "");
@@ -2885,6 +3301,9 @@ function evaluateGoldenTest(test, run) {
   const answer = String(run.answer || "").trim();
   const lower = answer.toLowerCase();
   const route = run.route || {};
+  const taskContract = run.taskContract || {};
+  const contractGate = run.contractGate || {};
+  const scorecard = run.scorecard || {};
   const checks = [];
 
   checks.push({
@@ -2955,6 +3374,59 @@ function evaluateGoldenTest(test, run) {
     });
   }
 
+  if (test.minAnalyticalScore) {
+    const score = Number(run.analyticalCore?.score || 0);
+    checks.push({
+      label: "analytical",
+      passed: score >= Number(test.minAnalyticalScore),
+      detail: `Expected analytical score >= ${test.minAnalyticalScore}; got ${score || "none"}.`,
+    });
+  }
+
+  if (test.expectedAnalyticalStatus) {
+    const status = String(run.analyticalCore?.status || "");
+    checks.push({
+      label: "analytical-status",
+      passed: status === String(test.expectedAnalyticalStatus),
+      detail: `Expected ${test.expectedAnalyticalStatus}; got ${status || "none"}.`,
+    });
+  }
+
+  if (test.expectedContractKind) {
+    checks.push({
+      label: "contract-kind",
+      passed: taskContract.kind === test.expectedContractKind,
+      detail: `Expected ${test.expectedContractKind}; got ${taskContract.kind || "none"}.`,
+    });
+  }
+
+  if (test.expectedContractGate) {
+    checks.push({
+      label: "contract-gate",
+      passed: contractGate.status === test.expectedContractGate,
+      detail: `Expected ${test.expectedContractGate}; got ${contractGate.status || "none"}.`,
+    });
+  }
+
+  if (test.requiredContractProof?.length) {
+    const proofText = (taskContract.requiredProof || []).join(" ").toLowerCase();
+    const missing = test.requiredContractProof.filter((term) => !proofText.includes(term.toLowerCase()));
+    checks.push({
+      label: "contract-proof",
+      passed: missing.length === 0,
+      detail: missing.length ? `Missing: ${missing.join(", ")}` : "Contract proof terms found.",
+    });
+  }
+
+  if (test.minScorecard) {
+    const score = Number(scorecard.score || 0);
+    checks.push({
+      label: "scorecard",
+      passed: score >= Number(test.minScorecard),
+      detail: `Expected response scorecard >= ${test.minScorecard}; got ${score || "none"}.`,
+    });
+  }
+
   const passed = checks.every((check) => check.passed);
   return {
     status: passed ? "pass" : "fail",
@@ -2963,6 +3435,10 @@ function evaluateGoldenTest(test, run) {
     answer,
     route,
     returnCode: run.returnCode,
+    analyticalCore: run.analyticalCore,
+    taskContract: run.taskContract,
+    contractGate: run.contractGate,
+    scorecard: run.scorecard,
     thoughts: run.thoughts,
     warnings: run.warnings,
   };
@@ -2985,6 +3461,7 @@ function handleEvent(event, pending) {
     pending.deliverables = Array.isArray(event.deliverables) ? event.deliverables : [];
     pending.assumptions = Array.isArray(event.assumptions) ? event.assumptions : [];
     pending.scorecard = event.scorecard || null;
+    pending.contractGate = event.contractGate || null;
     renderMessages();
     return;
   }
@@ -3031,6 +3508,8 @@ function handleEvent(event, pending) {
         ? "Starting OpenAI Cloud Research."
         : event.engine === "local-research"
           ? "Starting Local Research with free web sources and Ollama."
+          : event.engine === "research-apply"
+            ? "Starting Research + Apply with free web sources, Ollama, and a local project receipt."
           : event.engine === "local-review"
             ? `Starting Local Review with ${event.model || "Ollama"}.`
             : event.model
@@ -3077,6 +3556,39 @@ function addThought(pending, text) {
 
 function findMessageById(thread, id) {
   return (thread.messages || []).find((message) => message.id === id);
+}
+
+function findMessageIndexById(thread, id) {
+  return (thread.messages || []).findIndex((message) => message.id === id);
+}
+
+function setComposerText(text) {
+  els.promptInput.value = text;
+  autoSizeTextarea();
+  els.promptInput.focus();
+}
+
+function startEditMessage(messageId) {
+  const thread = currentThread();
+  const index = findMessageIndexById(thread, messageId);
+  const message = index >= 0 ? thread.messages[index] : null;
+  if (!message || message.role !== "user") return;
+  composerIntent = { kind: "edit", messageId };
+  setComposerText(message.text || "");
+  els.runState.textContent = "Editing question";
+  els.runState.className = "run-state warning";
+  appendLog("event", "editing earlier question; next send reruns from that point");
+}
+
+function startSteerMessage(messageId) {
+  const thread = currentThread();
+  const message = findMessageById(thread, messageId);
+  if (!message || message.role !== "assistant") return;
+  composerIntent = { kind: "steer", messageId };
+  setComposerText("Steer the previous answer this way: ");
+  els.runState.textContent = "Steer ready";
+  els.runState.className = "run-state warning";
+  appendLog("event", "steer prompt prepared for the previous answer");
 }
 
 function latestUserPromptForMessage(thread, message) {
@@ -3130,6 +3642,9 @@ async function sendMessageFeedback(messageId, rating) {
         note,
         prompt: latestUserPromptForMessage(thread, message),
         answer: message.text || "",
+        messages: thread.messages.filter((item) => !item.running).slice(-8),
+        cwd: thread.cwd || config.cwd,
+        webSearch: thread.webSearch || config.webSearch,
         route: message.route || {},
         projectId: message.route?.projectId || message.adminTopic?.projectId || "general",
       }),
@@ -3139,8 +3654,11 @@ async function sendMessageFeedback(messageId, rating) {
     if (!payload.ok) throw new Error(payload.error || "feedback not saved");
     message.feedback = rating;
     message.feedbackNote = note;
+    message.feedbackGoldenTest = payload.goldenTest || null;
+    message.feedbackSelfHealing = payload.selfHealing?.event?.patchQueued || payload.selfHealing?.event || null;
     if (payload.goldenTests) config.goldenTests = payload.goldenTests;
     if (payload.admin) config.admin = payload.admin;
+    if (payload.goldenTest) appendLog("status", `Regression test saved: ${payload.goldenTest.name || payload.goldenTest.id}`);
     appendLog("event", rating === "fix" ? "quality lesson saved" : "positive answer feedback saved");
     await refreshAdmin();
   } catch (error) {
@@ -3253,10 +3771,11 @@ function engineValue(engine) {
     codex: 1,
     local: 1,
     "local-research": 2,
-    "local-review": 3,
-    openai: 4,
-    cloud: 4,
-    manager: 5,
+    "research-apply": 3,
+    "local-review": 4,
+    openai: 5,
+    cloud: 5,
+    manager: 6,
   };
   return values[engine] || 1;
 }
@@ -3322,6 +3841,18 @@ els.conversation.addEventListener("click", (event) => {
   if (localPathLink) {
     event.preventDefault();
     openLocalPath(localPathLink.dataset.localPath);
+    return;
+  }
+  const editButton = event.target.closest("[data-edit-message-id]");
+  if (editButton && !activeController) {
+    event.preventDefault();
+    startEditMessage(editButton.dataset.editMessageId);
+    return;
+  }
+  const steerButton = event.target.closest("[data-steer-message-id]");
+  if (steerButton && !activeController) {
+    event.preventDefault();
+    startSteerMessage(steerButton.dataset.steerMessageId);
     return;
   }
   const button = event.target.closest("[data-feedback-id]");
@@ -3459,6 +3990,9 @@ els.promptInput.addEventListener("keydown", (event) => {
 });
 
 els.sendButton.addEventListener("click", sendPrompt);
+if (els.runDeeperButton) els.runDeeperButton.addEventListener("click", () => runDeeperAnalysis("auto"));
+if (els.runAeroButton) els.runAeroButton.addEventListener("click", () => runDeeperAnalysis("aero"));
+if (els.runStructuralButton) els.runStructuralButton.addEventListener("click", () => runDeeperAnalysis("structural"));
 
 els.runQuickTestsButton.addEventListener("click", () => runTestBench(quickGoldenTests()));
 els.runAllTestsButton.addEventListener("click", () => runTestBench(allGoldenTests()));
@@ -3479,3 +4013,4 @@ els.warmModelButton.addEventListener("click", startWarmup);
 els.runBenchmarkButton.addEventListener("click", runBenchmarkSuite);
 els.packageHealthButton.addEventListener("click", runPackageHealth);
 els.selfHealButton.addEventListener("click", runSelfHealingCheck);
+if (els.refreshPrintingPackButton) els.refreshPrintingPackButton.addEventListener("click", refreshPrintingPackSources);

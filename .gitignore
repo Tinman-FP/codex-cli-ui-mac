@@ -6,6 +6,10 @@ __pycache__/
 data/
 logs/
 
+# Local project geometry inputs; keep public releases source-only by default.
+CPAP Inputs/
+Wind Turbine/
+
 # Local virtual environments and generated app bundles.
 .venv/
 build/
