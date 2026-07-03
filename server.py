@@ -1622,6 +1622,8 @@ def generated_golden_test_from_improvement(item):
     item_id = item.get("id") or improvement_item_id("improvement-test", item.get("prompt"), item.get("title"))
     prompt = compact(item.get("prompt") or item.get("title") or item.get("evidence") or "Answer this request with the improved response standard.", 700)
     evidence = " ".join(str(item.get(key, "")) for key in ("prompt", "title", "evidence", "recommendation", "nextAction")).lower()
+    diagnosis = item.get("diagnosis") if isinstance(item.get("diagnosis"), dict) else {}
+    failure_kind = str(diagnosis.get("failureKind") or "").lower()
     project_id = str(item.get("projectId") or "general")
     web_like = any(term in evidence for term in ("web", "search", "source", "price", "current", "latest", "availability", "stock", "today"))
     tool_like = item.get("type") == "tool-gap" or any(term in evidence for term in ("tool", "command not found", "missing command", "recovery", "load failed", "no final"))
@@ -1638,6 +1640,13 @@ def generated_golden_test_from_improvement(item):
         "i don't have access",
         "you can check it yourself",
     ]
+
+    if failure_kind in {"wrong-objective", "direct-answer-shape", "tone-format"}:
+        required.extend(("this is why", "you should also consider"))
+    if failure_kind in {"wrong-route", "wrong-artifact-route"}:
+        forbidden.extend(("fusion 360 script", "openscad model", "moonraker", "offline/unreachable"))
+    if failure_kind in {"unfinished-runtime", "missing-proof"}:
+        forbidden.extend(("load failed", "no final response", "staged a first-pass"))
 
     if web_like:
         any_terms.extend(("source", "http", "sources checked"))
@@ -2722,6 +2731,16 @@ def record_quality_feedback(payload):
             "specialist": route.get("specialist"),
         },
     }
+    if isinstance(payload.get("diagnosis"), dict):
+        diagnosis = payload["diagnosis"]
+        record["diagnosis"] = {
+            "failureKind": compact(diagnosis.get("failureKind") or "", 80),
+            "patchTarget": compact(diagnosis.get("patchTarget") or "", 120),
+            "recommendation": compact(redact_quality_text(diagnosis.get("recommendation") or ""), 500),
+            "nextAction": compact(redact_quality_text(diagnosis.get("nextAction") or ""), 360),
+            "safePatch": bool(diagnosis.get("safePatch")),
+            "gaps": diagnosis.get("gaps", [])[:4] if isinstance(diagnosis.get("gaps"), list) else [],
+        }
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with QUALITY_FEEDBACK_PATH.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, separators=(",", ":")) + "\n")
@@ -2784,6 +2803,7 @@ def improvement_status_rank(value):
 
 
 def improvement_lab_item_summary(item):
+    diagnosis = item.get("diagnosis") if isinstance(item.get("diagnosis"), dict) else {}
     return {
         "id": item.get("id"),
         "type": item.get("type", "improvement"),
@@ -2804,6 +2824,9 @@ def improvement_lab_item_summary(item):
         "archivedAt": item.get("archivedAt"),
         "promotedTestAt": item.get("promotedTestAt"),
         "goldenTestId": item.get("goldenTestId"),
+        "diagnosis": diagnosis,
+        "failureKind": diagnosis.get("failureKind", ""),
+        "patchTarget": diagnosis.get("patchTarget", ""),
     }
 
 
@@ -2833,6 +2856,16 @@ def store_improvement_item(item):
         "nextAction": compact(redact_quality_text(item.get("nextAction") or ""), 500),
         "evidence": compact(redact_quality_text(item.get("evidence") or ""), 700),
     }
+    if isinstance(item.get("diagnosis"), dict):
+        diagnosis = item["diagnosis"]
+        fields["diagnosis"] = {
+            "failureKind": compact(diagnosis.get("failureKind") or "", 80),
+            "patchTarget": compact(diagnosis.get("patchTarget") or "", 120),
+            "recommendation": compact(redact_quality_text(diagnosis.get("recommendation") or ""), 500),
+            "nextAction": compact(redact_quality_text(diagnosis.get("nextAction") or ""), 360),
+            "safePatch": bool(diagnosis.get("safePatch")),
+            "gaps": diagnosis.get("gaps", [])[:4] if isinstance(diagnosis.get("gaps"), list) else [],
+        }
     if existing:
         status = safe_choice(existing.get("status"), {"open", "reviewed", "archived"}, "open")
         existing.update(fields)
@@ -2869,6 +2902,18 @@ def quality_feedback_improvement_item(record):
     prompt = compact(record.get("prompt") or "", 260)
     note = compact(record.get("note") or "", 260)
     project_id = str(record.get("projectId") or "general")
+    diagnosis = record.get("diagnosis") if isinstance(record.get("diagnosis"), dict) else {}
+    failure_kind = compact(diagnosis.get("failureKind") or "answer-quality", 80)
+    patch_target = compact(diagnosis.get("patchTarget") or "route, prompt, rubric, tool, or regression path", 120)
+    recommendation = (
+        diagnosis.get("recommendation")
+        or note
+        or "Turn this feedback into a reusable answer rule, then rerun the same style of request as a regression check."
+    )
+    next_action = (
+        diagnosis.get("nextAction")
+        or "Create or update a golden prompt test and adjust the project playbook/rubric that produced the weak answer."
+    )
     return {
         "id": improvement_item_id("quality-feedback", record.get("id") or prompt or note),
         "type": "answer-quality",
@@ -2876,14 +2921,12 @@ def quality_feedback_improvement_item(record):
         "source": "Fix this feedback",
         "projectId": project_id,
         "project": record.get("project") or project_id.replace("-", " ").title(),
-        "title": f"Improve answer quality: {compact(prompt or project_id, 72)}",
+        "title": f"Repair {failure_kind}: {compact(prompt or project_id, 72)}",
         "prompt": prompt,
         "evidence": note or compact(record.get("answer") or "", 420),
-        "recommendation": (
-            note
-            or "Turn this feedback into a reusable answer rule, then rerun the same style of request as a regression check."
-        ),
-        "nextAction": "Create or update a golden prompt test and adjust the project playbook/rubric that produced the weak answer.",
+        "recommendation": recommendation,
+        "nextAction": f"{next_action} Patch target: {patch_target}.",
+        "diagnosis": diagnosis,
     }
 
 
@@ -2908,6 +2951,297 @@ def golden_test_from_feedback_improvement(record, improvement):
         ),
     }
     return upsert_generated_golden_test(generated_golden_test_from_improvement(item))
+
+
+def correction_language_present(text):
+    lower = str(text or "").lower()
+    return text_has_any(
+        lower,
+        (
+            "wrong",
+            "not acceptable",
+            "failed",
+            "failure",
+            "fix this",
+            "still not",
+            "didn't answer",
+            "did not answer",
+            "missed the point",
+            "no response",
+            "try again",
+            "massive disappointment",
+        ),
+    )
+
+
+def previous_failed_answer_context(messages):
+    latest_user_index = None
+    for index in range(len(messages or []) - 1, -1, -1):
+        if str((messages or [])[index].get("role", "")).lower() == "user":
+            latest_user_index = index
+            break
+    if latest_user_index is None:
+        return None
+    correction = str((messages or [])[latest_user_index].get("text") or "").strip()
+    if not correction_language_present(correction):
+        return None
+    assistant_index = None
+    for index in range(latest_user_index - 1, -1, -1):
+        message = (messages or [])[index]
+        if str(message.get("role", "")).lower() == "assistant" and str(message.get("text") or "").strip():
+            assistant_index = index
+            break
+    if assistant_index is None:
+        return None
+    prompt_index = None
+    for index in range(assistant_index - 1, -1, -1):
+        message = (messages or [])[index]
+        if str(message.get("role", "")).lower() == "user" and str(message.get("text") or "").strip():
+            prompt_index = index
+            break
+    prompt = str((messages or [])[prompt_index].get("text") or "").strip() if prompt_index is not None else correction
+    answer = str((messages or [])[assistant_index].get("text") or "").strip()
+    return {
+        "prompt": prompt,
+        "answer": answer,
+        "correction": correction,
+        "messages": [
+            {"role": "user", "text": prompt},
+            {"role": "assistant", "text": answer},
+            {"role": "user", "text": correction},
+        ],
+    }
+
+
+def diagnose_answer_failure(messages, route=None, answer_text="", correction_text="", web_search="live"):
+    route = route or {}
+    answer = str(answer_text or "")
+    correction = str(correction_text or "").lower()
+    contract = task_contract(messages, route)
+    supervisor = autonomy_supervisor_status(
+        messages,
+        route=route,
+        answer_text=answer,
+        web_search=web_search,
+        stage="post",
+    )
+    analytical = analytical_answer_score(messages, route, answer, web_search=web_search)
+    gaps = []
+    for gap in supervisor.get("gaps", [])[:4]:
+        gaps.append({"kind": gap.get("kind", "gap"), "severity": gap.get("severity", "medium"), "reason": compact(gap.get("reason") or "", 220)})
+    for gap in analytical.get("gaps", [])[:4]:
+        if not any(existing.get("kind") == gap.get("kind") for existing in gaps):
+            gaps.append({"kind": gap.get("kind", "gap"), "severity": gap.get("severity", "medium"), "reason": compact(gap.get("reason") or "", 220)})
+
+    failure_kind = "wrong-objective"
+    if contract.get("kind") == "CAD reference" and answer_has_cad_artifact(answer):
+        failure_kind = "wrong-artifact-route"
+    elif any(gap.get("kind") == "missing-tool" for gap in gaps):
+        failure_kind = "missing-tool"
+    elif any(gap.get("kind") in {"cad-artifact-missing", "cad-research-misrouted"} for gap in gaps):
+        failure_kind = "wrong-artifact-route"
+    elif any(gap.get("kind") in {"web-disabled", "web-evidence-missing", "missing-source-evidence"} for gap in gaps):
+        failure_kind = "missing-source-evidence"
+    elif any(gap.get("kind") == "unfinished-runtime" for gap in gaps) or text_has_any(answer.lower(), ("load failed", "no final response", "no final message")):
+        failure_kind = "unfinished-runtime"
+    elif contract.get("hardGate") and text_has_any(answer.lower(), ("i staged", "first-pass", "prepared")) and not answer_has_source_url(answer):
+        failure_kind = "missing-proof"
+    elif text_has_any(correction, ("cold", "technical", "plain language", "####", "format", "tone")):
+        failure_kind = "tone-format"
+    elif contract.get("kind") == "Direct answer" and not build_direct_answer_context(messages, route):
+        failure_kind = "direct-answer-shape"
+
+    patch_targets = {
+        "missing-tool": "capability manager or tool recovery",
+        "wrong-artifact-route": "route classifier, task contract gate, or direct-answer veto",
+        "missing-source-evidence": "research routing, web evidence gate, or source citation requirement",
+        "unfinished-runtime": "local runtime fallback, model budget, or recovery answer path",
+        "missing-proof": "task contract proof gate or artifact/solver validation path",
+        "tone-format": "response coach, answer style prompt, or final polish rubric",
+        "direct-answer-shape": "direct answer classifier and response coach",
+        "wrong-objective": "route manager, analytical core, or project playbook",
+    }
+    patch_target = patch_targets.get(failure_kind, "route, prompt, rubric, tool, or regression path")
+    recommendation = (
+        f"Repair `{failure_kind}` by updating the smallest responsible {patch_target} path, "
+        "then rerun the generated regression and package health."
+    )
+    next_action = (
+        "Use the saved golden test as the guardrail; patch only after reproducing the failure and proving the fix with package health."
+    )
+    safe_patch = failure_kind in {
+        "wrong-artifact-route",
+        "direct-answer-shape",
+        "tone-format",
+        "missing-source-evidence",
+        "unfinished-runtime",
+    }
+    return {
+        "failureKind": failure_kind,
+        "patchTarget": patch_target,
+        "recommendation": recommendation,
+        "nextAction": next_action,
+        "safePatch": safe_patch,
+        "contractKind": contract.get("kind"),
+        "analyticalScore": analytical.get("score"),
+        "analyticalStatus": analytical.get("status"),
+        "gaps": gaps[:6],
+    }
+
+
+def run_wrong_answer_repair_loop(payload, source="fix-this-feedback", record=True):
+    route = payload.get("route") if isinstance(payload.get("route"), dict) else {}
+    messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+    prompt = str(payload.get("prompt") or latest_user_text(messages) or "")
+    answer = str(payload.get("answer") or payload.get("answerText") or "")
+    correction = str(payload.get("note") or payload.get("correction") or "")
+    if not messages and prompt:
+        messages = [{"role": "user", "text": prompt}]
+    if not route:
+        route = route_manager(messages, requested_profile="manager", web_search=payload.get("webSearch") or DEFAULT_WEB_SEARCH)
+    diagnosis = diagnose_answer_failure(
+        messages,
+        route=route,
+        answer_text=answer,
+        correction_text=correction,
+        web_search=payload.get("webSearch") or DEFAULT_WEB_SEARCH,
+    )
+    feedback_payload = {
+        **payload,
+        "rating": "fix",
+        "note": correction,
+        "prompt": prompt,
+        "answer": answer,
+        "messages": messages,
+        "route": route,
+        "diagnosis": diagnosis,
+    }
+    feedback_record = record_quality_feedback(feedback_payload) if record else {
+        "id": "synthetic-repair",
+        "rating": "fix",
+        "note": correction,
+        "prompt": prompt,
+        "answer": answer,
+        "projectId": route.get("projectId", "general"),
+        "project": route.get("project", "General Helper"),
+        "diagnosis": diagnosis,
+    }
+    improvement = record_improvement_from_feedback(feedback_record) if record else quality_feedback_improvement_item(feedback_record)
+    golden_test = golden_test_from_feedback_improvement(feedback_record, improvement) if record else generated_golden_test_from_improvement(improvement)
+    self_healing = self_healing_supervise(
+        {
+            "trigger": source,
+            "messages": messages,
+            "answerText": answer,
+            "cwd": payload.get("cwd") or "",
+            "route": route,
+            "webSearch": payload.get("webSearch") or DEFAULT_WEB_SEARCH,
+            "autoRecover": True,
+            "autoInstall": True,
+        },
+        record=record,
+    )
+    signature = self_healing_signature(
+        f"{source}:{diagnosis.get('failureKind')}",
+        messages,
+        answer_text=answer or correction,
+    )
+    patch_item = queue_self_patch_candidate(
+        signature,
+        title=f"Self-repair candidate: {diagnosis.get('failureKind')}",
+        evidence=correction or answer,
+        recommendation=diagnosis.get("recommendation") or "",
+        severity="high" if diagnosis.get("safePatch") else "medium",
+        next_action=diagnosis.get("nextAction") or "",
+    ) if record else {
+        "id": "synthetic-self-patch",
+        "signature": signature,
+        "title": f"Self-repair candidate: {diagnosis.get('failureKind')}",
+    }
+    if self_healing and isinstance(self_healing, dict):
+        self_healing.setdefault("event", {})["patchQueued"] = patch_item
+        self_healing["queue"] = self_patch_queue_summary() if record else {"openCount": 1, "items": [patch_item]}
+    return {
+        "ok": True,
+        "record": feedback_record,
+        "improvement": improvement,
+        "goldenTest": golden_test,
+        "diagnosis": diagnosis,
+        "selfHealing": self_healing,
+        "patchItem": patch_item,
+    }
+
+
+def record_natural_correction_repair(messages, cwd="", web_search="live"):
+    context = previous_failed_answer_context(messages)
+    if not context:
+        return None
+    repair_messages = [{"role": "user", "text": context["prompt"]}]
+    repair_route = route_manager(repair_messages, requested_profile="manager", web_search=web_search)
+    return run_wrong_answer_repair_loop(
+        {
+            "prompt": context["prompt"],
+            "answer": context["answer"],
+            "note": context["correction"],
+            "messages": repair_messages,
+            "cwd": cwd,
+            "webSearch": web_search,
+            "route": repair_route,
+        },
+        source="natural-correction",
+        record=True,
+    )
+
+
+def wrong_answer_repair_loop_synthetic_check():
+    messages = [{"role": "user", "text": "What file type from Fusion preserves component names?"}]
+    route = route_manager(messages, requested_profile="manager", web_search="disabled")
+    loop = run_wrong_answer_repair_loop(
+        {
+            "prompt": messages[0]["text"],
+            "answer": "Fusion 360 script: /tmp/generated.py\nOpenSCAD model: /tmp/model.scad",
+            "note": "That is wrong. I wanted the direct file type answer, not generated CAD files.",
+            "messages": messages,
+            "route": route,
+            "webSearch": "disabled",
+        },
+        source="synthetic-wrong-answer",
+        record=False,
+    )
+    natural = previous_failed_answer_context(
+        [
+            {"role": "user", "text": "What is the best temp for this PCTG image?"},
+            {"role": "assistant", "text": "Fusion 360 script: stale.py"},
+            {"role": "user", "text": "This is wrong and not acceptable."},
+        ]
+    )
+    diagnosis = loop.get("diagnosis") or {}
+    golden = loop.get("goldenTest") or {}
+    return (
+        loop.get("ok")
+        and diagnosis.get("failureKind") in {"wrong-artifact-route", "wrong-objective"}
+        and bool(loop.get("patchItem"))
+        and golden.get("source") == "improvement-lab"
+        and natural
+        and natural.get("prompt", "").startswith("What is the best temp")
+    )
+
+
+def self_repair_receipt_note(repair):
+    if not repair:
+        return ""
+    diagnosis = repair.get("diagnosis") or {}
+    golden = repair.get("goldenTest") or {}
+    patch = repair.get("patchItem") or (repair.get("selfHealing") or {}).get("event", {}).get("patchQueued") or {}
+    parts = [f"Self-repair captured this correction as `{diagnosis.get('failureKind', 'answer-quality')}`"]
+    if golden.get("id"):
+        parts.append(f"saved regression `{golden.get('id')}`")
+    if patch.get("id"):
+        parts.append(f"queued patch `{patch.get('id')}`")
+    target = diagnosis.get("patchTarget")
+    if target:
+        parts.append(f"target: {target}")
+    return "; ".join(parts) + "."
 
 
 def capability_result_improvement_item(result):
@@ -5510,6 +5844,11 @@ def format_manager_context(route):
         "",
         "Specialist playbook:",
     ]
+    if isinstance(route.get("selfRepair"), dict):
+        diagnosis = route["selfRepair"].get("diagnosis") or {}
+        lines.append(
+            f"- Self-repair active: prior answer was classified as `{diagnosis.get('failureKind', 'answer-quality')}`; use this response to correct the failure, not repeat it."
+        )
     lines.extend(f"- {rule}" for rule in playbook.get("rules", ()))
     lines.extend(
         [
@@ -18306,6 +18645,15 @@ def package_health_report():
         add("tools:self-healing-supervisor", "fail", str(exc))
 
     try:
+        add(
+            "tools:wrong-answer-repair-loop",
+            "pass" if wrong_answer_repair_loop_synthetic_check() else "fail",
+            "turns wrong-answer corrections into diagnosis, regression test, and self-patch candidate",
+        )
+    except Exception as exc:
+        add("tools:wrong-answer-repair-loop", "fail", str(exc))
+
+    try:
         diagram_messages = [
             {
                 "role": "user",
@@ -22001,47 +22349,17 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 self.send_error(400, "Invalid JSON")
                 return
             try:
-                record = record_quality_feedback(payload)
-                improvement = record_improvement_from_feedback(record)
-                golden_test = golden_test_from_feedback_improvement(record, improvement)
                 self_healing = None
                 if str(payload.get("rating") or "").lower() == "fix":
-                    prompt = str(payload.get("prompt") or "")
-                    messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
-                    if not messages and prompt:
-                        messages = [{"role": "user", "text": prompt}]
-                    route = payload.get("route") if isinstance(payload.get("route"), dict) else {}
-                    self_healing = self_healing_supervise(
-                        {
-                            "trigger": "fix-this-feedback",
-                            "messages": messages,
-                            "answerText": payload.get("answer") or "",
-                            "cwd": payload.get("cwd") or "",
-                            "route": route,
-                            "webSearch": payload.get("webSearch") or DEFAULT_WEB_SEARCH,
-                            "autoRecover": True,
-                            "autoInstall": True,
-                        },
-                        record=True,
-                    )
-                    if not self_healing.get("event", {}).get("patchQueued"):
-                        patch_item = queue_self_patch_candidate(
-                            self_healing_signature(
-                                "fix-this-feedback",
-                                messages,
-                                answer_text=str(payload.get("answer") or payload.get("note") or ""),
-                            ),
-                            title="Fix-this feedback needs a code, routing, prompt, or test repair",
-                            evidence=str(payload.get("note") or payload.get("answer") or "")[:900],
-                            recommendation=(
-                                "Diagnose why this answer missed Tinman's intent, patch the smallest responsible route/tool/prompt/UI path, "
-                                "and keep the generated golden test as the regression guard."
-                            ),
-                            severity="medium",
-                            next_action="Run the matching golden test after the repair, then package-health before publishing.",
-                        )
-                        self_healing["event"]["patchQueued"] = patch_item
-                        self_healing["queue"] = self_patch_queue_summary()
+                    repair = run_wrong_answer_repair_loop(payload, source="fix-this-feedback", record=True)
+                    record = repair.get("record")
+                    improvement = repair.get("improvement")
+                    golden_test = repair.get("goldenTest")
+                    self_healing = repair.get("selfHealing")
+                else:
+                    record = record_quality_feedback(payload)
+                    improvement = record_improvement_from_feedback(record)
+                    golden_test = golden_test_from_feedback_improvement(record, improvement)
             except Exception as exc:
                 self.send_json(
                     {
@@ -22632,6 +22950,23 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             admin_topic = {**admin_topic, "volatile": True}
         if payload.get("testRun"):
             admin_topic = {**admin_topic, "testRun": True}
+        natural_self_repair = None
+        if not payload.get("testRun"):
+            try:
+                natural_self_repair = record_natural_correction_repair(
+                    messages,
+                    cwd=cwd,
+                    web_search=web_search,
+                )
+            except Exception:
+                natural_self_repair = None
+        if natural_self_repair:
+            route["selfRepair"] = {
+                "diagnosis": natural_self_repair.get("diagnosis"),
+                "goldenTestId": (natural_self_repair.get("goldenTest") or {}).get("id"),
+                "patchId": (natural_self_repair.get("patchItem") or {}).get("id"),
+            }
+            admin_topic = {**admin_topic, "selfRepair": route["selfRepair"]}
 
         research_apply_requested = route.get("engine") == "research-apply" or profile in RESEARCH_APPLY_PROFILES or is_research_apply_request(messages)
         direct_knowledge = None if research_apply_requested else general_direct_knowledge_answer(messages, route)
@@ -22663,6 +22998,8 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                     "adminTopic": admin_topic,
                 },
             )
+            if natural_self_repair:
+                json_line(self, {"type": "thought", "text": self_repair_receipt_note(natural_self_repair)})
             json_line(self, {"type": "thought", "text": direct_knowledge.get("thought") or "Answering directly from local knowledge."})
             emit_assistant_answer(
                 self,
@@ -23488,6 +23825,8 @@ class CodexUIHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
+        if natural_self_repair:
+            json_line(self, {"type": "thought", "text": self_repair_receipt_note(natural_self_repair)})
 
         if effective_profile in LOCAL_REVIEW_PROFILES:
             review_model = local_review_model_for_profile(effective_profile)
