@@ -5177,6 +5177,13 @@ def analytical_answer_gaps(messages, route=None, answer_text="", web_search="liv
         "this is why:" in lower and "you should also consider:" in lower
     ):
         gaps.append({"kind": "missing-direct-answer-shape", "severity": "high", "reason": "Direct answer is missing Tinman's preferred why/consider structure."})
+    query = latest_user_text(messages).lower()
+    cpap_duct_context = (
+        text_has_any(query, ("cpap", "cpap fan", "cpap blower"))
+        and text_has_any(query, ("duct", "part cooling", "cooling duct", "airflow"))
+    )
+    if cpap_duct_context and "psi" not in query and re.search(r"\b\d+(?:\.\d+)?(?:\s*(?:-|to|–)\s*\d+(?:\.\d+)?)?\s*psi\b", lower):
+        gaps.append({"kind": "unprompted-cpap-psi-assumption", "severity": "high", "reason": "CPAP/printer duct answer invented a numeric psi pressure assumption instead of using duct/airflow design reasoning."})
     numeric_constraints = [item for item in constraints if re.search(r"\d", item)]
     if numeric_constraints:
         matched = 0
@@ -16395,6 +16402,31 @@ def package_health_report():
         )
     except Exception as exc:
         add("tools:cpap-duct-wall-thickness-direct", "fail", str(exc))
+
+    try:
+        wall_messages = [
+            {
+                "role": "user",
+                "text": "What is the wall thickness I should use for a 3D printed CPAP duct?",
+            }
+        ]
+        route = route_manager(wall_messages, requested_profile="manager", web_search="disabled")
+        bad_answer = "Use a 1 mm wall because typical CPAP pressure is 5-15 psi and the hoop stress is low."
+        good_answer = cpap_duct_wall_thickness_direct_answer(wall_messages)
+        bad = analytical_answer_score(wall_messages, route, bad_answer, web_search="disabled")
+        good = analytical_answer_score(wall_messages, route, good_answer, web_search="disabled")
+        ok = (
+            good.get("status") == "pass"
+            and bad.get("status") != "pass"
+            and any(gap.get("kind") == "unprompted-cpap-psi-assumption" for gap in bad.get("gaps", []))
+        )
+        add(
+            "analysis:cpap-pressure-unit-sanity",
+            "pass" if ok else "fail",
+            "Analytical Core rejects unprompted numeric psi assumptions for printer CPAP duct answers",
+        )
+    except Exception as exc:
+        add("analysis:cpap-pressure-unit-sanity", "fail", str(exc))
 
     try:
         research_messages = [
