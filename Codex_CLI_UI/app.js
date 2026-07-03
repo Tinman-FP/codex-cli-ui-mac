@@ -1487,7 +1487,7 @@ function buildFeedbackActions(message) {
   } else if (message.feedback === "good") {
     status.textContent = "Marked good";
   } else if (message.feedback === "fix") {
-    status.textContent = "Lesson saved";
+    status.textContent = message.feedbackGoldenTest ? "Lesson saved + test" : "Lesson saved";
   } else if (message.feedback === "error") {
     status.textContent = "Feedback not saved";
   }
@@ -3487,8 +3487,10 @@ async function sendMessageFeedback(messageId, rating) {
     if (!payload.ok) throw new Error(payload.error || "feedback not saved");
     message.feedback = rating;
     message.feedbackNote = note;
+    message.feedbackGoldenTest = payload.goldenTest || null;
     if (payload.goldenTests) config.goldenTests = payload.goldenTests;
     if (payload.admin) config.admin = payload.admin;
+    if (payload.goldenTest) appendLog("status", `Regression test saved: ${payload.goldenTest.name || payload.goldenTest.id}`);
     appendLog("event", rating === "fix" ? "quality lesson saved" : "positive answer feedback saved");
     await refreshAdmin();
   } catch (error) {

@@ -1031,6 +1031,7 @@ def generated_golden_test_from_improvement(item):
         "anyTerms": normalize_test_terms(any_terms),
         "forbiddenTerms": normalize_test_terms(forbidden, limit=12),
         "requiresSource": bool(web_like),
+        "minAnalyticalScore": 82,
         "goal": compact(item.get("recommendation") or item.get("nextAction") or "Prevent this improvement item from regressing.", 260),
         "source": "improvement-lab",
         "improvementId": item_id,
@@ -1176,6 +1177,7 @@ def golden_test_generator_synthetic_check():
         and test.get("group") == "Improvement"
         and "this is why" in test.get("requiredTerms", [])
         and "run failed" in test.get("forbiddenTerms", [])
+        and int(test.get("minAnalyticalScore") or 0) >= 82
     )
 
 
@@ -1958,6 +1960,22 @@ def record_improvement_from_feedback(record):
     if not item:
         return None
     return store_improvement_item(item)
+
+
+def golden_test_from_feedback_improvement(record, improvement):
+    if not record or record.get("rating") != "fix" or not improvement:
+        return None
+    item = {
+        **improvement,
+        "prompt": record.get("prompt") or improvement.get("prompt"),
+        "evidence": record.get("note") or improvement.get("evidence") or record.get("answer"),
+        "recommendation": (
+            record.get("note")
+            or improvement.get("recommendation")
+            or "Turn this Fix-this feedback into a reusable answer rule and regression check."
+        ),
+    }
+    return upsert_generated_golden_test(generated_golden_test_from_improvement(item))
 
 
 def capability_result_improvement_item(result):
@@ -17813,6 +17831,7 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             try:
                 record = record_quality_feedback(payload)
                 improvement = record_improvement_from_feedback(record)
+                golden_test = golden_test_from_feedback_improvement(record, improvement)
             except Exception as exc:
                 self.send_json(
                     {
@@ -17829,8 +17848,11 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                     "ok": True,
                     "record": record,
                     "improvement": improvement,
+                    "goldenTest": golden_test,
+                    "goldenTests": golden_tests(),
                     "qualityFeedback": quality_feedback_summary(),
                     "improvementLab": improvement_lab_summary(),
+                    "goldenTestSummary": golden_test_summary(),
                     "admin": admin_summary(),
                 }
             )
