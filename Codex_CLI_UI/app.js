@@ -124,6 +124,7 @@ let config = {
 };
 let activeController = null;
 let pendingAttachments = [];
+let composerIntent = { kind: "", messageId: "" };
 const testBench = {
   running: false,
   activeId: "",
@@ -1305,6 +1306,9 @@ function renderMessages() {
     answer.className = "answer-text";
     renderMessageText(answer, message);
     body.appendChild(answer);
+    if (message.role === "user" && !message.running && String(message.text || "").trim()) {
+      body.appendChild(buildUserMessageActions(message));
+    }
     const responsePackage = buildResponsePackagePanel(message);
     if (responsePackage) body.appendChild(responsePackage);
     const thoughts = buildThoughtsCard(message);
@@ -1466,6 +1470,19 @@ function buildResponsePackagePanel(message) {
   return wrap.childElementCount ? wrap : null;
 }
 
+function buildUserMessageActions(message) {
+  const actions = document.createElement("div");
+  actions.className = "message-actions";
+  const edit = document.createElement("button");
+  edit.className = "message-action-button";
+  edit.type = "button";
+  edit.dataset.editMessageId = message.id;
+  edit.textContent = "Edit question";
+  edit.disabled = Boolean(activeController);
+  actions.appendChild(edit);
+  return actions;
+}
+
 function buildAnswerCheckFact(label, value) {
   const item = document.createElement("div");
   item.className = "answer-check-fact";
@@ -1487,7 +1504,7 @@ function buildFeedbackActions(message) {
   } else if (message.feedback === "good") {
     status.textContent = "Marked good";
   } else if (message.feedback === "fix") {
-    status.textContent = message.feedbackGoldenTest ? "Lesson saved + test" : "Lesson saved";
+    status.textContent = message.feedbackSelfHealing ? "Lesson saved + self-heal" : message.feedbackGoldenTest ? "Lesson saved + test" : "Lesson saved";
   } else if (message.feedback === "error") {
     status.textContent = "Feedback not saved";
   }
@@ -1508,7 +1525,14 @@ function buildFeedbackActions(message) {
   fix.textContent = "Fix this";
   fix.disabled = message.feedback === "saving";
 
-  actions.append(good, fix);
+  const steer = document.createElement("button");
+  steer.className = "feedback-button";
+  steer.type = "button";
+  steer.dataset.steerMessageId = message.id;
+  steer.textContent = "Steer";
+  steer.disabled = message.feedback === "saving";
+
+  actions.append(good, fix, steer);
   if (status.textContent) actions.appendChild(status);
   return actions;
 }
@@ -2855,8 +2879,21 @@ function workingIntroForPrompt(text, attachments = []) {
 async function sendPrompt() {
   const thread = currentThread();
   const text = els.promptInput.value.trim();
-  const attachments = pendingAttachments.slice();
+  let attachments = pendingAttachments.slice();
   if (!thread || (!text && !attachments.length) || activeController) return;
+  let editingIndex = -1;
+  let editingMessage = null;
+  if (composerIntent.kind === "edit" && composerIntent.messageId) {
+    editingIndex = findMessageIndexById(thread, composerIntent.messageId);
+    editingMessage = editingIndex >= 0 ? thread.messages[editingIndex] : null;
+    if (editingMessage?.role !== "user") {
+      editingIndex = -1;
+      editingMessage = null;
+    }
+    if (editingMessage && !attachments.length && Array.isArray(editingMessage.attachments)) {
+      attachments = editingMessage.attachments.slice();
+    }
+  }
 
   thread.cwd = els.cwdInput.value.trim() || config.cwd;
   thread.profile = thread.profile || config.profile;
@@ -2866,12 +2903,16 @@ async function sendPrompt() {
   thread.friendlinessLevel = normalizeFriendliness(thread.friendlinessLevel || config.friendlinessLevel);
   thread.humorLevel = normalizeHumor(thread.humorLevel || config.humorLevel);
   thread.webSearch = normalizeWebSearch(thread.webSearch || config.webSearch);
+  if (editingIndex >= 0) {
+    thread.messages = thread.messages.slice(0, editingIndex);
+  }
   thread.messages.push({ id: crypto.randomUUID(), role: "user", text, attachments });
   if (isUntitledThread(thread)) {
     thread.title = (text || attachments[0]?.name || "Attached file").split(/\s+/).slice(0, 7).join(" ");
   }
   thread.updatedAt = new Date().toISOString();
   pendingAttachments = [];
+  composerIntent = { kind: "", messageId: "" };
   els.promptInput.value = "";
   autoSizeTextarea();
   renderAttachmentTray();
@@ -3449,6 +3490,39 @@ function findMessageById(thread, id) {
   return (thread.messages || []).find((message) => message.id === id);
 }
 
+function findMessageIndexById(thread, id) {
+  return (thread.messages || []).findIndex((message) => message.id === id);
+}
+
+function setComposerText(text) {
+  els.promptInput.value = text;
+  autoSizeTextarea();
+  els.promptInput.focus();
+}
+
+function startEditMessage(messageId) {
+  const thread = currentThread();
+  const index = findMessageIndexById(thread, messageId);
+  const message = index >= 0 ? thread.messages[index] : null;
+  if (!message || message.role !== "user") return;
+  composerIntent = { kind: "edit", messageId };
+  setComposerText(message.text || "");
+  els.runState.textContent = "Editing question";
+  els.runState.className = "run-state warning";
+  appendLog("event", "editing earlier question; next send reruns from that point");
+}
+
+function startSteerMessage(messageId) {
+  const thread = currentThread();
+  const message = findMessageById(thread, messageId);
+  if (!message || message.role !== "assistant") return;
+  composerIntent = { kind: "steer", messageId };
+  setComposerText("Steer the previous answer this way: ");
+  els.runState.textContent = "Steer ready";
+  els.runState.className = "run-state warning";
+  appendLog("event", "steer prompt prepared for the previous answer");
+}
+
 function latestUserPromptForMessage(thread, message) {
   const index = (thread.messages || []).indexOf(message);
   for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
@@ -3500,6 +3574,9 @@ async function sendMessageFeedback(messageId, rating) {
         note,
         prompt: latestUserPromptForMessage(thread, message),
         answer: message.text || "",
+        messages: thread.messages.filter((item) => !item.running).slice(-8),
+        cwd: thread.cwd || config.cwd,
+        webSearch: thread.webSearch || config.webSearch,
         route: message.route || {},
         projectId: message.route?.projectId || message.adminTopic?.projectId || "general",
       }),
@@ -3510,6 +3587,7 @@ async function sendMessageFeedback(messageId, rating) {
     message.feedback = rating;
     message.feedbackNote = note;
     message.feedbackGoldenTest = payload.goldenTest || null;
+    message.feedbackSelfHealing = payload.selfHealing?.event?.patchQueued || payload.selfHealing?.event || null;
     if (payload.goldenTests) config.goldenTests = payload.goldenTests;
     if (payload.admin) config.admin = payload.admin;
     if (payload.goldenTest) appendLog("status", `Regression test saved: ${payload.goldenTest.name || payload.goldenTest.id}`);
@@ -3694,6 +3772,18 @@ els.conversation.addEventListener("click", (event) => {
   if (localPathLink) {
     event.preventDefault();
     openLocalPath(localPathLink.dataset.localPath);
+    return;
+  }
+  const editButton = event.target.closest("[data-edit-message-id]");
+  if (editButton && !activeController) {
+    event.preventDefault();
+    startEditMessage(editButton.dataset.editMessageId);
+    return;
+  }
+  const steerButton = event.target.closest("[data-steer-message-id]");
+  if (steerButton && !activeController) {
+    event.preventDefault();
+    startSteerMessage(steerButton.dataset.steerMessageId);
     return;
   }
   const button = event.target.closest("[data-feedback-id]");

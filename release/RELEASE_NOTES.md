@@ -1,24 +1,33 @@
-# Codex CLI UI for Mac v2026.07.14
+# Codex CLI UI for Mac v2026.07.15
 
-3D printing expert-pack release.
+World-class response-quality and manufacturing-test release.
 
 ## Download
 
 Download one file:
 
 ```text
-Codex_CLI_UI_Mac_v2026.07.14.dmg
+Codex_CLI_UI_Mac_Public_Bundle_2026-07-03.zip
 ```
 
-Open the DMG and double-click `Install Codex CLI UI.command`.
+Unzip it, then open the included DMG or double-click `install/Install Codex CLI UI.command`.
 
 ## Fixed
 
 - Printer/material/component knowledge questions now answer directly instead of falling into generic CAD, Moonraker, or printer-status fallbacks.
 - Package health now catches 3D-printing expert-pack, Orca tuning, and printer-profile regressions before release.
+- CAD and CNC knowledge questions now route to manufacturing expertise instead of generic CAD artifact staging.
+- Complex Codex CLI UI/TinmanX1 requests now route to the local-agent workflow lane instead of getting pulled sideways by filament keywords.
+- `Fix this` feedback now creates a lesson, a golden regression test, and a self-healing repair candidate with evidence.
 
 ## Added
 
+- Public 100-question Manufacturing Samples golden-test bank: 50 CAD questions and 50 CNC machining questions.
+- TinmanX1/Polymaker/Fiberon workflow scenario covering test-bank import, Steer/Edit UI, self-healing, GitHub release, and zip packaging behavior.
+- `Edit question` message action for user prompts. It reloads the question into the composer and reruns from that point.
+- `Steer` message action for assistant answers. It preloads a correction prompt so Tinman can redirect the answer without starting over.
+- Package-health checks for manufacturing-sample tests and workflow-scenario tests.
+- README commands for running manufacturing samples and the workflow scenario through the live `/api/run` test bench.
 - 3D Printing Expert Pack with printer profiles for Bambu H2D/X1C, Creality K2 Plus, Qidi Plus 4, Snapmaker U1, Rat Rig V-Core 4.1 IDEX Klipper, Sovol SV08 Max, and ELEGOO Centauri Carbon.
 - Filament/material library for PLA, PETG, PCTG, ABS, ASA, PA, PA-CF, PET-CF, PC, and TPU with drying, use-case, strength, and caution notes.
 - OrcaSlicer tuning coach using the practical calibration order: temperature tower, flow pass 1, flow pass 2, pressure advance, max volumetric speed, retraction/stringing, then VFA/speed.
@@ -47,6 +56,8 @@ Open the DMG and double-click `Install Codex CLI UI.command`.
 - Fast, Careful, Coder, Review, Manager, and Local Research modes
 - Web Access, access level, reasoning, friendliness, and humor controls
 - Admin Improvement Lab, Golden Test Generator, Test Bench history, and package health checks
+- Public CAD/CNC manufacturing regression fixture
+- Steer/Edit chat controls and self-healing Fix-this queue
 - Tool Recovery Engine and Capability Manager
 - Autonomy Supervisor help-needed checker
 - Klipper config discovery and macro-staging helpers
