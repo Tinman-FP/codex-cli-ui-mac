@@ -9884,7 +9884,7 @@ def evaluate_free_tool_install(tool_or_command, approved=False):
     estimated = int(manifest.get("estimatedBytes") or 0)
     free_bytes = disk_free_bytes(APP_DIR)
     brew = shutil.which("brew", path=PATH_FOR_CODEX)
-    python = shutil.which("python3", path=PATH_FOR_CODEX) or sys.executable
+    python = sys.executable or shutil.which("python3", path=PATH_FOR_CODEX)
     result = {
         "ok": True,
         "tool": tool_id,
@@ -10006,7 +10006,7 @@ def install_free_tool(tool_or_command, approved=False, dry_run=False, reason="")
     elif manifest.get("brew"):
         cmd = [shutil.which("brew", path=PATH_FOR_CODEX), "install", *manifest.get("brew", [])]
     else:
-        python = shutil.which("python3", path=PATH_FOR_CODEX) or sys.executable
+        python = sys.executable or shutil.which("python3", path=PATH_FOR_CODEX)
         cmd = [python, "-m", "pip", "install", "--user", *manifest.get("pip", []), "--upgrade-strategy", "only-if-needed"]
     started = time.time()
     try:
