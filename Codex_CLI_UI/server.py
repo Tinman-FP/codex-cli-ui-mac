@@ -946,6 +946,21 @@ GOLDEN_TESTS = [
         "minAnalyticalScore": 82,
         "goal": "Answer CPAP duct wall thickness directly without artifact staging or unrealistic pressure assumptions.",
     },
+    {
+        "id": "hard-stl-filename-missing-attachment",
+        "name": "Filename-Only STL Attachment",
+        "group": "Hard Cases",
+        "prompt": "missing-codex-ui-regression-fixture-0000.stl I need a part cooling duct designed. See the attached STL file. The bottom of CPAP Inlet 1 needs to connect to both upper CPAP Outlet 1. The routing needs 1.5mm clearance, 1mm wall thickness, max 5mm away, and 0mm in the y direction.",
+        "profile": "manager",
+        "managerDepth": "fast",
+        "webSearch": "disabled",
+        "expectedProjectId": "cad-modeling-projects",
+        "directAnswer": True,
+        "requiredTerms": ["did not find a readable stl", "attach the stl", "stopped before generating fake duct geometry"],
+        "forbiddenTerms": ["i generated an inferred", "duct stl:", "airway stl", "fusion 360 script", "openscad model"],
+        "minAnalyticalScore": 82,
+        "goal": "If macOS pasted only an STL filename, stop before inventing geometry and ask for the actual file.",
+    },
 ]
 HARD_CASE_GOLDEN_TEST_IDS = {
     "hard-cpap-hose-id",
@@ -955,6 +970,7 @@ HARD_CASE_GOLDEN_TEST_IDS = {
     "hard-pctg-temp-tower-image",
     "hard-cpap-duct-design-not-status",
     "hard-cpap-duct-wall-thickness",
+    "hard-stl-filename-missing-attachment",
 }
 
 
@@ -4333,6 +4349,7 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
     cooling_duct_research = is_cooling_duct_research_request(messages)
     cad_reference = is_cad_reference_question(messages)
     cad_design = is_cad_design_request(messages)
+    stl_cfd_design = is_stl_cfd_duct_design_request(messages)
     engineering_diagram = is_engineering_diagram_request(messages)
     printing_calibration_or_profile = (
         is_filament_profile_pull_request(messages)
@@ -4340,7 +4357,7 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
         or is_temperature_tower_pressure_advance_followup(messages)
         or is_orca_calibration_image_question(messages)
     )
-    public_printer_research = wants_public_printer_research(messages) and not cad_design
+    public_printer_research = wants_public_printer_research(messages) and not (cad_design or stl_cfd_design)
     scores = []
     for project_id, playbook in PROJECT_PLAYBOOKS.items():
         if project_id == "general":
@@ -4378,6 +4395,10 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
         project_id = "engineering-diagrams"
         score = max(score, 36)
         matched = ["engineering-diagram"] + [item for item in matched if item != "engineering-diagram"]
+    elif stl_cfd_design:
+        project_id = "cad-modeling-projects"
+        score = max(score, 36)
+        matched = ["stl-cfd-design"] + [item for item in matched if item != "stl-cfd-design"]
     elif cpap_hose_spec:
         project_id = "research-parts-reference"
         score = max(score, 30)
@@ -4406,6 +4427,7 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
         or public_printer_research
         or cooling_duct_research
         or cad_design
+        or stl_cfd_design
     )
     local_need_terms = (
         "ssh", "moonraker", "tailscale", "vpn", "local file", "this mac",
@@ -4413,7 +4435,7 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
         "upload", "restart", "deploy", "production", "flightops",
     )
     needs_local = (
-        (any(term in text for term in local_need_terms) or cad_design)
+        (any(term in text for term in local_need_terms) or cad_design or stl_cfd_design)
         and not public_printer_research
         and not cooling_duct_research
     )
@@ -5167,7 +5189,11 @@ def analytical_answer_gaps(messages, route=None, answer_text="", web_search="liv
     word_count = len(re.findall(r"\w+", answer))
     if (profile.get("complexity") in {"medium", "high"} or mode != "direct-answer" or profile.get("riskLevel") != "normal") and word_count < 18:
         gaps.append({"kind": "too-thin", "severity": "high", "reason": "The answer is too thin for the task complexity."})
-    if mode in {"decision", "evidence-research"} and not text_has_any(lower, ("recommend", "pick", "best", "choose", "would use", "buy", "skip", "reject")):
+    missing_geometry_blocker = (
+        text_has_any(lower, ("did not find a readable stl", "no readable stl", "no readable geometry"))
+        and text_has_any(lower, ("attach the stl", "attach the file", "upload the stl", "stopped before generating fake"))
+    )
+    if mode in {"decision", "evidence-research"} and not missing_geometry_blocker and not text_has_any(lower, ("recommend", "pick", "best", "choose", "would use", "buy", "skip", "reject")):
         gaps.append({"kind": "no-decision", "severity": "high", "reason": "The answer does not make a clear recommendation or ranked decision."})
     if mode == "diagnostics" and not text_has_any(lower, ("first", "check", "test", "likely", "root", "cause", "because")):
         gaps.append({"kind": "no-diagnostic-path", "severity": "high", "reason": "The answer does not give a ranked diagnostic path."})
@@ -5185,7 +5211,7 @@ def analytical_answer_gaps(messages, route=None, answer_text="", web_search="liv
     if cpap_duct_context and "psi" not in query and re.search(r"\b\d+(?:\.\d+)?(?:\s*(?:-|to|–)\s*\d+(?:\.\d+)?)?\s*psi\b", lower):
         gaps.append({"kind": "unprompted-cpap-psi-assumption", "severity": "high", "reason": "CPAP/printer duct answer invented a numeric psi pressure assumption instead of using duct/airflow design reasoning."})
     numeric_constraints = [item for item in constraints if re.search(r"\d", item)]
-    if numeric_constraints:
+    if numeric_constraints and not missing_geometry_blocker:
         matched = 0
         for item in numeric_constraints[:6]:
             number = re.findall(r"\d+(?:\.\d+)?", item)
@@ -16125,6 +16151,40 @@ def package_health_report():
         add("tools:stl-cfd-geometry-routing", "fail", str(exc))
 
     try:
+        LOCAL_CAD_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="health-stl-missing-", dir=str(LOCAL_CAD_OUTPUT_DIR)) as tmp_dir:
+            missing_messages = [
+                {
+                    "role": "user",
+                    "text": (
+                        "missing-fixture.stl I need a part cooling duct designed. See the attached STL file. "
+                        "The bottom of CPAP Inlet 1 needs to connect to both upper CPAP Outlet 1. "
+                        "The routing needs 1.5mm clearance, 1mm wall thickness, max 5mm away, and 0mm in the y direction."
+                    ),
+                }
+            ]
+            result = stage_stl_cfd_design_case(missing_messages, cwd=tmp_dir, target_path=Path(tmp_dir) / "case")
+            answer = format_stl_cfd_case_answer(result)
+            readme_path = Path(result.get("readmePath", ""))
+            ok = (
+                is_stl_cfd_duct_design_request(missing_messages)
+                and not result.get("ok")
+                and readme_path.exists()
+                and "No readable STL file was found" in readme_path.read_text(encoding="utf-8")
+                and "stopped before generating fake duct geometry" in answer
+                and "attach the stl" in answer.lower()
+                and "Duct STL:" not in answer
+                and "I generated an inferred" not in answer
+            )
+        add(
+            "tools:stl-missing-attachment-guard",
+            "pass" if ok else "fail",
+            "filename-only STL prompts stop before fake geometry and ask for the actual attachment",
+        )
+    except Exception as exc:
+        add("tools:stl-missing-attachment-guard", "fail", str(exc))
+
+    try:
         toolchain = cfd_toolchain_status()
         ok = (
             toolchain.get("openfoamAvailable")
@@ -18828,14 +18888,7 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 self,
                 {
                     "type": "thought",
-                    "text": "Inspecting the STL mesh, inferring CPAP inlet/outlet geometry, and generating a real duct artifact before answering.",
-                },
-            )
-            json_line(
-                self,
-                {
-                    "type": "thought",
-                    "text": "Running the CAD design worker: port inference, flattened split-duct generation, STL export, and OpenFOAM surface check when available.",
+                    "text": "Running the STL preflight: resolve the attachment or filename first, then inspect mesh and generate duct artifacts only if the file is readable.",
                 },
             )
             try:
