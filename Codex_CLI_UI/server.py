@@ -899,6 +899,22 @@ GOLDEN_TESTS = [
         "goal": "Return Orca/TinmanX1 filament parameters instead of machine specifications.",
     },
     {
+        "id": "hard-orca-current-petcf-06-profile",
+        "name": "Current PET-CF 0.6 Profile Pull",
+        "group": "Hard Cases",
+        "prompt": "will you pull the current filament settings for PET-CF for my 0.6 nozzle on my plus 4?",
+        "profile": "manager",
+        "managerDepth": "fast",
+        "webSearch": "disabled",
+        "expectedProjectId": "tinmanx-slicer-research",
+        "directAnswer": True,
+        "directTerms": ["actual local slicer profile data", "pet-cf"],
+        "requiredTerms": ["qidi pet-cf @qidi x-plus 4 0.6 nozzle", "nozzle temp", "280", "pressure advance", "0.025", "not PETG-CF"],
+        "forbiddenTerms": ["fusion 360", "cad package", "buildVolume", "machine specs only"],
+        "minAnalyticalScore": 82,
+        "goal": "Pull the actual local Orca/TinmanX1 PET-CF 0.6 nozzle filament profile instead of returning machine specs or generic tuning.",
+    },
+    {
         "id": "hard-pctg-temp-tower-image",
         "name": "PCTG Temp Tower Image",
         "group": "Hard Cases",
@@ -1005,6 +1021,7 @@ HARD_CASE_GOLDEN_TEST_IDS = {
     "hard-fusion-component-format",
     "hard-marlin-diagnostic",
     "hard-orca-filament-profile",
+    "hard-orca-current-petcf-06-profile",
     "hard-pctg-temp-tower-image",
     "hard-pctg-temp-tower-pa-followup",
     "hard-cpap-duct-design-not-status",
@@ -16023,23 +16040,20 @@ def package_health_report():
                 }
             ]
         )
-        real_profile_ok = (
+        ok = (
             "Filament profile" in profile_answer_06
             and "PET-CF" in profile_answer_06
+            and "Qidi X-Plus 4 0.6 nozzle" in profile_answer_06
             and "Nozzle temp" in profile_answer_06
+            and "280" in profile_answer_06
+            and "Pressure advance" in profile_answer_06
+            and "0.025" in profile_answer_06
+            and "No nozzle size was stated" in profile_answer_ambiguous
             and "Fusion 360" not in profile_answer_06
+            and "Fusion 360" not in profile_answer_ambiguous
             and "buildVolume" not in profile_answer_06
+            and "buildVolume" not in profile_answer_ambiguous
         )
-        fallback_ok = (
-            "PET-CF starter baseline" in profile_answer_06
-            and "Fusion 360" not in profile_answer_06
-            and "buildVolume" not in profile_answer_06
-        )
-        ambiguity_ok = (
-            "No nozzle size was stated" in profile_answer_ambiguous
-            or "PET-CF starter baseline" in profile_answer_ambiguous
-        )
-        ok = (real_profile_ok or fallback_ok) and ambiguity_ok
         add(
             "tools:orca-profile-parameter-pull",
             "pass" if ok else "fail",
