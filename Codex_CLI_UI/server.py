@@ -5649,6 +5649,35 @@ def build_web_disabled_context(messages):
     )
 
 
+def build_attachment_context(messages):
+    attachments = message_attachments(messages)
+    if not attachments:
+        return ""
+
+    lines = [
+        "Attachment context:",
+        "- Treat attached local paths as readable files on this Mac when they exist.",
+        "- For very large files, inspect metadata first and avoid copying them unless Tinman explicitly asks.",
+    ]
+    for index, attachment in enumerate(attachments[-8:], start=1):
+        name = str(attachment.get("name") or "attached file")
+        path = str(attachment.get("path") or "")
+        content_type = str(attachment.get("type") or attachment.get("contentType") or "application/octet-stream")
+        try:
+            size = int(float(attachment.get("size") or 0))
+        except (TypeError, ValueError):
+            size = 0
+        source = str(attachment.get("source") or "upload")
+        exists = Path(path).expanduser().is_file() if path else False
+        size_label = human_bytes(size) if size else "unknown size"
+        lines.append(
+            f"- Attachment {index}: {name}; type={content_type}; size={size_label}; "
+            f"source={source}; exists={str(exists).lower()}; path={path or '(no path)'}"
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
 def moonraker_get(path, timeout=4, base_url=None):
     url = (base_url or QIDI_MOONRAKER_URL).rstrip("/") + path
     try:
@@ -16922,6 +16951,7 @@ def build_prompt(
         if web_search == "live"
         else build_web_disabled_context(messages)
     )
+    attachment_context = build_attachment_context(messages)
     research_context = build_research_quality_context(messages)
     research_apply_context = build_research_apply_context(messages, route or {})
     local_context = build_local_context(messages)
@@ -16947,6 +16977,7 @@ def build_prompt(
             + manager_context
             + ("\n" if manager_context else "")
             + startup_context_text
+            + attachment_context
             + web_context
             + research_context
             + research_apply_context
@@ -16971,6 +17002,8 @@ def build_prompt(
         manager_context.strip(),
         "",
         startup_context_text.strip(),
+        "",
+        attachment_context.strip(),
         "",
         quality_context.strip(),
         "",

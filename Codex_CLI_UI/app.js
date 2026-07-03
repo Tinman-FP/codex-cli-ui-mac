@@ -125,6 +125,8 @@ let config = {
 };
 let activeController = null;
 let pendingAttachments = [];
+const MAX_BROWSER_UPLOAD_BYTES = 250 * 1024 * 1024;
+const nativeFilePickers = new Map();
 let composerIntent = { kind: "", messageId: "" };
 const testBench = {
   running: false,
@@ -2767,15 +2769,82 @@ function appendLog(kind, text) {
   saveState();
 }
 
-async function fileToBase64(file) {
-  const buffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  const chunkSize = 0x8000;
-  let binary = "";
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+function nativeFilePickerAvailable() {
+  return Boolean(window.webkit?.messageHandlers?.codexOpenFiles);
+}
+
+function openNativeFilePicker() {
+  return new Promise((resolve, reject) => {
+    if (!nativeFilePickerAvailable()) {
+      reject(new Error("Native file picker is not available"));
+      return;
+    }
+    const requestId = crypto.randomUUID();
+    const timeoutId = window.setTimeout(() => {
+      nativeFilePickers.delete(requestId);
+      reject(new Error("Native file picker timed out"));
+    }, 120000);
+    nativeFilePickers.set(requestId, {
+      resolve: (files) => {
+        window.clearTimeout(timeoutId);
+        resolve(files);
+      },
+      reject: (error) => {
+        window.clearTimeout(timeoutId);
+        reject(error);
+      },
+    });
+    try {
+      window.webkit.messageHandlers.codexOpenFiles.postMessage({ requestId });
+    } catch (error) {
+      nativeFilePickers.delete(requestId);
+      window.clearTimeout(timeoutId);
+      reject(error);
+    }
+  });
+}
+
+window.codexReceiveNativeFiles = function codexReceiveNativeFiles(payload) {
+  const requestId = payload?.requestId || "";
+  const pending = nativeFilePickers.get(requestId);
+  if (!pending) return;
+  nativeFilePickers.delete(requestId);
+  if (payload?.error) {
+    pending.reject(new Error(payload.error));
+    return;
   }
-  return btoa(binary);
+  pending.resolve(Array.isArray(payload?.files) ? payload.files : []);
+};
+
+function attachmentFromNativeFile(file) {
+  const path = String(file?.path || "");
+  const fallbackName = path.split("/").filter(Boolean).pop() || "attached file";
+  return {
+    id: crypto.randomUUID(),
+    name: String(file?.name || fallbackName),
+    size: Number(file?.size || 0),
+    type: String(file?.type || file?.contentType || "application/octet-stream"),
+    path,
+    source: "native-local-path",
+  };
+}
+
+async function handleNativeFiles(files) {
+  const selected = Array.from(files || []).filter((file) => file?.path);
+  if (!selected.length || activeController) return;
+  els.runState.textContent = "Attaching";
+  els.runState.className = "run-state warning";
+  for (const file of selected) {
+    const attachment = attachmentFromNativeFile(file);
+    pendingAttachments.push(attachment);
+    appendLog(
+      "event",
+      `Attached local file ${attachment.name} (${formatFileSize(attachment.size || 0)})`
+    );
+  }
+  renderAttachmentTray();
+  els.runState.textContent = "Attachment ready";
+  els.runState.className = "run-state ok";
 }
 
 async function uploadAttachment(file) {
@@ -2807,6 +2876,16 @@ async function uploadAttachment(file) {
 async function handleFiles(files) {
   const selected = Array.from(files || []).filter((file) => file && file.name);
   if (!selected.length || activeController) return;
+  const tooLarge = selected.find((file) => Number(file.size || 0) > MAX_BROWSER_UPLOAD_BYTES);
+  if (tooLarge) {
+    appendLog(
+      "error",
+      `${tooLarge.name} is ${formatFileSize(tooLarge.size)}. Use the native + button so Codex can reference the local path instead of uploading a copy.`
+    );
+    els.runState.textContent = "Use + button";
+    els.runState.className = "run-state error";
+    return;
+  }
   els.runState.textContent = "Attaching";
   els.runState.className = "run-state warning";
   for (const file of selected) {
@@ -3932,8 +4011,17 @@ els.webAccessToggle.addEventListener("click", () => {
   renderRunControls();
 });
 
-els.attachButton.addEventListener("click", () => {
+els.attachButton.addEventListener("click", async () => {
   if (activeController) return;
+  if (nativeFilePickerAvailable()) {
+    try {
+      const files = await openNativeFilePicker();
+      await handleNativeFiles(files);
+      return;
+    } catch (error) {
+      appendLog("warning", `Native file picker failed: ${error.message}; using browser picker`);
+    }
+  }
   els.fileInput.click();
 });
 

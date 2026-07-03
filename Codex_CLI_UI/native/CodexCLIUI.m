@@ -1,7 +1,7 @@
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
 
-@interface AppDelegate : NSObject <NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate>
+@interface AppDelegate : NSObject <NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler>
 @property(nonatomic, strong) NSWindow *window;
 @property(nonatomic, strong) WKWebView *webView;
 @property(nonatomic, strong) NSTask *serverTask;
@@ -38,6 +38,9 @@
     WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
     configuration.defaultWebpagePreferences.allowsContentJavaScript = YES;
     configuration.preferences.javaScriptCanOpenWindowsAutomatically = NO;
+    WKUserContentController *userContentController = [[WKUserContentController alloc] init];
+    [userContentController addScriptMessageHandler:self name:@"codexOpenFiles"];
+    configuration.userContentController = userContentController;
 
     self.webView = [[WKWebView alloc] initWithFrame:NSZeroRect configuration:configuration];
     self.webView.navigationDelegate = self;
@@ -159,6 +162,99 @@
     "<p>The native app could not reach <code>127.0.0.1:8765</code>. Try restarting the app or running <code>~/Applications/Codex_CLI_UI/start.command</code>.</p>"
     "</main></body></html>";
     [self.webView loadHTMLString:html baseURL:nil];
+}
+
+- (NSString *)contentTypeForPath:(NSString *)path {
+    NSString *extension = path.pathExtension.lowercaseString ?: @"";
+    NSDictionary<NSString *, NSString *> *types = @{
+        @"stl": @"model/stl",
+        @"step": @"model/step",
+        @"stp": @"model/step",
+        @"3mf": @"model/3mf",
+        @"obj": @"model/obj",
+        @"scad": @"text/plain",
+        @"f3d": @"application/octet-stream",
+        @"img": @"application/octet-stream",
+        @"xz": @"application/x-xz",
+        @"zip": @"application/zip",
+        @"pdf": @"application/pdf",
+        @"txt": @"text/plain",
+        @"md": @"text/markdown",
+        @"json": @"application/json",
+        @"csv": @"text/csv",
+        @"jpg": @"image/jpeg",
+        @"jpeg": @"image/jpeg",
+        @"png": @"image/png",
+        @"gif": @"image/gif",
+        @"webp": @"image/webp"
+    };
+    return types[extension] ?: @"application/octet-stream";
+}
+
+- (void)sendNativeFilePickerResponseWithRequestId:(NSString *)requestId files:(NSArray<NSDictionary *> *)files error:(NSString *)errorText {
+    NSMutableDictionary *payload = [@{
+        @"requestId": requestId ?: @"",
+        @"files": files ?: @[]
+    } mutableCopy];
+    if (errorText.length) {
+        payload[@"error"] = errorText;
+    }
+
+    NSError *jsonError = nil;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:payload options:0 error:&jsonError];
+    if (!data || jsonError) {
+        return;
+    }
+    NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (!json.length) {
+        return;
+    }
+    NSString *script = [NSString stringWithFormat:@"window.codexReceiveNativeFiles && window.codexReceiveNativeFiles(%@);", json];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self.webView evaluateJavaScript:script completionHandler:nil];
+    });
+}
+
+- (void)userContentController:(WKUserContentController *)userContentController didReceiveScriptMessage:(WKScriptMessage *)message {
+    if (![message.name isEqualToString:@"codexOpenFiles"]) {
+        return;
+    }
+
+    NSString *requestId = @"";
+    if ([message.body isKindOfClass:[NSDictionary class]]) {
+        id value = [(NSDictionary *)message.body objectForKey:@"requestId"];
+        if ([value isKindOfClass:[NSString class]]) {
+            requestId = value;
+        }
+    }
+
+    NSOpenPanel *panel = [NSOpenPanel openPanel];
+    panel.canChooseFiles = YES;
+    panel.canChooseDirectories = NO;
+    panel.allowsMultipleSelection = YES;
+    panel.canCreateDirectories = NO;
+    panel.prompt = @"Attach";
+
+    [panel beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse result) {
+        NSMutableArray<NSDictionary *> *files = [NSMutableArray array];
+        if (result == NSModalResponseOK) {
+            for (NSURL *url in panel.URLs) {
+                NSString *path = url.path;
+                if (!path.length) {
+                    continue;
+                }
+                NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
+                NSNumber *size = attributes[NSFileSize] ?: @0;
+                [files addObject:@{
+                    @"name": path.lastPathComponent ?: @"attached file",
+                    @"path": path,
+                    @"size": size,
+                    @"type": [self contentTypeForPath:path]
+                }];
+            }
+        }
+        [self sendNativeFilePickerResponseWithRequestId:requestId files:files error:nil];
+    }];
 }
 
 - (void)webView:(WKWebView *)webView
