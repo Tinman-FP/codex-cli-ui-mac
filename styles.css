@@ -2386,17 +2386,16 @@ input:focus {
   font-size: 20px;
   font-weight: 800;
   box-shadow: var(--shadow);
-  pointer-events: none;
+  cursor: pointer;
 }
 
 .file-input-overlay {
   position: absolute;
-  inset: 0;
-  width: 36px;
-  height: 46px;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
   opacity: 0;
-  cursor: pointer;
-  z-index: 2;
+  pointer-events: none;
   font-size: 0;
 }
 
@@ -2405,11 +2404,7 @@ input:focus {
   color: var(--text);
 }
 
-.file-input-overlay:focus-visible {
-  outline: none;
-}
-
-.attach-picker:focus-within .attach-button {
+.attach-button:focus-visible {
   border-color: var(--accent);
   outline: 3px solid rgba(37, 99, 235, 0.16);
 }
@@ -2421,10 +2416,6 @@ input:focus {
 .icon-button:disabled,
 .switch-button:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.attach-picker:has(.file-input-overlay:disabled) .attach-button {
   opacity: 0.55;
 }
 
