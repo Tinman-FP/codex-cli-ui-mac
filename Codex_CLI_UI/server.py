@@ -44,6 +44,7 @@ LOCAL_TOOL_OUTPUT_DIR = DATA_DIR / "generated" / "printer-macros"
 LOCAL_CAD_OUTPUT_DIR = DATA_DIR / "generated" / "cad"
 LOCAL_AERO_OUTPUT_DIR = DATA_DIR / "generated" / "aero-cfd"
 LOCAL_STRUCTURAL_OUTPUT_DIR = DATA_DIR / "generated" / "structural-fea"
+LOCAL_DIAGRAM_OUTPUT_DIR = DATA_DIR / "generated" / "engineering-diagrams"
 LOCAL_QUALITY_OUTPUT_DIR = DATA_DIR / "generated" / "quality-gates"
 SOURCE_VAULT_DIR = DATA_DIR / "source-vault"
 PRINTING_SOURCE_VAULT_DIR = SOURCE_VAULT_DIR / "3d-printing"
@@ -290,6 +291,21 @@ ADMIN_TAXONOMY = {
             },
         },
     },
+    "engineering-diagrams": {
+        "name": "Engineering Diagrams",
+        "description": "Electrical block diagrams, wiring diagrams, schematics, and machine/system architecture drawings.",
+        "triggers": (
+            "architecture diagram", "block diagram", "diagram", "draw.io", "drawio",
+            "electrical diagram", "graphviz", "kicad", "schematic", "wiring diagram",
+        ),
+        "routeProjects": ("engineering-diagrams",),
+        "folders": {
+            "power-systems": {"name": "Power Systems", "triggers": ("solar", "battery", "grid", "inverter", "charge controller")},
+            "machine-architecture": {"name": "Machine Architecture", "triggers": ("3d printer", "cnc", "controller", "motion", "spindle", "toolhead")},
+            "wiring": {"name": "Wiring", "triggers": ("connector", "harness", "pinout", "wire", "wiring")},
+            "schematics": {"name": "Schematics", "triggers": ("kicad", "schematic", "symbol", "netlist")},
+        },
+    },
     "software-projects": {
         "name": "Software Projects",
         "description": "Apps, repos, local tools, automation, and UI work.",
@@ -500,6 +516,18 @@ PROJECT_QUERY_HINTS = {
     ),
     "research-parts-reference": ("fk275", "serpentine belt", "cross reference", "part number"),
     "energy-power-research": ("wind turbine", "alternator", "60vdc", "60 vdc", "300 rpm"),
+    "engineering-diagrams": (
+        "block diagram",
+        "wiring diagram",
+        "electrical diagram",
+        "schematic",
+        "drawio",
+        "graphviz",
+        "kicad",
+        "solar backup",
+        "battery backup",
+        "machine architecture",
+    ),
     "bible-kjv-study": ("king james", "kjv", "bible", "scripture"),
 }
 PROJECT_PLAYBOOKS = {
@@ -671,6 +699,26 @@ PROJECT_PLAYBOOKS = {
             "For electrical recommendations, verify voltage, RPM, phase/output type, power rating, and price separately.",
             "Do not extrapolate voltage at RPM unless you mark it as an estimate and explain load sag.",
             "Lead with one best practical pick, then list rejects or seller-confirmation questions.",
+        ),
+    },
+    "engineering-diagrams": {
+        "name": "Engineering Diagrams",
+        "specialist": "Systems Diagram Engineer",
+        "preferred_engine": "local",
+        "local_profile": "local-oss",
+        "reasoning": "high",
+        "triggers": (
+            "block diagram", "wiring diagram", "electrical diagram", "schematic",
+            "architecture diagram", "system diagram", "power diagram", "solar",
+            "backup battery", "battery backup", "power grid", "grid tie", "inverter",
+            "drawio", "draw.io", "graphviz", "dot file", "mermaid", "kicad",
+            "connector", "pinout", "wire gauge", "wiring harness", "cnc", "3d printer architecture",
+        ),
+        "rules": (
+            "Create editable diagram artifacts, not just prose, when asked for diagrams.",
+            "Separate block diagrams from wiring/schematic detail and label power, signal, safety, and ground paths.",
+            "Show assumptions, ratings to verify, protection devices, disconnects, grounding/bonding, connector/pin details, and unresolved engineering inputs.",
+            "Use Graphviz for clean layout when available, draw.io XML for editing, and KiCad notes/files when connector-level schematic work is needed.",
         ),
     },
     "bible-kjv-study": {
@@ -1257,6 +1305,33 @@ FREE_TOOL_MANIFEST = {
         "capabilities": ["scripted CAD", "STL export from SCAD models"],
         "free": True,
         "autoInstall": True,
+    },
+    "graphviz": {
+        "label": "Graphviz",
+        "commands": ["dot"],
+        "brew": ["graphviz"],
+        "estimatedBytes": 250 * MIB,
+        "capabilities": ["engineering block diagrams", "wiring architecture layout", "SVG diagram rendering"],
+        "free": True,
+        "autoInstall": True,
+    },
+    "drawio": {
+        "label": "draw.io Desktop",
+        "commands": ["drawio"],
+        "brewCask": ["drawio"],
+        "estimatedBytes": 550 * MIB,
+        "capabilities": ["editable engineering diagrams", "draw.io XML review", "diagram export"],
+        "free": True,
+        "autoInstall": False,
+    },
+    "kicad": {
+        "label": "KiCad",
+        "commands": ["kicad-cli"],
+        "brewCask": ["kicad"],
+        "estimatedBytes": 4500 * MIB,
+        "capabilities": ["electrical schematics", "connector-level wiring", "ERC/PCB handoff"],
+        "free": True,
+        "autoInstall": False,
     },
     "gmsh": {
         "label": "Gmsh",
@@ -4006,6 +4081,54 @@ def project_from_thread(messages):
     return ""
 
 
+ENGINEERING_DIAGRAM_TERMS = (
+    "block diagram",
+    "wiring diagram",
+    "electrical diagram",
+    "schematic",
+    "architecture diagram",
+    "system diagram",
+    "power diagram",
+    "drawio",
+    "draw.io",
+    "graphviz",
+    "mermaid",
+    "kicad",
+    "connector diagram",
+    "pinout diagram",
+)
+
+
+ENGINEERING_DIAGRAM_DOMAIN_TERMS = (
+    "solar",
+    "backup battery",
+    "battery backup",
+    "power grid",
+    "utility grid",
+    "inverter",
+    "charge controller",
+    "3d printer",
+    "printer architecture",
+    "toolhead",
+    "cnc",
+    "spindle",
+    "vfd",
+    "stepper driver",
+    "servo drive",
+)
+
+
+def is_engineering_diagram_request(messages):
+    query = latest_user_text(messages).lower()
+    if not query:
+        return False
+    if text_has_any(query, ENGINEERING_DIAGRAM_TERMS):
+        return True
+    if text_has_any(query, ("create", "make", "draw", "generate", "design")) and text_has_any(query, ENGINEERING_DIAGRAM_DOMAIN_TERMS):
+        return text_has_any(query, ("diagram", "wiring", "architecture", "schematic", "layout"))
+    return False
+
+
 def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_search="live"):
     text = route_query_text(messages, cwd)
     previous_project = project_from_thread(messages)
@@ -4013,6 +4136,7 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
     cooling_duct_research = is_cooling_duct_research_request(messages)
     cad_reference = is_cad_reference_question(messages)
     cad_design = is_cad_design_request(messages)
+    engineering_diagram = is_engineering_diagram_request(messages)
     public_printer_research = wants_public_printer_research(messages) and not cad_design
     scores = []
     for project_id, playbook in PROJECT_PLAYBOOKS.items():
@@ -4047,7 +4171,11 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
     else:
         score, project_id, matched = 0, "general", []
 
-    if cpap_hose_spec:
+    if engineering_diagram:
+        project_id = "engineering-diagrams"
+        score = max(score, 36)
+        matched = ["engineering-diagram"] + [item for item in matched if item != "engineering-diagram"]
+    elif cpap_hose_spec:
         project_id = "research-parts-reference"
         score = max(score, 30)
         matched = ["cpap-hose-spec"] + [item for item in matched if item != "cpap-hose-spec"]
@@ -6663,6 +6791,11 @@ APP_BUNDLE_COMMAND_PATHS = {
     "vspaero": [
         "/Applications/OpenVSP.app/Contents/Resources/vspaero",
         "/Applications/OpenVSP-*.app/Contents/Resources/vspaero",
+    ],
+    "kicad-cli": [
+        str(Path.home() / "Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli"),
+        "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli",
+        "/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/kicad-cli",
     ],
 }
 
@@ -12492,6 +12625,552 @@ def format_structural_fea_preflight_answer(result):
     return "\n".join(lines)
 
 
+def engineering_diagram_domain(query):
+    text = str(query or "").lower()
+    if text_has_any(text, ("solar", "backup battery", "battery backup", "power grid", "utility grid", "inverter", "charge controller", "pv array")):
+        return "solar-grid-battery"
+    if text_has_any(text, ("cnc", "spindle", "vfd", "cnc machine", "router table", "mill", "lathe")):
+        return "cnc-machine-architecture"
+    if text_has_any(text, ("3d printer", "printer architecture", "toolhead", "hotend", "heated bed", "klipper", "marlin", "bambu", "qidi")):
+        return "3d-printer-architecture"
+    return "electrical-system"
+
+
+def engineering_diagram_modes(query):
+    text = str(query or "").lower()
+    if text_has_any(text, ("wiring", "wire", "connector", "pinout", "harness", "schematic")):
+        return ("block", "wiring")
+    if text_has_any(text, ("block", "architecture", "system")):
+        return ("block",)
+    return ("block", "wiring")
+
+
+def engineering_diagram_spec(query):
+    domain = engineering_diagram_domain(query)
+    modes = engineering_diagram_modes(query)
+    if domain == "solar-grid-battery":
+        title = "Solar, Grid, and Backup Battery Power Architecture"
+        nodes = [
+            {"id": "grid", "label": "Utility Grid", "group": "source", "note": "AC service source"},
+            {"id": "meter", "label": "Meter / Service Entrance", "group": "protection", "note": "Utility/service boundary"},
+            {"id": "main_panel", "label": "Main Service Panel", "group": "distribution", "note": "Existing load distribution"},
+            {"id": "pv_array", "label": "PV Array", "group": "source", "note": "String voltage/current TBD"},
+            {"id": "pv_disconnect", "label": "PV Combiner / DC Disconnect", "group": "protection", "note": "OCPD, rapid shutdown where required"},
+            {"id": "hybrid_inverter", "label": "Hybrid Inverter / Charger", "group": "conversion", "note": "Grid-forming backup inverter"},
+            {"id": "battery", "label": "Battery Bank", "group": "storage", "note": "Chemistry, voltage, Ah/kWh TBD"},
+            {"id": "bms", "label": "BMS + Battery Disconnect", "group": "protection", "note": "Fuse, contactor, service disconnect"},
+            {"id": "transfer", "label": "Transfer Switch / Critical Loads Panel", "group": "distribution", "note": "Isolates backed-up loads"},
+            {"id": "loads", "label": "Critical Loads", "group": "load", "note": "Load list and surge current TBD"},
+            {"id": "ground", "label": "Grounding / Bonding System", "group": "safety", "note": "NEC/local code required"},
+        ]
+        edges = [
+            ("grid", "meter", "utility AC service", "AC"),
+            ("meter", "main_panel", "service conductors", "AC"),
+            ("main_panel", "hybrid_inverter", "AC input / charger feed", "AC"),
+            ("hybrid_inverter", "transfer", "backup AC output", "AC"),
+            ("transfer", "loads", "protected load circuits", "AC"),
+            ("pv_array", "pv_disconnect", "PV string DC + / -", "DC"),
+            ("pv_disconnect", "hybrid_inverter", "PV DC input", "DC"),
+            ("battery", "bms", "cell taps / pack leads", "DC"),
+            ("bms", "hybrid_inverter", "battery DC + / - with fuse/disconnect", "DC"),
+            ("main_panel", "transfer", "selected backed-up circuits", "AC"),
+            ("ground", "main_panel", "equipment grounding conductor", "GROUND"),
+            ("ground", "pv_disconnect", "array/frame bonding", "GROUND"),
+            ("ground", "hybrid_inverter", "EGC/bonding per manual", "GROUND"),
+        ]
+        checks = [
+            "Confirm utility interconnect rules, permit/inspection requirements, and whether this is grid-tied, hybrid, or off-grid only.",
+            "Size PV string voltage/current against inverter MPPT limits and cold-weather Voc.",
+            "Specify PV rapid shutdown, DC disconnects, OCPD, combiner ratings, and conductor insulation ratings.",
+            "Size battery fuse/disconnect/contactors for fault current and inverter surge load.",
+            "Verify neutral-ground bonding and transfer-switch topology before installation.",
+            "Calculate conductor gauge from current, distance, voltage drop, temperature, conduit fill, and local code.",
+        ]
+    elif domain == "3d-printer-architecture":
+        title = "3D Printer Electrical and Control Architecture"
+        nodes = [
+            {"id": "ac_inlet", "label": "AC Inlet + Fuse + Switch", "group": "source", "note": "IEC inlet, fuse, earth ground"},
+            {"id": "psu_24v", "label": "24 VDC PSU", "group": "power", "note": "Current rating TBD"},
+            {"id": "controller", "label": "Motion Controller Board", "group": "control", "note": "MCU, endstops, heaters, fans"},
+            {"id": "sbc", "label": "SBC / Host", "group": "control", "note": "Klipper host or vendor controller"},
+            {"id": "drivers", "label": "Stepper Drivers", "group": "motion", "note": "Onboard or external drivers"},
+            {"id": "motors", "label": "X/Y/Z/E Motors", "group": "load", "note": "Phase wiring and current TBD"},
+            {"id": "toolhead", "label": "Toolhead Board / Harness", "group": "control", "note": "CAN/USB/ribbon/harness"},
+            {"id": "hotend", "label": "Hotend Heater + Thermistor", "group": "load", "note": "Heater wattage and sensor type TBD"},
+            {"id": "bed", "label": "Heated Bed + SSR/MOSFET", "group": "load", "note": "DC or AC bed topology TBD"},
+            {"id": "fans", "label": "Fans / LEDs / Aux Loads", "group": "load", "note": "Voltage and PWM path TBD"},
+            {"id": "sensors", "label": "Probe, Endstops, Filament Sensors", "group": "sensor", "note": "Signal voltage and pullups TBD"},
+            {"id": "ground", "label": "Frame Earth / DC Return", "group": "safety", "note": "Earth bonding and DC common rules"},
+        ]
+        edges = [
+            ("ac_inlet", "psu_24v", "AC line/neutral/earth", "AC"),
+            ("psu_24v", "controller", "24 VDC + / -", "DC"),
+            ("psu_24v", "bed", "bed power feed", "DC/AC"),
+            ("sbc", "controller", "USB/UART/CAN control link", "SIGNAL"),
+            ("controller", "drivers", "STEP/DIR/EN", "SIGNAL"),
+            ("drivers", "motors", "motor phase pairs", "MOTOR"),
+            ("controller", "toolhead", "CAN/USB/harness + power", "SIGNAL/DC"),
+            ("toolhead", "hotend", "heater PWM + thermistor", "POWER/SIGNAL"),
+            ("controller", "fans", "PWM/tach or switched DC", "POWER/SIGNAL"),
+            ("controller", "sensors", "endstop/probe/sensor inputs", "SIGNAL"),
+            ("ground", "ac_inlet", "protective earth", "GROUND"),
+            ("ground", "psu_24v", "frame bond / DC reference as designed", "GROUND"),
+        ]
+        checks = [
+            "Identify firmware platform first: Klipper, Marlin, RepRapFirmware, Bambu/vendor appliance, or custom.",
+            "Verify PSU voltage/current budget for heaters, motors, fans, LEDs, and toolhead electronics.",
+            "Separate heater power wiring from low-level thermistor/probe/signal wiring where possible.",
+            "Document every connector pinout, voltage, polarity, fuse, and wire gauge before live wiring.",
+            "Confirm earth bonding for metal frames, AC beds, SSRs, and PSU chassis.",
+            "For CAN toolheads, document termination, bitrate, shield/drain handling, and power injection.",
+        ]
+    elif domain == "cnc-machine-architecture":
+        title = "CNC Machine Electrical and Control Architecture"
+        nodes = [
+            {"id": "ac_mains", "label": "AC Mains / Disconnect", "group": "source", "note": "Branch circuit and disconnect TBD"},
+            {"id": "estop", "label": "E-Stop + Safety Relay", "group": "safety", "note": "Hardware safety loop"},
+            {"id": "control_psu", "label": "Control PSU", "group": "power", "note": "24 VDC/5 VDC controls"},
+            {"id": "controller", "label": "CNC Controller", "group": "control", "note": "GRBL/LinuxCNC/Mach/industrial controller"},
+            {"id": "drivers", "label": "Stepper/Servo Drives", "group": "motion", "note": "Drive voltage/current TBD"},
+            {"id": "motors", "label": "Axis Motors", "group": "load", "note": "X/Y/Z/A motors"},
+            {"id": "vfd", "label": "VFD / Spindle Drive", "group": "power", "note": "Spindle power and control mode TBD"},
+            {"id": "spindle", "label": "Spindle", "group": "load", "note": "Shielded motor cable, grounding"},
+            {"id": "limits", "label": "Limits, Probe, Home Sensors", "group": "sensor", "note": "NO/NC and noise handling TBD"},
+            {"id": "aux", "label": "Coolant / Dust / Aux Relays", "group": "load", "note": "Relay/contactor outputs"},
+            {"id": "pc", "label": "Control PC / Pendant", "group": "control", "note": "USB/Ethernet/fieldbus"},
+            {"id": "ground", "label": "Protective Earth / Shield Ground", "group": "safety", "note": "Star grounding/shield strategy"},
+        ]
+        edges = [
+            ("ac_mains", "estop", "AC feed through safety path", "AC/SAFETY"),
+            ("estop", "control_psu", "safe control power", "DC"),
+            ("estop", "drivers", "drive enable / power cut", "SAFETY"),
+            ("estop", "vfd", "spindle enable / STO where available", "SAFETY"),
+            ("control_psu", "controller", "control power", "DC"),
+            ("pc", "controller", "USB/Ethernet/fieldbus", "SIGNAL"),
+            ("controller", "drivers", "STEP/DIR/EN or fieldbus", "SIGNAL"),
+            ("drivers", "motors", "motor power cables", "MOTOR"),
+            ("controller", "vfd", "0-10 V, PWM, relay, or Modbus", "SIGNAL"),
+            ("vfd", "spindle", "shielded 3-phase spindle cable", "AC"),
+            ("controller", "limits", "home/limit/probe inputs", "SIGNAL"),
+            ("controller", "aux", "relay outputs", "SIGNAL/AC"),
+            ("ground", "ac_mains", "protective earth", "GROUND"),
+            ("ground", "vfd", "PE and shield termination", "GROUND"),
+            ("ground", "spindle", "spindle/frame bond", "GROUND"),
+        ]
+        checks = [
+            "Treat E-stop as a hardwired safety function, not software-only pause.",
+            "Use shielded spindle/motor cables and a documented shield-ground strategy.",
+            "Confirm VFD control mode, STO availability, braking resistor needs, and spindle cable rating.",
+            "Separate noisy VFD/motor wiring from limit/probe/control signals.",
+            "Document every drive enable, alarm, limit, probe, coolant, and dust-collection interlock.",
+            "Size breakers, fuses, contactors, and wire gauge from real current, duty, length, and code requirements.",
+        ]
+    else:
+        title = "Electrical System Architecture"
+        nodes = [
+            {"id": "source", "label": "Power Source", "group": "source", "note": "Voltage/current TBD"},
+            {"id": "protection", "label": "Fuse / Breaker / Disconnect", "group": "protection", "note": "OCPD rating TBD"},
+            {"id": "conversion", "label": "Power Conversion", "group": "conversion", "note": "PSU, inverter, converter, or regulator"},
+            {"id": "controller", "label": "Controller", "group": "control", "note": "Control logic TBD"},
+            {"id": "loads", "label": "Loads", "group": "load", "note": "Load list TBD"},
+            {"id": "sensors", "label": "Sensors / Feedback", "group": "sensor", "note": "Signal levels TBD"},
+            {"id": "ground", "label": "Ground / Bonding", "group": "safety", "note": "Grounding rules TBD"},
+        ]
+        edges = [
+            ("source", "protection", "incoming power", "POWER"),
+            ("protection", "conversion", "protected feed", "POWER"),
+            ("conversion", "controller", "control power", "DC"),
+            ("controller", "loads", "switched outputs", "POWER/SIGNAL"),
+            ("sensors", "controller", "feedback signals", "SIGNAL"),
+            ("ground", "source", "protective earth/reference", "GROUND"),
+            ("ground", "loads", "equipment grounding", "GROUND"),
+        ]
+        checks = [
+            "List all voltages, currents, loads, connectors, and distances before assigning wire gauge.",
+            "Add over-current protection near the source and document disconnects.",
+            "Separate power, signal, and safety wiring.",
+            "Document grounding/bonding and shield termination.",
+        ]
+    return {"domain": domain, "title": title, "modes": modes, "nodes": nodes, "edges": edges, "checks": checks}
+
+
+def dot_id(value):
+    return re.sub(r"[^A-Za-z0-9_]", "_", str(value or "node")).strip("_") or "node"
+
+
+def graphviz_dot_text(spec, wiring=False):
+    lines = [
+        "digraph EngineeringDiagram {",
+        "  graph [rankdir=LR, bgcolor=\"white\", splines=ortho, nodesep=0.55, ranksep=0.8, pad=0.25];",
+        "  node [shape=box, style=\"rounded,filled\", fontname=\"Helvetica\", fontsize=11, margin=\"0.12,0.08\", penwidth=1.2];",
+        "  edge [fontname=\"Helvetica\", fontsize=9, arrowsize=0.75, penwidth=1.4, color=\"#334155\"];",
+        f"  labelloc=\"t\"; label={json.dumps(spec['title'] + (' - wiring layer' if wiring else ' - block layer'))};",
+    ]
+    colors = {
+        "source": "#DBEAFE",
+        "protection": "#FEF3C7",
+        "distribution": "#E0E7FF",
+        "conversion": "#DCFCE7",
+        "storage": "#FCE7F3",
+        "power": "#DCFCE7",
+        "control": "#EDE9FE",
+        "motion": "#FDE68A",
+        "load": "#FFEDD5",
+        "sensor": "#CCFBF1",
+        "safety": "#FEE2E2",
+    }
+    for node in spec["nodes"]:
+        label = node["label"] if not wiring else f"{node['label']}\\n{node.get('note', '')}"
+        fill = colors.get(node.get("group"), "#F8FAFC")
+        lines.append(f"  {dot_id(node['id'])} [label={json.dumps(label)}, fillcolor=\"{fill}\"];")
+    edge_colors = {
+        "AC": "#DC2626",
+        "DC": "#2563EB",
+        "DC/AC": "#7C3AED",
+        "SIGNAL": "#0F766E",
+        "SIGNAL/DC": "#0891B2",
+        "POWER/SIGNAL": "#9333EA",
+        "AC/SAFETY": "#B91C1C",
+        "SAFETY": "#EA580C",
+        "GROUND": "#475569",
+        "MOTOR": "#9333EA",
+    }
+    for source, target, label, kind in spec["edges"]:
+        edge_label = label if wiring else kind
+        color = edge_colors.get(kind, edge_colors.get(str(kind).split("/")[0], "#334155"))
+        style = "dashed" if "GROUND" in kind or "SAFETY" in kind else "solid"
+        lines.append(f"  {dot_id(source)} -> {dot_id(target)} [xlabel={json.dumps(edge_label)}, color=\"{color}\", style=\"{style}\"];")
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def manual_diagram_svg(spec):
+    width = 1200
+    x_left = 70
+    y = 90
+    box_w = 230
+    box_h = 60
+    gap_x = 270
+    gap_y = 34
+    positions = {}
+    for index, node in enumerate(spec["nodes"]):
+        col = index % 4
+        row = index // 4
+        positions[node["id"]] = (x_left + col * gap_x, y + row * (box_h + gap_y))
+    height = max(420, y + ((len(spec["nodes"]) + 3) // 4) * (box_h + gap_y) + 80)
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+        '<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/></marker></defs>',
+        '<rect width="100%" height="100%" fill="white"/>',
+        f'<text x="60" y="42" font-family="Helvetica" font-size="24" font-weight="700" fill="#0f172a">{html.escape(spec["title"])}</text>',
+    ]
+    for source, target, label, kind in spec["edges"]:
+        if source not in positions or target not in positions:
+            continue
+        sx, sy = positions[source]
+        tx, ty = positions[target]
+        x1, y1 = sx + box_w, sy + box_h / 2
+        x2, y2 = tx, ty + box_h / 2
+        parts.append(f'<path d="M {x1:.1f} {y1:.1f} L {x2:.1f} {y2:.1f}" fill="none" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>')
+        parts.append(f'<text x="{(x1+x2)/2:.1f}" y="{(y1+y2)/2 - 5:.1f}" font-family="Helvetica" font-size="11" fill="#334155">{html.escape(kind)}</text>')
+    for node in spec["nodes"]:
+        x, y0 = positions[node["id"]]
+        parts.append(f'<rect x="{x}" y="{y0}" width="{box_w}" height="{box_h}" rx="8" fill="#f8fafc" stroke="#334155" stroke-width="1.5"/>')
+        parts.append(f'<text x="{x+14}" y="{y0+27}" font-family="Helvetica" font-size="14" font-weight="700" fill="#0f172a">{html.escape(node["label"])}</text>')
+        parts.append(f'<text x="{x+14}" y="{y0+47}" font-family="Helvetica" font-size="11" fill="#475569">{html.escape(node.get("note", ""))}</text>')
+    parts.append("</svg>")
+    return "\n".join(parts)
+
+
+def mermaid_diagram_text(spec):
+    lines = [f"%% {spec['title']}", "flowchart LR"]
+    for node in spec["nodes"]:
+        lines.append(f"  {dot_id(node['id'])}[\"{node['label']}\"]")
+    for source, target, label, kind in spec["edges"]:
+        edge = f"{label} ({kind})"
+        lines.append(f"  {dot_id(source)} -->|\"{edge}\"| {dot_id(target)}")
+    return "\n".join(lines) + "\n"
+
+
+def drawio_xml_text(spec):
+    cells = [
+        '<mxCell id="0"/>',
+        '<mxCell id="1" parent="0"/>',
+    ]
+    x0, y0, gap_x, gap_y, w, h = 80, 100, 280, 115, 210, 70
+    for index, node in enumerate(spec["nodes"]):
+        col = index % 4
+        row = index // 4
+        x = x0 + col * gap_x
+        y = y0 + row * gap_y
+        value = html.escape(f"{node['label']}<br><font style=\"font-size: 10px\">{node.get('note', '')}</font>")
+        cells.append(
+            f'<mxCell id="{html.escape(node["id"])}" value="{value}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8fafc;strokeColor=#334155;" vertex="1" parent="1">'
+            f'<mxGeometry x="{x}" y="{y}" width="{w}" height="{h}" as="geometry"/></mxCell>'
+        )
+    for index, (source, target, label, kind) in enumerate(spec["edges"], 1):
+        edge_id = f"edge_{index}"
+        value = html.escape(f"{label} ({kind})")
+        cells.append(
+            f'<mxCell id="{edge_id}" value="{value}" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="{html.escape(source)}" target="{html.escape(target)}">'
+            '<mxGeometry relative="1" as="geometry"/></mxCell>'
+        )
+    body = "".join(cells)
+    return (
+        '<mxfile host="Codex CLI UI" agent="Codex CLI UI" version="24.0.0">'
+        f'<diagram id="engineering-diagram" name="{html.escape(spec["title"])}">'
+        f'<mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0"><root>{body}</root></mxGraphModel>'
+        "</diagram></mxfile>\n"
+    )
+
+
+def diagram_csv_text(spec):
+    lines = ["source,target,label,type"]
+    for source, target, label, kind in spec["edges"]:
+        cells = [source, target, label, kind]
+        lines.append(",".join('"' + str(cell).replace('"', '""') + '"' for cell in cells))
+    return "\n".join(lines) + "\n"
+
+
+def deterministic_uuid(seed):
+    digest = hashlib.md5(str(seed or "codex-diagram").encode("utf-8")).hexdigest()
+    return f"{digest[:8]}-{digest[8:12]}-{digest[12:16]}-{digest[16:20]}-{digest[20:32]}"
+
+
+def kicad_quote(value):
+    return str(value or "").replace("\\", "\\\\").replace('"', '\\"')
+
+
+def kicad_starter_schematic_text(spec):
+    text_lines = [
+        spec.get("title", "Engineering Diagram"),
+        "",
+        "Blocks:",
+        *[f"- {node['label']}: {node.get('note', '')}" for node in spec.get("nodes", [])[:18]],
+        "",
+        "Connections:",
+        *[f"- {source} -> {target}: {label} ({kind})" for source, target, label, kind in spec.get("edges", [])[:24]],
+        "",
+        "Next: replace these text blocks with real symbols, connector pin numbers, nets, ERC rules, footprints, and BOM data.",
+    ]
+    body = "\\n".join(kicad_quote(line) for line in text_lines)
+    return f'''(kicad_sch
+  (version 20250114)
+  (generator "Codex_CLI_UI")
+  (generator_version "1")
+  (uuid "{deterministic_uuid(spec.get('title'))}")
+  (paper "A3")
+  (title_block
+    (title "{kicad_quote(spec.get('title'))}")
+    (date "{time.strftime('%Y-%m-%d')}")
+    (rev "draft")
+  )
+  (lib_symbols)
+  (text "{body}"
+    (exclude_from_sim no)
+    (at 20 25 0)
+    (effects
+      (font
+        (size 2.0 2.0)
+      )
+      (justify left top)
+    )
+    (uuid "{deterministic_uuid(spec.get('title') + '-notes')}")
+  )
+)
+'''
+
+
+def kicad_starter_project_text(title):
+    return json.dumps(
+        {
+            "board": {"design_settings": {"defaults": {}}},
+            "boards": [],
+            "cvpcb": {"equivalence_files": []},
+            "erc": {"erc_exclusions": []},
+            "libraries": {"pinned_footprint_libs": [], "pinned_symbol_libs": []},
+            "meta": {"filename": f"{slugify(title, 'engineering-diagram')}.kicad_pro", "version": 1},
+            "net_settings": {"classes": []},
+            "pcbnew": {},
+            "schematic": {"drawing": {"dashed_lines_dash_length_ratio": 12.0, "dashed_lines_gap_length_ratio": 3.0}, "legacy_lib_dir": ""},
+            "sheets": [],
+            "text_variables": {},
+        },
+        indent=2,
+    ) + "\n"
+
+
+def engineering_diagram_readme_text(prompt, spec, paths, tools):
+    checks = "\n".join(f"- [ ] {item}" for item in spec.get("checks", []))
+    nodes = "\n".join(f"- {node['label']}: {node.get('note', '')}" for node in spec.get("nodes", []))
+    edges = "\n".join(f"- {source} -> {target}: {label} ({kind})" for source, target, label, kind in spec.get("edges", []))
+    return f"""# {spec['title']}
+
+Generated by Codex CLI UI engineering diagram pack.
+
+## Files
+
+- Graphviz DOT: `{paths.get('dotPath')}`
+- SVG preview: `{paths.get('svgPath')}`
+- Mermaid source: `{paths.get('mermaidPath')}`
+- draw.io import: `{paths.get('drawioPath')}`
+- Wiring/net CSV: `{paths.get('netlistCsvPath')}`
+- KiCad starter project: `{paths.get('kicadProjectPath')}`
+- KiCad starter schematic: `{paths.get('kicadSchematicPath')}`
+
+## Tool status
+
+- Graphviz dot: {tools.get('dotPath') or 'not found; fallback SVG used'}
+- draw.io CLI: {tools.get('drawioPath') or 'not found; .drawio XML still generated'}
+- KiCad CLI: {tools.get('kicadCliPath') or 'not found; starter files still generated'}
+
+## Engineering checks before build
+
+{checks}
+
+## Blocks
+
+{nodes}
+
+## Connections
+
+{edges}
+
+## Original prompt
+
+```text
+{compact(prompt, 1600)}
+```
+"""
+
+
+def stage_engineering_diagram_artifact(messages, cwd="", target_path=None):
+    prompt = latest_user_text(messages)
+    spec = engineering_diagram_spec(prompt)
+    slug = slugify(prompt, fallback=spec["domain"])[:64]
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    target = Path(target_path).expanduser() if target_path else LOCAL_DIAGRAM_OUTPUT_DIR / f"{timestamp}-{slug}"
+    target.mkdir(parents=True, exist_ok=True)
+    dot_path = target / f"{slug}_block.dot"
+    svg_path = target / f"{slug}_block.svg"
+    mermaid_path = target / f"{slug}.mmd"
+    drawio_path = target / f"{slug}.drawio"
+    netlist_path = target / f"{slug}_wiring_netlist.csv"
+    kicad_dir = target / "kicad_starter"
+    kicad_dir.mkdir(exist_ok=True)
+    kicad_project_path = kicad_dir / f"{slug}.kicad_pro"
+    kicad_schematic_path = kicad_dir / f"{slug}.kicad_sch"
+    kicad_notes_path = kicad_dir / "README.md"
+    readme_path = target / "README.md"
+    dot_text = graphviz_dot_text(spec, wiring="wiring" in spec.get("modes", ()))
+    dot_path.write_text(dot_text, encoding="utf-8")
+    dot_bin = command_path("dot")
+    dot_ok = False
+    dot_error = ""
+    if dot_bin:
+        run = subprocess.run(
+            [dot_bin, "-Tsvg", str(dot_path), "-o", str(svg_path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=30,
+            env={**os.environ, "PATH": PATH_FOR_CODEX},
+        )
+        dot_ok = run.returncode == 0 and svg_path.exists() and svg_path.stat().st_size > 0
+        dot_error = compact(run.stderr or run.stdout or "", 240)
+    if not dot_ok:
+        svg_path.write_text(manual_diagram_svg(spec), encoding="utf-8")
+    mermaid_path.write_text(mermaid_diagram_text(spec), encoding="utf-8")
+    drawio_path.write_text(drawio_xml_text(spec), encoding="utf-8")
+    netlist_path.write_text(diagram_csv_text(spec), encoding="utf-8")
+    kicad_project_path.write_text(kicad_starter_project_text(spec["title"]), encoding="utf-8")
+    kicad_schematic_path.write_text(kicad_starter_schematic_text(spec), encoding="utf-8")
+    kicad_notes_path.write_text(
+        "\n".join(
+            [
+                f"# KiCad starter for {spec['title']}",
+                "",
+                "This folder is a starter project placeholder. Use it when the block/wiring diagram is ready to become a real schematic with symbols, connector pin numbers, footprints, ERC, and BOM.",
+                "",
+                "Next schematic inputs needed:",
+                *[f"- {item}" for item in spec.get("checks", [])],
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    tools = {
+        "dotPath": dot_bin,
+        "drawioPath": command_path("drawio"),
+        "kicadCliPath": command_path("kicad-cli"),
+        "dotRendered": dot_ok,
+        "dotError": dot_error,
+    }
+    paths = {
+        "targetDir": str(target),
+        "dotPath": str(dot_path),
+        "svgPath": str(svg_path),
+        "mermaidPath": str(mermaid_path),
+        "drawioPath": str(drawio_path),
+        "netlistCsvPath": str(netlist_path),
+        "kicadProjectPath": str(kicad_project_path),
+        "kicadSchematicPath": str(kicad_schematic_path),
+        "kicadNotesPath": str(kicad_notes_path),
+        "readmePath": str(readme_path),
+    }
+    readme_path.write_text(engineering_diagram_readme_text(prompt, spec, paths, tools), encoding="utf-8")
+    return {"ok": True, "spec": spec, "tools": tools, **paths}
+
+
+def engineering_diagram_working_notes(result):
+    notes = []
+    tools = result.get("tools") or {}
+    spec = result.get("spec") or {}
+    notes.append(f"Classified diagram domain as {spec.get('domain', 'unknown')}.")
+    notes.append("Generated Graphviz DOT, SVG preview, Mermaid source, draw.io import XML, wiring/net CSV, and KiCad starter notes.")
+    if tools.get("dotRendered"):
+        notes.append(f"Rendered SVG with Graphviz at {tools.get('dotPath')}.")
+    else:
+        notes.append("Graphviz rendering was unavailable or failed; used the built-in SVG fallback.")
+    if tools.get("drawioPath"):
+        notes.append(f"draw.io CLI is visible at {tools.get('drawioPath')}.")
+    if tools.get("kicadCliPath"):
+        notes.append(f"KiCad CLI is visible at {tools.get('kicadCliPath')}.")
+    return notes
+
+
+def format_engineering_diagram_answer(result):
+    if not result.get("ok"):
+        return "\n\n".join(
+            [
+                "I could not finish the engineering diagram package.",
+                f"This is why: {compact(result.get('error') or 'the local diagram tool failed before files were finalized', 400)}",
+                f"You should also consider: retry with the system boundary, source voltage, load list, controller type, and whether you want a block diagram, wiring diagram, or schematic. Target folder: `{result.get('targetDir') or LOCAL_DIAGRAM_OUTPUT_DIR}`",
+            ]
+        )
+    spec = result.get("spec") or {}
+    tools = result.get("tools") or {}
+    lines = [
+        f"I created an engineering diagram package for {spec.get('title', 'the requested system')}.",
+        "",
+        f"- SVG preview: `{result.get('svgPath')}`",
+        f"- Graphviz DOT: `{result.get('dotPath')}`",
+        f"- draw.io editable diagram: `{result.get('drawioPath')}`",
+        f"- Mermaid source: `{result.get('mermaidPath')}`",
+        f"- Wiring/net CSV: `{result.get('netlistCsvPath')}`",
+        f"- KiCad starter project: `{result.get('kicadProjectPath')}`",
+        f"- KiCad starter schematic: `{result.get('kicadSchematicPath')}`",
+        f"- Engineering README: `{result.get('readmePath')}`",
+        "",
+        "This is why: Graphviz gives a clean, repeatable block layout; draw.io gives an editable engineering drawing; the wiring/net CSV preserves connection intent; and the KiCad starter folder is the handoff point for true schematic work with pins, symbols, ERC, footprints, and BOM.",
+        "",
+        f"Tool status: Graphviz {'rendered the SVG' if tools.get('dotRendered') else 'fallback SVG was used'}; draw.io {'found' if tools.get('drawioPath') else 'not found'}; KiCad CLI {'found' if tools.get('kicadCliPath') else 'not found'}.",
+        "",
+        "You should also consider: this is an engineering-quality starting package, not an approved construction drawing. Before wiring, confirm voltages, currents, breaker/fuse sizes, disconnect ratings, wire gauge, connector pin numbers, grounding/bonding, enclosure/strain relief, and applicable electrical code or machine-safety requirements.",
+    ]
+    return "\n".join(lines)
+
+
 def run_deeper_analysis_tool(messages, cwd="", analysis_kind="auto"):
     kind = str(analysis_kind or "auto").strip().lower()
     if kind not in {"auto", "aero", "structural"}:
@@ -12499,7 +13178,7 @@ def run_deeper_analysis_tool(messages, cwd="", analysis_kind="auto"):
     route = route_manager(messages, cwd=cwd, requested_profile="manager", web_search="live")
     admin_topic = route_admin_topic(messages, route)
     if kind == "auto":
-        if is_structural_mechanical_design_request(messages):
+        if is_structural_mechanical_design_request(messages) and not is_engineering_diagram_request(messages):
             kind = "structural"
         elif is_aero_cfd_analysis_request(messages):
             kind = "aero"
@@ -14071,6 +14750,43 @@ def package_health_report():
         add("tools:self-healing-supervisor", "fail", str(exc))
 
     try:
+        diagram_messages = [
+            {
+                "role": "user",
+                "text": "Create an engineering quality electrical block diagram and wiring diagram for solar, grid power, backup battery, hybrid inverter, and critical loads.",
+            }
+        ]
+        diagram_route = route_manager(diagram_messages, requested_profile="manager", web_search="disabled")
+        LOCAL_DIAGRAM_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="diagram-health-", dir=str(LOCAL_DIAGRAM_OUTPUT_DIR)) as tmp_dir:
+            diagram = stage_engineering_diagram_artifact(diagram_messages, target_path=tmp_dir)
+            required_paths = [
+                diagram.get("svgPath"),
+                diagram.get("dotPath"),
+                diagram.get("drawioPath"),
+                diagram.get("mermaidPath"),
+                diagram.get("netlistCsvPath"),
+                diagram.get("kicadProjectPath"),
+                diagram.get("kicadSchematicPath"),
+                diagram.get("readmePath"),
+            ]
+            files_ok = all(path and Path(path).exists() and Path(path).stat().st_size > 0 for path in required_paths)
+        ok = (
+            diagram_route.get("projectId") == "engineering-diagrams"
+            and diagram.get("ok")
+            and files_ok
+            and (diagram.get("spec") or {}).get("domain") == "solar-grid-battery"
+        )
+        tools = diagram.get("tools") or {}
+        add(
+            "tools:engineering-diagram-pack",
+            "pass" if ok else "fail",
+            f"Graphviz={'yes' if tools.get('dotPath') else 'no'}, draw.io={'yes' if tools.get('drawioPath') else 'no'}, KiCad CLI={'yes' if tools.get('kicadCliPath') else 'no'}",
+        )
+    except Exception as exc:
+        add("tools:engineering-diagram-pack", "fail", str(exc))
+
+    try:
         discovery = discover_klipper_config_dirs("klipper")
         candidates = discovery.get("candidates", [])
         add(
@@ -15279,6 +15995,11 @@ def response_role_style(route=None):
             "voice": "One practical pick, verified electrical constraints, seller/manufacturer confirmation questions.",
             "checklist": ["voltage", "RPM", "phase/output", "price", "confirmation caveat"],
         },
+        "engineering-diagrams": {
+            "title": "Systems Diagram Engineer",
+            "voice": "Engineering-grade diagrams with labeled power/signal/safety paths, assumptions, and editable artifacts.",
+            "checklist": ["system boundary", "power path", "signal path", "protection/safety", "editable files"],
+        },
         "research-parts-reference": {
             "title": "Parts Researcher",
             "voice": "Exact-fit thinking with clear rejects and dimensional/material caveats.",
@@ -15312,6 +16033,9 @@ def task_contract(messages, route=None):
     if is_cad_reference_question(messages):
         kind = "CAD reference"
         done = "Give the format/spec answer directly; do not create CAD artifacts."
+    elif is_engineering_diagram_request(messages):
+        kind = "Engineering diagram"
+        done = "Create editable block/wiring diagram artifacts, label paths, list assumptions, and flag missing ratings or code-sensitive details."
     elif is_stl_cfd_duct_design_request(messages):
         kind = "STL/CAD deliverable"
         done = "Find or confirm the STL, generate usable design artifacts, list clickable paths, and state validation limits."
@@ -15355,6 +16079,8 @@ def deliverable_type(path):
         return "script"
     if suffix in {".stl", ".step", ".stp", ".f3d", ".f3z", ".scad", ".3mf"}:
         return "cad"
+    if suffix in {".svg", ".drawio", ".mmd", ".dot", ".kicad_pro", ".kicad_sch"}:
+        return "diagram"
     if suffix in {".cfg", ".ini", ".json", ".yaml", ".yml", ".toml", ".plist", ".gcode"}:
         return "config"
     if suffix in {".md", ".txt", ".pdf", ".csv"}:
@@ -15454,11 +16180,11 @@ def response_scorecard(messages, route, answer, contract=None, deliverables=None
         (not direct_needed) or ("this is why:" in lower and "you should also consider:" in lower),
         "Direct answers should include why and what to consider.",
     )
-    if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable", "Aero/CFD preflight", "Mechanical/structural preflight", "File/action", "Code/config"}:
+    if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable", "Aero/CFD preflight", "Mechanical/structural preflight", "Engineering diagram", "File/action", "Code/config"}:
         add("Deliverables visible", bool(deliverables), "Created or referenced files should be visible and clickable.")
     else:
         add("No wrong artifact route", not (contract.get("kind") == "CAD reference" and answer_has_cad_artifact(text)), "Reference questions should not stage artifacts.")
-    if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable", "Aero/CFD preflight", "Mechanical/structural preflight"}:
+    if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable", "Aero/CFD preflight", "Mechanical/structural preflight", "Engineering diagram"}:
         add("Assumptions/validation shown", bool(assumptions), "Engineering work should show assumptions or validation limits.")
     score = int(round(100 * sum(1 for check in checks if check["passed"]) / max(1, len(checks))))
     return {"score": score, "status": "pass" if score >= 80 else "review", "checks": checks}
@@ -16450,6 +17176,24 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             self.send_json(result)
             return
 
+        if parsed.path == "/api/tools/engineering-diagram":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self.send_error(400, "Invalid JSON")
+                return
+            try:
+                result = stage_engineering_diagram_artifact(
+                    payload.get("messages") if isinstance(payload.get("messages"), list) else [{"role": "user", "text": payload.get("prompt") or ""}],
+                    cwd=safe_cwd(payload.get("cwd")),
+                    target_path=payload.get("targetPath") or payload.get("targetDir"),
+                )
+            except Exception as exc:
+                result = {"ok": False, "error": str(exc)}
+            self.send_json(result)
+            return
+
         if parsed.path == "/api/files/open":
             length = int(self.headers.get("Content-Length", "0") or "0")
             try:
@@ -16977,7 +17721,7 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             json_line(self, {"type": "done", "returnCode": 0 if tool_result.get("ok") else 1})
             return
 
-        if is_structural_mechanical_design_request(messages):
+        if is_structural_mechanical_design_request(messages) and not is_engineering_diagram_request(messages):
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
@@ -17043,6 +17787,59 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 route,
                 admin_topic,
                 format_structural_fea_preflight_answer(tool_result),
+                normalize=False,
+            )
+            json_line(self, {"type": "done", "returnCode": 0 if tool_result.get("ok") else 1})
+            return
+
+        if is_engineering_diagram_request(messages):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            json_line(
+                self,
+                {
+                    "type": "status",
+                    "message": "starting",
+                    "cwd": cwd,
+                    "profile": profile,
+                    "effectiveProfile": effective_profile,
+                    "accessLevel": "local-files",
+                    "reasoningLevel": reasoning_level,
+                    "webSearch": web_search,
+                    "managerDepth": manager_depth,
+                    "friendlinessLevel": friendliness_level,
+                    "humorLevel": humor_level,
+                    "mode": "engineering-diagram-tool",
+                    "engine": "local-tool",
+                    "model": "",
+                    "freeOnlyRedirect": free_only_redirect,
+                    "route": route,
+                    "adminTopic": admin_topic,
+                },
+            )
+            json_line(
+                self,
+                {
+                    "type": "thought",
+                    "text": "Recognized this as an engineering diagram request, so I am creating editable block/wiring artifacts before answering.",
+                },
+            )
+            try:
+                tool_result = stage_engineering_diagram_artifact(messages, cwd=cwd)
+                for note in engineering_diagram_working_notes(tool_result):
+                    json_line(self, {"type": "thought", "text": note})
+            except Exception as exc:
+                tool_result = {"ok": False, "error": str(exc), "targetDir": str(LOCAL_DIAGRAM_OUTPUT_DIR)}
+                json_line(self, {"type": "thought", "text": f"Engineering diagram tool failed before finalizing: {exc}"})
+            emit_assistant_answer(
+                self,
+                messages,
+                route,
+                admin_topic,
+                format_engineering_diagram_answer(tool_result),
                 normalize=False,
             )
             json_line(self, {"type": "done", "returnCode": 0 if tool_result.get("ok") else 1})
