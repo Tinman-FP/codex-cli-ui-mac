@@ -45,6 +45,7 @@ LOCAL_TOOL_OUTPUT_DIR = DATA_DIR / "generated" / "printer-macros"
 LOCAL_CAD_OUTPUT_DIR = DATA_DIR / "generated" / "cad"
 LOCAL_AERO_OUTPUT_DIR = DATA_DIR / "generated" / "aero-cfd"
 LOCAL_STRUCTURAL_OUTPUT_DIR = DATA_DIR / "generated" / "structural-fea"
+LOCAL_EMBEDDED_IMAGE_OUTPUT_DIR = DATA_DIR / "generated" / "embedded-images"
 LOCAL_DIAGRAM_OUTPUT_DIR = DATA_DIR / "generated" / "engineering-diagrams"
 LOCAL_QUALITY_OUTPUT_DIR = DATA_DIR / "generated" / "quality-gates"
 LOCAL_ORCA_PROFILE_OUTPUT_DIR = DATA_DIR / "generated" / "orca-profiles"
@@ -74,7 +75,7 @@ CODEX_BIN = os.environ.get(
     "CODEX_BIN", "/Applications/Codex.app/Contents/Resources/codex"
 )
 DEFAULT_PROFILE = os.environ.get("CODEX_PROFILE", "manager")
-DEFAULT_CWD = os.environ.get("CODEX_CWD", str(Path.home() / "Documents" / "Codex"))
+DEFAULT_CWD = os.environ.get("CODEX_CWD", "/Users/williamtinney/Documents/Codex")
 DEFAULT_HOST = os.environ.get("CODEX_UI_HOST", "127.0.0.1")
 DEFAULT_PORT = int(os.environ.get("CODEX_UI_PORT", "8765"))
 DEFAULT_ACCESS_LEVEL = os.environ.get("CODEX_ACCESS_LEVEL", "danger-full-access")
@@ -94,7 +95,7 @@ FREE_ONLY = os.environ.get("CODEX_FREE_ONLY", "1").strip().lower() not in {
     "false",
     "no",
 }
-QIDI_MOONRAKER_URL = os.environ.get("QIDI_MOONRAKER_URL", "").strip()
+QIDI_MOONRAKER_URL = os.environ.get("QIDI_MOONRAKER_URL", "http://192.168.50.145:7125")
 PYTHON_USER_BIN = (
     Path.home()
     / "Library"
@@ -103,10 +104,10 @@ PYTHON_USER_BIN = (
     / "bin"
 )
 PATH_FOR_CODEX = (
-    f"{Path.home() / '.local' / 'bin'}:{PYTHON_USER_BIN}:/usr/local/bin:/opt/homebrew/bin:/Applications/Codex.app/Contents/Resources:"
+    f"/Users/williamtinney/.local/bin:{PYTHON_USER_BIN}:/usr/local/bin:/opt/homebrew/bin:/Applications/Codex.app/Contents/Resources:"
     "/Applications/Codex.app/Contents/Resources/cua_node/bin:"
     "/usr/bin:/bin:/usr/sbin:/sbin:"
-    f"{Path.home() / '.cache' / 'codex-runtimes' / 'codex-primary-runtime' / 'dependencies' / 'bin'}"
+    "/Users/williamtinney/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin"
 )
 ACCESS_LEVELS = {"read-only", "workspace-write", "danger-full-access"}
 REASONING_LEVELS = {"low", "medium", "high"}
@@ -332,6 +333,22 @@ ADMIN_TAXONOMY = {
             "automation": {"name": "Automation", "triggers": ("automation", "launchagent", "workflow")},
             "repos": {"name": "Repos", "triggers": ("git", "github", "repo", "release")},
             "cad": {"name": "CAD", "triggers": ("cad", "fusion", "model", "step", "stl")},
+        },
+    },
+    "embedded-linux": {
+        "name": "Embedded Linux & Images",
+        "description": "Raspberry Pi, RatOS, boot media, firmware, kernels, and appliance OS images.",
+        "triggers": (
+            "ratos", "rat os", "raspberry pi", "rasberry pi", "rpi", "pi 5",
+            "pi5", "pi 4", "pi4", ".img.xz", ".img", "boot partition",
+            "boot image", "dtb", "device tree", "firmware", "kernel",
+            "os image", "sd card image",
+        ),
+        "routeProjects": ("embedded-linux-images",),
+        "folders": {
+            "os-images": {"name": "OS Images", "triggers": (".img.xz", ".img", "image", "os image", "sd card")},
+            "boot-firmware": {"name": "Boot & Firmware", "triggers": ("boot", "dtb", "device tree", "firmware", "kernel", "overlay")},
+            "services": {"name": "Services", "triggers": ("klipper", "moonraker", "ratos", "service", "systemd")},
         },
     },
     "reference": {
@@ -598,6 +615,21 @@ PROJECT_QUERY_HINTS = {
         "battery backup",
         "machine architecture",
     ),
+    "embedded-linux-images": (
+        "ratos",
+        "rat os",
+        "raspberry pi",
+        "rasberry pi",
+        "pi 5",
+        "pi5",
+        "pi 4",
+        "pi4",
+        ".img.xz",
+        "sd card image",
+        "boot partition",
+        "dtb",
+        "kernel",
+    ),
     "research-parts-reference": ("fk275", "serpentine belt", "cross reference", "part number"),
     "energy-power-research": ("wind turbine", "alternator", "60vdc", "60 vdc", "300 rpm"),
     "aviation-engineering": ("aircraft performance", "aerodynamic data", "density altitude", "weight and balance"),
@@ -717,6 +749,27 @@ PROJECT_PLAYBOOKS = {
             "Prefer reversible diagnostics before resets or account changes.",
             "Use Keychain, app settings, and system logs carefully; do not expose secrets in chat.",
             "For network access, distinguish LAN, Tailscale, VPN, and public internet reachability.",
+        ),
+    },
+    "embedded-linux-images": {
+        "name": "Embedded Linux & OS Images",
+        "specialist": "Embedded Linux Specialist",
+        "preferred_engine": "local",
+        "local_profile": "local-coder",
+        "reasoning": "high",
+        "triggers": (
+            "ratos", "rat os", "raspberry pi", "rasberry pi", "rpi",
+            "pi 5", "pi5", "pi 4", "pi4", "bookworm", "bullseye",
+            ".img.xz", ".img", "sd card image", "boot image", "os image",
+            "boot partition", "dtb", "device tree", "kernel", "firmware",
+            "initramfs", "arm64", "aarch64", "rpi-eeprom",
+        ),
+        "rules": (
+            "Classify OS image, boot firmware, kernel, DTB, overlays, and userland before choosing tools.",
+            "Do not route compressed OS images to CAD, CFD, or structural FEA just because the user says create or make.",
+            "Inspect the source image and boot contents before claiming a Pi 5 compatible image exists.",
+            "Check storage before expanding or rewriting multi-gigabyte images, and ask before writing removable media or flashing hardware.",
+            "Separate a staged compatibility preflight from a boot-tested image; never call it seamless until boot and services are verified.",
         ),
     },
     "cad-modeling-projects": {
@@ -1174,6 +1227,23 @@ GOLDEN_TESTS = [
         "minAnalyticalScore": 82,
         "goal": "If macOS pasted only an STL filename, stop before inventing geometry and ask for the actual file.",
     },
+    {
+        "id": "hard-ratos-pi5-image-port-not-fea",
+        "name": "RatOS Pi 5 Image Port",
+        "group": "Hard Cases",
+        "prompt": "I have downloaded a file in the downloads folder. It is Rat OS. It works on rasberry pi 4 but not rasberry pi 5. can you create a working version that will work seemlessly on the pi 5?2026-03-04-RatOS-2.1.0-raspberry-rpi32.img.xz",
+        "profile": "manager",
+        "managerDepth": "fast",
+        "webSearch": "disabled",
+        "expectedProjectId": "embedded-linux-images",
+        "expectedContractKind": "Embedded/Linux image port",
+        "expectedContractGate": "pass",
+        "requiredTerms": ["ratos", "raspberry pi 5", "boot", "kernel", "dtb", "image"],
+        "requiredContractProof": ["source image status", "boot/kernel/firmware checklist", "storage or flash safety boundary"],
+        "forbiddenTerms": ["structural fea", "calculix", "aluminum 6061", "fusion 360 script", "openscad model", "cad package"],
+        "minAnalyticalScore": 82,
+        "goal": "Classify RatOS img.xz work as an embedded Linux image-porting job, not CAD/FEA or generic file staging.",
+    },
 ]
 HARD_CASE_GOLDEN_TEST_IDS = {
     "hard-cpap-hose-id",
@@ -1188,11 +1258,13 @@ HARD_CASE_GOLDEN_TEST_IDS = {
     "hard-cpap-duct-design-not-status",
     "hard-cpap-duct-wall-thickness",
     "hard-stl-filename-missing-attachment",
+    "hard-ratos-pi5-image-port-not-fea",
 }
 
 CONTRACT_GATE_GOLDEN_TEST_IDS = {
     "hard-cpap-hose-id",
     "hard-fusion-component-format",
+    "hard-ratos-pi5-image-port-not-fea",
     "hard-cpap-duct-design-not-status",
     "hard-stl-filename-missing-attachment",
 }
@@ -3909,6 +3981,7 @@ def is_cad_design_request(messages):
         or is_cad_reference_question(messages)
         or is_orca_calibration_image_question(messages)
         or is_temperature_tower_image_question(messages)
+        or is_embedded_linux_image_request(messages)
     ):
         return False
     latest = latest_user_text(messages).lower()
@@ -4378,6 +4451,9 @@ def route_admin_topic(messages, route=None):
         project_boosts["3d-printers"] = project_boosts.get("3d-printers", 0) + 50
         folder_id = "filament" if text_has_any(context_query, ("pctg", "filament", "spool", "pla", "petg", "asa", "abs")) else "processes"
         folder_boosts[("3d-printers", folder_id)] = folder_boosts.get(("3d-printers", folder_id), 0) + 50
+    if isinstance(route, dict) and route.get("projectId") == "embedded-linux-images":
+        project_boosts["embedded-linux"] = project_boosts.get("embedded-linux", 0) + 60
+        folder_boosts[("embedded-linux", "os-images")] = folder_boosts.get(("embedded-linux", "os-images"), 0) + 60
     scored = []
     for project_id, project in ADMIN_TAXONOMY.items():
         score, matched = admin_project_score(project_id, project, query, route or {})
@@ -5660,6 +5736,7 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
     fusion_cam = is_fusion_cam_question(messages)
     stl_cfd_design = is_stl_cfd_duct_design_request(messages)
     engineering_diagram = is_engineering_diagram_request(messages)
+    embedded_image = is_embedded_linux_image_request(messages)
     codex_ui_workflow_scenario = is_codex_ui_workflow_scenario_request(messages)
     orca_profile_creation = is_orca_profile_creation_request(messages)
     orca_nozzle_visibility = is_orca_nozzle_visibility_question(messages)
@@ -5723,6 +5800,10 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
         project_id = "engineering-diagrams"
         score = max(score, 36)
         matched = ["engineering-diagram"] + [item for item in matched if item != "engineering-diagram"]
+    elif embedded_image:
+        project_id = "embedded-linux-images"
+        score = max(score, 42)
+        matched = ["embedded-linux-image"] + [item for item in matched if item != "embedded-linux-image"]
     elif stl_cfd_design:
         project_id = "cad-modeling-projects"
         score = max(score, 36)
@@ -5777,7 +5858,7 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
         "upload", "restart", "deploy", "production", "flightops",
     )
     needs_local = (
-        (any(term in text for term in local_need_terms) or cad_design or stl_cfd_design)
+        (any(term in text for term in local_need_terms) or cad_design or stl_cfd_design or embedded_image)
         and not public_printer_research
         and not cooling_duct_research
     )
@@ -6330,6 +6411,20 @@ def detected_domain_profile(messages, route=None):
         "volatility": "volatile/current" if is_volatile_query_text(query) or wants_web_context(messages) else "mostly stable",
         "risk": "normal",
     }
+    if route_id == "embedded-linux-images" or is_embedded_linux_image_request(messages):
+        profile.update(
+            {
+                "domain": "embedded Linux OS-image compatibility",
+                "platform": "Raspberry Pi / RatOS boot image workflow",
+                "platformConfidence": "high",
+                "toolFamily": "compressed image inspection, boot partition read-only mount, Raspberry Pi firmware/DTB/kernel checks, service verification after boot",
+                "firstChecks": ["source .img.xz path", "compressed/uncompressed size", "boot partition firmware", "Pi 5 DTB", "kernel/modules", "RatOS services"],
+                "avoid": "Do not route to CAD/CFD/FEA, do not expand or flash multi-gigabyte images without storage/media confirmation, and do not claim Pi 5 bootability without inspection or boot testing.",
+                "evidenceNeed": "Use local file inspection first, then official RatOS/Raspberry Pi sources if packages or current Pi 5 support status must be confirmed.",
+                "risk": "system image / boot media",
+            }
+        )
+        return profile
     if route_id == "cad-modeling-projects" or is_cad_design_request(messages):
         profile.update(
             {
@@ -13295,9 +13390,363 @@ def resolve_geometry_file(messages, cwd="", extensions=GEOMETRY_FILE_EXTENSIONS)
     return {"path": None, "source": "", "name": refs[0] if refs else "", "searched": searched}
 
 
+EMBEDDED_IMAGE_EXTENSIONS = (".img.xz", ".img", ".xz", ".zip")
+
+
+def embedded_image_names_from_text(text):
+    ext_pattern = r"img\.xz|img|xz|zip"
+    pattern = re.compile(rf"([A-Za-z0-9_./~()#&+ -]{{1,220}}\.(?:{ext_pattern}))", re.IGNORECASE)
+    names = []
+    for match in pattern.finditer(str(text or "")):
+        name = match.group(1).strip().strip("`'\"")
+        if name:
+            names.append(name)
+    return names
+
+
+def is_embedded_linux_image_request(messages):
+    query = latest_user_text(messages).lower()
+    if not query:
+        return False
+    platform_terms = (
+        "ratos",
+        "rat os",
+        "raspberry pi",
+        "rasberry pi",
+        "raspberry",
+        "rasberry",
+        "rpi",
+        "pi 5",
+        "pi5",
+        "pi 4",
+        "pi4",
+        "bookworm",
+        "bullseye",
+        "arm64",
+        "aarch64",
+        "boot partition",
+        "device tree",
+        "dtb",
+        "kernel",
+        "firmware",
+        "rpi-eeprom",
+    )
+    image_terms = (
+        ".img.xz",
+        ".img",
+        "sd card image",
+        "boot image",
+        "os image",
+        "image file",
+        "downloaded file",
+        "downloads folder",
+    )
+    action_terms = (
+        "create",
+        "make",
+        "working version",
+        "works on",
+        "not work",
+        "not working",
+        "compatible",
+        "seamless",
+        "seemless",
+        "port",
+        "boot",
+        "flash",
+        "image",
+    )
+    has_image_ref = bool(embedded_image_names_from_text(query)) or any(
+        str(item.get("name") or item.get("path") or "").lower().endswith(EMBEDDED_IMAGE_EXTENSIONS)
+        for item in message_attachments(messages)
+    )
+    return (
+        (text_has_any(query, platform_terms) and (text_has_any(query, image_terms) or has_image_ref))
+        or (has_image_ref and text_has_any(query, action_terms) and text_has_any(query, platform_terms))
+    )
+
+
+def resolve_embedded_image_file(messages, cwd=""):
+    attachments = message_attachments(messages)
+    for attachment in reversed(attachments):
+        name = str(attachment.get("name") or "")
+        path = str(attachment.get("path") or "")
+        if name.lower().endswith(EMBEDDED_IMAGE_EXTENSIONS) or path.lower().endswith(EMBEDDED_IMAGE_EXTENSIONS):
+            candidate = Path(path).expanduser()
+            if candidate.exists() and candidate.is_file():
+                return {
+                    "path": candidate,
+                    "source": "attached upload",
+                    "name": name or candidate.name,
+                    "searched": [],
+                }
+
+    latest = latest_user_text(messages)
+    refs = embedded_image_names_from_text(latest)
+    searched = []
+    roots = [
+        Path(cwd or DEFAULT_CWD).expanduser(),
+        UPLOAD_DIR,
+        APP_DIR,
+        Path(DEFAULT_CWD).expanduser(),
+        Path.home() / "Downloads",
+        Path.home() / "Desktop",
+        Path.home() / "Documents",
+    ]
+    seen_roots = set()
+    for ref in refs:
+        ref_path = Path(ref).expanduser()
+        direct_candidates = []
+        if ref_path.is_absolute():
+            direct_candidates.append(ref_path)
+        else:
+            for root in roots:
+                direct_candidates.append(root / ref_path)
+        for candidate in direct_candidates:
+            searched.append(str(candidate))
+            if candidate.exists() and candidate.is_file():
+                return {
+                    "path": candidate,
+                    "source": "filename reference",
+                    "name": candidate.name,
+                    "searched": searched,
+                }
+        basename = ref_path.name
+        for root in roots:
+            root = Path(root)
+            if root in seen_roots:
+                continue
+            seen_roots.add(root)
+            for candidate in iter_named_file_matches(root, basename, max_depth=3, limit=8):
+                searched.append(str(candidate))
+                if candidate.exists() and candidate.is_file():
+                    return {
+                        "path": candidate,
+                        "source": "filename search",
+                        "name": candidate.name,
+                        "searched": searched,
+                    }
+    return {"path": None, "source": "", "name": refs[0] if refs else "", "searched": searched}
+
+
+def embedded_image_xz_listing(path):
+    if not path:
+        return {"ok": False, "error": "missing image path"}
+    xz_path = command_path("xz")
+    if not xz_path:
+        return {"ok": False, "error": "xz command is not available"}
+    try:
+        proc = subprocess.run(
+            [xz_path, "-l", str(path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=30,
+            env={**os.environ, "PATH": PATH_FOR_CODEX},
+        )
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    return {
+        "ok": proc.returncode == 0,
+        "stdout": compact(proc.stdout, 1200),
+        "stderr": compact(proc.stderr, 600),
+        "returnCode": proc.returncode,
+    }
+
+
+def stage_embedded_linux_image_preflight(messages, cwd="", target_path=None):
+    resolved = resolve_embedded_image_file(messages, cwd=cwd)
+    image_path = resolved.get("path")
+    slug = slugify(latest_user_text(messages), fallback="embedded-image")[:48]
+    target = Path(target_path).expanduser() if target_path else LOCAL_EMBEDDED_IMAGE_OUTPUT_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}-{slug}"
+    target.mkdir(parents=True, exist_ok=True)
+    source_found = bool(image_path and Path(image_path).exists())
+    image_size = int(Path(image_path).stat().st_size) if source_found else 0
+    xz_info = embedded_image_xz_listing(image_path) if source_found and str(image_path).lower().endswith(".xz") else {"ok": False, "error": "not an xz-compressed image or source missing"}
+    file_info = ""
+    if source_found and command_path("file"):
+        try:
+            proc = subprocess.run(
+                [command_path("file"), str(image_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=20,
+                env={**os.environ, "PATH": PATH_FOR_CODEX},
+            )
+            file_info = compact(proc.stdout or proc.stderr, 400)
+        except Exception as exc:
+            file_info = f"file command failed: {exc}"
+
+    setup = {
+        "task": "RatOS/Raspberry Pi 5 image compatibility preflight",
+        "sourceFound": source_found,
+        "sourcePath": str(image_path) if source_found else "",
+        "sourceName": resolved.get("name") or "",
+        "source": resolved.get("source") or "",
+        "sizeBytes": image_size,
+        "size": human_bytes(image_size) if image_size else "",
+        "searched": resolved.get("searched", [])[:30],
+        "targetDir": str(target),
+        "pi5MustCheck": [
+            "boot firmware files in the FAT boot partition",
+            "Raspberry Pi 5 DTB files such as bcm2712-rpi-5-b.dtb",
+            "kernel version/config with Pi 5 support",
+            "config.txt overlays and cmdline.txt rootfs references",
+            "32-bit versus 64-bit userland and RatOS service compatibility",
+            "Klipper/Moonraker/RatOS services after first boot",
+        ],
+        "safetyBoundary": "Do not expand, rewrite, or flash multi-gigabyte images without storage and removable-media confirmation.",
+    }
+    setup_path = target / "case_setup.json"
+    write_json_atomic(setup_path, setup)
+
+    report_path = target / "RATOS_PI5_IMAGE_PREFLIGHT.md"
+    searched_lines = "\n".join(f"- `{item}`" for item in resolved.get("searched", [])[:12]) or "- No candidate paths were searched."
+    xz_block = xz_info.get("stdout") or xz_info.get("stderr") or xz_info.get("error") or "not run"
+    report_path.write_text(
+        "\n".join(
+            [
+                "# RatOS Raspberry Pi 5 Image Preflight",
+                "",
+                "## Result",
+                (
+                    f"- Source image found: `{image_path}` ({human_bytes(image_size)})"
+                    if source_found
+                    else f"- Source image not found. Filename reference: `{resolved.get('name') or 'unknown'}`"
+                ),
+                f"- Resolver source: {resolved.get('source') or 'not resolved'}",
+                "- Classification: embedded Linux / Raspberry Pi OS-image port, not CAD, CFD, or structural FEA.",
+                "- Status: preflight staged only. This is not yet a boot-tested Raspberry Pi 5 image.",
+                "",
+                "## Quick File Inspection",
+                f"- `file`: {file_info.strip() or 'not run'}",
+                "- `xz -l`:",
+                "```text",
+                xz_block,
+                "```",
+                "",
+                "## Pi 5 Compatibility Checklist",
+                "- Confirm the boot partition has Pi 5 firmware and `bcm2712-rpi-5-b.dtb`.",
+                "- Confirm the kernel and modules support Raspberry Pi 5 hardware.",
+                "- Confirm `config.txt`, overlays, and `cmdline.txt` match the partition layout.",
+                "- Confirm the RatOS base is not pinned to Pi 4-only firmware or kernel packages.",
+                "- Confirm Klipper, Moonraker, CAN/USB printer interfaces, networking, and RatOS services start cleanly after first boot.",
+                "- Check storage before expanding the compressed image, then write only to a confirmed removable target.",
+                "",
+                "## Searched Paths",
+                searched_lines,
+                "",
+                "## Next Safe Step",
+                "Expand the image into this work folder only after storage is confirmed, mount it read-only, inspect the boot partition, then patch or rebuild against a Pi 5-capable Raspberry Pi OS/RatOS base.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    script_path = target / "inspect_ratos_pi5_image.sh"
+    script_path.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env bash",
+                "set -euo pipefail",
+                f"SOURCE_IMAGE=\"${{1:-{str(image_path) if source_found else '<path-to-ratos-img-xz>'}}}\"",
+                "WORKDIR=$(cd \"$(dirname \"$0\")\" && pwd)",
+                "echo \"Source: $SOURCE_IMAGE\"",
+                "test -f \"$SOURCE_IMAGE\"",
+                "file \"$SOURCE_IMAGE\" || true",
+                "xz -l \"$SOURCE_IMAGE\" || true",
+                "shasum -a 256 \"$SOURCE_IMAGE\"",
+                "cat <<'NOTE'",
+                "",
+                "This script intentionally stops before expansion/flash.",
+                "After Tinman confirms storage, expand to $WORKDIR/source.img, attach read-only, and inspect:",
+                "- boot firmware files",
+                "- bcm2712-rpi-5-b.dtb",
+                "- kernel/modules",
+                "- config.txt overlays",
+                "- cmdline.txt rootfs mapping",
+                "- RatOS/Klipper/Moonraker services",
+                "NOTE",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    try:
+        script_path.chmod(0o755)
+    except OSError:
+        pass
+
+    return {
+        "ok": source_found,
+        "targetDir": str(target),
+        "sourceFound": source_found,
+        "sourcePath": str(image_path) if source_found else "",
+        "sourceName": resolved.get("name") or "",
+        "source": resolved.get("source") or "",
+        "sizeBytes": image_size,
+        "size": human_bytes(image_size) if image_size else "",
+        "fileInfo": file_info.strip(),
+        "xzInfo": xz_info,
+        "searched": resolved.get("searched", []),
+        "reportPath": str(report_path),
+        "caseSetupPath": str(setup_path),
+        "inspectScriptPath": str(script_path),
+    }
+
+
+def embedded_linux_image_preflight_working_notes(result):
+    notes = []
+    if result.get("sourceFound"):
+        notes.append(f"Found source OS image: {result.get('sourcePath')} ({result.get('size')}).")
+    else:
+        notes.append("Did not find the referenced OS image yet; stopping before pretending a Pi 5 image was created.")
+    notes.append("Classified the request as Raspberry Pi/RatOS embedded Linux image work, not CAD, CFD, or structural FEA.")
+    notes.append("Staged a boot/kernel/firmware preflight report and a safe inspection script; no image was expanded, flashed, or claimed bootable.")
+    return notes
+
+
+def format_embedded_linux_image_preflight_answer(result):
+    found = bool(result.get("sourceFound"))
+    source_line = (
+        f"Source image: `{result.get('sourcePath')}` ({result.get('size')})."
+        if found
+        else f"Source image not found yet. Filename reference: `{result.get('sourceName') or 'unknown'}`."
+    )
+    return "\n\n".join(
+        [
+            (
+                "I found the RatOS image and staged a Raspberry Pi 5 compatibility preflight, not a CAD/FEA package."
+                if found
+                else "I treated this as a Raspberry Pi/RatOS OS-image porting job and stopped before making a fake Pi 5 image."
+            ),
+            "\n".join(
+                [
+                    source_line,
+                    f"Preflight report: `{result.get('reportPath')}`",
+                    f"Case setup: `{result.get('caseSetupPath')}`",
+                    f"Inspection script: `{result.get('inspectScriptPath')}`",
+                ]
+            ),
+            (
+                "This is why: moving a RatOS image from Raspberry Pi 4 to Raspberry Pi 5 is a boot/kernel/firmware compatibility job. "
+                "The answer has to inspect the boot partition, Pi 5 DTB files, kernel/modules, overlays, `cmdline.txt`, userland architecture, and RatOS/Klipper services before claiming a working image."
+            ),
+            (
+                "You should also consider: I did not expand or rewrite the 2 GB compressed image in this pass because that can consume several more gigabytes and should be done only after storage is confirmed. "
+                "No removable media was written or flashed. The next real step is read-only image expansion/mount inspection, then either patching the image or rebuilding from a Pi 5-capable RatOS/Raspberry Pi OS base and boot-testing it on the Pi 5."
+            ),
+        ]
+    )
+
+
 def is_aero_cfd_analysis_request(messages):
     query = latest_user_text(messages).lower()
     if not query:
+        return False
+    if is_embedded_linux_image_request(messages):
         return False
     if is_cad_design_request(messages) and text_has_any(query, ("cpap", "part cooling", "cooling duct", "fusion 360", "cad")):
         return False
@@ -15089,6 +15538,8 @@ def structural_analysis_parameters(messages):
 def is_structural_mechanical_design_request(messages):
     query = latest_user_text(messages).lower()
     if not query:
+        return False
+    if is_embedded_linux_image_request(messages):
         return False
     if re.match(r"\s*what\s+is\s+the\s+best\s+filament\b", query):
         return False
@@ -19704,6 +20155,41 @@ def package_health_report():
         add("analysis:platform-classifier", "fail", str(exc))
 
     try:
+        ratos_messages = [
+            {
+                "role": "user",
+                "text": "I have downloaded a file in the downloads folder. It is Rat OS. It works on rasberry pi 4 but not rasberry pi 5. can you create a working version that will work seemlessly on the pi 5?2026-03-04-RatOS-2.1.0-raspberry-rpi32.img.xz",
+            }
+        ]
+        ratos_route = route_manager(ratos_messages, requested_profile="manager", web_search="disabled")
+        ratos_contract = task_contract(ratos_messages, ratos_route)
+        ratos_answer = "\n\n".join(
+            [
+                "I treated this as a Raspberry Pi/RatOS OS-image porting job and stopped before making a fake Pi 5 image.",
+                "Source image not found yet. Preflight report: `/Users/example/data/generated/embedded-images/ratos/RATOS_PI5_IMAGE_PREFLIGHT.md`\nInspection script: `/Users/example/data/generated/embedded-images/ratos/inspect_ratos_pi5_image.sh`",
+                "This is why: Pi 5 compatibility depends on boot firmware, kernel, DTB files, config.txt, cmdline.txt, and RatOS services.",
+                "You should also consider: do not expand or flash the image until storage and removable media are confirmed; this is not yet a boot-tested Pi 5 image.",
+            ]
+        )
+        ratos_gate = task_contract_gate(ratos_messages, ratos_route, ratos_answer, contract=ratos_contract, web_search="disabled")
+        ok = (
+            is_embedded_linux_image_request(ratos_messages)
+            and not is_cad_design_request(ratos_messages)
+            and not is_aero_cfd_analysis_request(ratos_messages)
+            and not is_structural_mechanical_design_request(ratos_messages)
+            and ratos_route.get("projectId") == "embedded-linux-images"
+            and ratos_contract.get("kind") == "Embedded/Linux image port"
+            and ratos_gate.get("status") == "pass"
+        )
+        add(
+            "analysis:ratos-pi5-image-routing",
+            "pass" if ok else "fail",
+            f"{ratos_route.get('projectId')} contract={ratos_contract.get('kind')} gate={ratos_gate.get('status')}",
+        )
+    except Exception as exc:
+        add("analysis:ratos-pi5-image-routing", "fail", str(exc))
+
+    try:
         research_route = route_manager(
             [
                 {
@@ -20614,6 +21100,11 @@ def response_role_style(route=None):
             "voice": "Product-minded, implementation plus verification, with private/local boundaries called out.",
             "checklist": ["behavior change", "local files", "verification", "GitHub/package state"],
         },
+        "embedded-linux-images": {
+            "title": "Embedded Linux Specialist",
+            "voice": "Boot chain first, plain-language blockers, no fake compatibility claims, storage/flash safety explicit.",
+            "checklist": ["source image", "boot firmware", "kernel/DTB", "services", "storage/flash boundary"],
+        },
         "mac-system-accounts": {
             "title": "Mac/Network Tech",
             "voice": "Reversible diagnostics, privacy-aware, clear LAN/VPN/public-network boundaries.",
@@ -20644,6 +21135,13 @@ def task_contract(messages, route=None):
         must_do = ["answer the CAD/export reference directly", "avoid unrelated file generation"]
         required_proof = ["direct format recommendation", "why/caveat explanation"]
         reject_if.append("stages Fusion/OpenSCAD artifacts for a reference question")
+    elif is_embedded_linux_image_request(messages):
+        kind = "Embedded/Linux image port"
+        done = "Resolve the source OS image, inspect or stage boot/kernel/firmware checks, list storage/flash safety limits, and do not claim Pi 5 bootability until verified."
+        must_do = ["resolve source image", "check boot/kernel/firmware compatibility path", "state storage and flash safety boundary"]
+        required_proof = ["source image status", "boot/kernel/firmware checklist", "storage or flash safety boundary"]
+        reject_if.extend(["routes to CAD/CFD/FEA", "claims a working Pi 5 image without boot testing", "expands or flashes a large image without confirmation"])
+        hard_gate = True
     elif is_engineering_diagram_request(messages):
         kind = "Engineering diagram"
         done = "Create editable block/wiring diagram artifacts, label paths, list assumptions, and flag missing ratings or code-sensitive details."
@@ -20806,6 +21304,8 @@ def extract_assumption_ledger(messages, route, answer, contract=None):
     if "you should also consider:" in lower:
         caveat = str(answer or "").split("You should also consider:", 1)[-1].strip().split("\n\n", 1)[0]
         add("Caveat", caveat, "caution")
+    if text_has_any(lower, ("not yet a boot-tested", "not boot-tested", "not call it bootable", "no removable media was written", "not expand")):
+        add("Validation", "Bootable image status is explicitly limited until inspection or boot testing proves it.", "limited")
     if not ledger and (contract or {}).get("kind", "").lower().startswith(("cad", "stl")):
         add("Validation", "Engineering/CAD work should still be fit-checked before final use.", "caution")
     return ledger
@@ -20900,6 +21400,7 @@ def task_contract_gate(messages, route, answer, contract=None, deliverables=None
         "STL/CAD deliverable",
         "Aero/CFD preflight",
         "Mechanical/structural preflight",
+        "Embedded/Linux image port",
         "Engineering diagram",
         "Research + Apply",
         "File/action",
@@ -21015,6 +21516,26 @@ def task_contract_gate(messages, route, answer, contract=None, deliverables=None
             "hard",
         )
 
+    if kind == "Embedded/Linux image port":
+        pi5_complete_claim = text_has_any(lower, ("working pi 5 image is ready", "seamless pi 5 image is complete"))
+        pi5_complete_claim = pi5_complete_claim or (
+            "boot-tested pi 5 image" in lower
+            and "not yet a boot-tested pi 5 image" not in lower
+            and "not a boot-tested pi 5 image" not in lower
+        )
+        add(
+            "Boot-chain basis",
+            text_has_any(lower, ("boot", "kernel", "dtb", "firmware", "cmdline.txt", "config.txt")),
+            "OS image porting answers need boot/kernel/firmware checks.",
+            "hard",
+        )
+        add(
+            "No fake Pi 5 completion",
+            not pi5_complete_claim,
+            "Do not claim a finished Pi 5 image without boot/test proof.",
+            "hard",
+        )
+
     if kind == "Code/config":
         add(
             "Validation named",
@@ -21073,11 +21594,11 @@ def response_scorecard(messages, route, answer, contract=None, deliverables=None
         (not direct_needed) or ("this is why:" in lower and "you should also consider:" in lower),
         "Direct answers should include why and what to consider.",
     )
-    if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable", "Aero/CFD preflight", "Mechanical/structural preflight", "Engineering diagram", "Research + Apply", "File/action", "Code/config"}:
+    if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable", "Aero/CFD preflight", "Mechanical/structural preflight", "Embedded/Linux image port", "Engineering diagram", "Research + Apply", "File/action", "Code/config"}:
         add("Deliverables visible", bool(deliverables), "Created or referenced files should be visible and clickable.")
     else:
         add("No wrong artifact route", not (contract.get("kind") == "CAD reference" and answer_has_cad_artifact(text)), "Reference questions should not stage artifacts.")
-    if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable", "Aero/CFD preflight", "Mechanical/structural preflight", "Engineering diagram"}:
+    if contract.get("kind") in {"CAD/design deliverable", "STL/CAD deliverable", "Aero/CFD preflight", "Mechanical/structural preflight", "Embedded/Linux image port", "Engineering diagram"}:
         add("Assumptions/validation shown", bool(assumptions), "Engineering work should show assumptions or validation limits.")
     analytical = analytical_answer_score(messages, route or {}, text)
     add(
@@ -22967,6 +23488,77 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 "patchId": (natural_self_repair.get("patchItem") or {}).get("id"),
             }
             admin_topic = {**admin_topic, "selfRepair": route["selfRepair"]}
+
+        if is_embedded_linux_image_request(messages):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            json_line(
+                self,
+                {
+                    "type": "status",
+                    "message": "starting",
+                    "cwd": cwd,
+                    "profile": profile,
+                    "effectiveProfile": effective_profile,
+                    "accessLevel": "local-files",
+                    "reasoningLevel": reasoning_level,
+                    "webSearch": web_search,
+                    "managerDepth": manager_depth,
+                    "friendlinessLevel": friendliness_level,
+                    "humorLevel": humor_level,
+                    "mode": "embedded-linux-image-preflight",
+                    "engine": "local-tool",
+                    "model": "",
+                    "freeOnlyRedirect": free_only_redirect,
+                    "route": route,
+                    "adminTopic": admin_topic,
+                },
+            )
+            json_line(
+                self,
+                {
+                    "type": "thought",
+                    "text": "Recognized this as a RatOS/Raspberry Pi OS-image compatibility job, not CAD, CFD, or structural analysis.",
+                },
+            )
+            json_line(
+                self,
+                {
+                    "type": "thought",
+                    "text": "Resolving the compressed image from uploads, the current workspace, and Downloads before deciding whether it can be inspected or modified.",
+                },
+            )
+            try:
+                tool_result = stage_embedded_linux_image_preflight(messages, cwd=cwd)
+                for note in embedded_linux_image_preflight_working_notes(tool_result):
+                    json_line(self, {"type": "thought", "text": note})
+            except Exception as exc:
+                tool_result = {
+                    "ok": False,
+                    "error": str(exc),
+                    "targetDir": str(LOCAL_EMBEDDED_IMAGE_OUTPUT_DIR),
+                    "searched": [],
+                }
+                json_line(
+                    self,
+                    {
+                        "type": "thought",
+                        "text": f"Embedded Linux image preflight failed before finalizing: {exc}",
+                    },
+                )
+            emit_assistant_answer(
+                self,
+                messages,
+                route,
+                admin_topic,
+                format_embedded_linux_image_preflight_answer(tool_result),
+                normalize=False,
+            )
+            json_line(self, {"type": "done", "returnCode": 0 if tool_result.get("sourceFound") else 1})
+            return
 
         research_apply_requested = route.get("engine") == "research-apply" or profile in RESEARCH_APPLY_PROFILES or is_research_apply_request(messages)
         direct_knowledge = None if research_apply_requested else general_direct_knowledge_answer(messages, route)
