@@ -930,6 +930,22 @@ GOLDEN_TESTS = [
         "minAnalyticalScore": 82,
         "goal": "Recognize CAD/CFD design intent even with misspellings and never route it to printer status.",
     },
+    {
+        "id": "hard-cpap-duct-wall-thickness",
+        "name": "CPAP Duct Wall Thickness",
+        "group": "Hard Cases",
+        "prompt": "What is the wall thickness I should use for a 3D printed CPAP duct?",
+        "profile": "manager",
+        "managerDepth": "fast",
+        "webSearch": "disabled",
+        "expectedProjectId": "cad-modeling-projects",
+        "directAnswer": True,
+        "directTerms": ["1.2", "1.6", "2.0"],
+        "requiredTerms": ["this is why", "you should also consider", "mount", "collar"],
+        "forbiddenTerms": ["psi", "fusion 360 script", "openscad model", "cad package", "staged"],
+        "minAnalyticalScore": 82,
+        "goal": "Answer CPAP duct wall thickness directly without artifact staging or unrealistic pressure assumptions.",
+    },
 ]
 HARD_CASE_GOLDEN_TEST_IDS = {
     "hard-cpap-hose-id",
@@ -938,6 +954,7 @@ HARD_CASE_GOLDEN_TEST_IDS = {
     "hard-orca-filament-profile",
     "hard-pctg-temp-tower-image",
     "hard-cpap-duct-design-not-status",
+    "hard-cpap-duct-wall-thickness",
 }
 
 
@@ -5156,6 +5173,10 @@ def analytical_answer_gaps(messages, route=None, answer_text="", web_search="liv
         gaps.append({"kind": "no-diagnostic-path", "severity": "high", "reason": "The answer does not give a ranked diagnostic path."})
     if mode in {"engineering-design", "systems-design", "calculation"} and not text_has_any(lower, ("assumption", "verify", "validate", "check", "safety", "constraint", "rating")):
         gaps.append({"kind": "no-validation", "severity": "medium", "reason": "Engineering answer lacks assumptions, validation, or safety checks."})
+    if mode == "direct-answer" and build_direct_answer_context(messages, route or {}) and not (
+        "this is why:" in lower and "you should also consider:" in lower
+    ):
+        gaps.append({"kind": "missing-direct-answer-shape", "severity": "high", "reason": "Direct answer is missing Tinman's preferred why/consider structure."})
     numeric_constraints = [item for item in constraints if re.search(r"\d", item)]
     if numeric_constraints:
         matched = 0
@@ -5226,12 +5247,19 @@ def build_direct_answer_context(messages, route):
         return ""
     lower = query.lower()
     direct_triggers = (
+        "what is",
+        "what are",
         "what is the best",
+        "what file",
+        "what format",
         "best all around",
         "best first step",
         "can you tell me",
         "what should",
+        "how much",
+        "how many",
         "which",
+        "do you know",
     )
     if not any(trigger in lower for trigger in direct_triggers):
         return ""
@@ -5268,6 +5296,37 @@ def cpap_hose_spec_direct_answer(messages):
             (
                 "You should also consider: if you are modeling an adapter or duct inlet, measure the actual hose/cuff you have. "
                 "For most 3D-printer CPAP cooling setups, start with a 19 mm airflow bore unless you know you are using 15 mm slim tubing."
+            ),
+        ]
+    )
+
+
+def is_cpap_duct_wall_thickness_question(messages):
+    query = latest_user_text(messages).lower()
+    if not query:
+        return False
+    return (
+        text_has_any(query, ("cpap", "duct", "part cooling", "cooling duct"))
+        and text_has_any(query, ("wall thickness", "wall", "thickness", "shell", "perimeter", "perimeters"))
+        and is_direct_factual_question_without_artifact_action(query)
+    )
+
+
+def cpap_duct_wall_thickness_direct_answer(messages):
+    if not is_cpap_duct_wall_thickness_question(messages):
+        return ""
+    return "\n\n".join(
+        [
+            "Use 1.2-1.6 mm wall thickness for the duct body, then thicken hose collars, mounting ears, and screw bosses to about 2.0-2.5 mm.",
+            (
+                "This is why: for a 3D-printer CPAP cooling duct, wall thickness is driven more by print quality, sealing, stiffness, heat, vibration, "
+                "and mount/collar strength than by pressure-vessel stress. A standard 0.4 mm nozzle makes 1.2 mm a clean 3-perimeter wall; 1.6 mm is a "
+                "stiffer 4-perimeter wall. The duct should not need heavy pressure-tank-style walls."
+            ),
+            (
+                "You should also consider: use 1.0 mm only for short protected sections, use 2.0 mm or more anywhere a hose clamps on or a screw loads the part, "
+                "and add fillets/ribs instead of making the whole duct bulky. For PLA/PETG/PCTG, start around 1.6 mm; for nylon or CF-filled material, 1.2-1.6 mm "
+                "works well if the collars and mounts are locally reinforced."
             ),
         ]
     )
@@ -16282,6 +16341,62 @@ def package_health_report():
         add("routing:direct-cad-question-veto", "fail", str(exc))
 
     try:
+        factual_messages = [
+            {
+                "role": "user",
+                "text": "What is the wall thickness I should use for a 3D printed CPAP duct?",
+            }
+        ]
+        route = route_manager(factual_messages, requested_profile="manager", web_search="disabled")
+        raw_answer = "Use about 2 mm wall thickness for a typical printed CPAP duct.\n\nWhy: that is stiff enough for normal CPAP pressure without making the duct bulky.\n\nConsider: use 1.5 mm only for short, protected ducts and 3 mm around mounts."
+        normalized = normalize_direct_answer_shape(factual_messages, route, raw_answer)
+        analytical = analytical_answer_score(factual_messages, route, normalized, web_search="disabled")
+        weak = analytical_answer_score(factual_messages, route, "Use about 2 mm wall thickness.", web_search="disabled")
+        ok = (
+            build_direct_answer_context(factual_messages, route)
+            and "This is why:" in normalized
+            and "You should also consider:" in normalized
+            and analytical.get("status") == "pass"
+            and weak.get("status") != "pass"
+        )
+        add(
+            "response:direct-factual-answer-shape",
+            "pass" if ok else "fail",
+            "direct factual questions normalize to answer/why/consider shape",
+        )
+    except Exception as exc:
+        add("response:direct-factual-answer-shape", "fail", str(exc))
+
+    try:
+        wall_messages = [
+            {
+                "role": "user",
+                "text": "What is the wall thickness I should use for a 3D printed CPAP duct?",
+            }
+        ]
+        wall_route = route_manager(wall_messages, requested_profile="manager", web_search="disabled")
+        wall_answer = cpap_duct_wall_thickness_direct_answer(wall_messages)
+        ok = (
+            is_cpap_duct_wall_thickness_question(wall_messages)
+            and not is_cad_design_request(wall_messages)
+            and not is_cad_artifact_tool_request(wall_messages)
+            and wall_route.get("projectId") == "cad-modeling-projects"
+            and "1.2-1.6 mm" in wall_answer
+            and "2.0-2.5 mm" in wall_answer
+            and "This is why:" in wall_answer
+            and "You should also consider:" in wall_answer
+            and "psi" not in wall_answer.lower()
+            and "Fusion 360 script" not in wall_answer
+        )
+        add(
+            "tools:cpap-duct-wall-thickness-direct",
+            "pass" if ok else "fail",
+            "CPAP duct wall-thickness questions answer directly without pressure or artifact hallucinations",
+        )
+    except Exception as exc:
+        add("tools:cpap-duct-wall-thickness-direct", "fail", str(exc))
+
+    try:
         research_messages = [
             {
                 "role": "user",
@@ -18536,6 +18651,53 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 route,
                 admin_topic,
                 direct_cpap_hose_answer,
+                normalize=False,
+            )
+            json_line(self, {"type": "done", "returnCode": 0})
+            return
+
+        direct_cpap_wall_answer = cpap_duct_wall_thickness_direct_answer(messages)
+        if direct_cpap_wall_answer:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            json_line(
+                self,
+                {
+                    "type": "status",
+                    "message": "starting",
+                    "cwd": cwd,
+                    "profile": profile,
+                    "effectiveProfile": effective_profile,
+                    "accessLevel": "local-files",
+                    "reasoningLevel": reasoning_level,
+                    "webSearch": web_search,
+                    "managerDepth": manager_depth,
+                    "friendlinessLevel": friendliness_level,
+                    "humorLevel": humor_level,
+                    "mode": "cad-reference-direct-answer",
+                    "engine": "local-knowledge",
+                    "model": "",
+                    "freeOnlyRedirect": free_only_redirect,
+                    "route": route,
+                    "adminTopic": admin_topic,
+                },
+            )
+            json_line(
+                self,
+                {
+                    "type": "thought",
+                    "text": "Recognized this as a CPAP duct wall-thickness question, not a CAD artifact request.",
+                },
+            )
+            emit_assistant_answer(
+                self,
+                messages,
+                route,
+                admin_topic,
+                direct_cpap_wall_answer,
                 normalize=False,
             )
             json_line(self, {"type": "done", "returnCode": 0})
