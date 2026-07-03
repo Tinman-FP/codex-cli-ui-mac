@@ -12794,6 +12794,296 @@ def engineering_diagram_spec(query):
     return {"domain": domain, "title": title, "modes": modes, "nodes": nodes, "edges": edges, "checks": checks}
 
 
+ELECTRICAL_COMPONENT_LIBRARY = {
+    "solar-grid-battery": [
+        {"id": "pv_array", "label": "PV array", "category": "source", "verify": "module Voc/Isc, string count, cold-weather Voc, conductor insulation rating"},
+        {"id": "rapid_shutdown", "label": "Rapid shutdown", "category": "safety", "verify": "required by local code and inverter/module compatibility"},
+        {"id": "pv_combiner", "label": "PV combiner / DC disconnect", "category": "protection", "verify": "fuse/breaker rating, DC voltage rating, enclosure rating"},
+        {"id": "hybrid_inverter", "label": "Hybrid inverter / charger", "category": "conversion", "verify": "MPPT range, AC input/output rating, surge rating, neutral-bonding instructions"},
+        {"id": "battery_bank", "label": "LiFePO4 battery bank", "category": "storage", "verify": "nominal voltage, usable kWh, max charge/discharge current, fault current"},
+        {"id": "bms", "label": "BMS / battery disconnect", "category": "protection", "verify": "contactor/fuse size, precharge needs, low-temp charge protection"},
+        {"id": "critical_loads", "label": "Critical loads panel", "category": "distribution", "verify": "load list, surge loads, transfer switch topology, backfeed prevention"},
+        {"id": "grounding", "label": "Grounding and bonding", "category": "safety", "verify": "equipment grounding conductor, neutral-ground bond location, surge protection"},
+    ],
+    "cnc-machine-architecture": [
+        {"id": "disconnect", "label": "Main disconnect", "category": "safety", "verify": "branch circuit, lockout ability, enclosure rating"},
+        {"id": "estop", "label": "E-stop safety relay / STO", "category": "safety", "verify": "hardwired safety loop, normally-closed contacts, drive enable/STO behavior"},
+        {"id": "control_psu", "label": "24 V control PSU", "category": "power", "verify": "control load current, fuse per branch, common reference strategy"},
+        {"id": "controller", "label": "CNC controller", "category": "control", "verify": "signal voltage, isolated I/O, controller grounding rules"},
+        {"id": "axis_drives", "label": "Stepper/servo drives", "category": "motion", "verify": "motor current, drive voltage, alarm/enable wiring, heat sinking"},
+        {"id": "vfd", "label": "VFD / spindle drive", "category": "power", "verify": "input current, spindle cable shield, braking resistor, STO, Modbus/0-10 V control"},
+        {"id": "limits_probe", "label": "Limits / probe / home sensors", "category": "sensor", "verify": "NO/NC choice, shielded cable, noise filtering, fail-safe behavior"},
+        {"id": "cabinet_ground", "label": "Protective earth / shield ground", "category": "safety", "verify": "PE bus, shield termination, VFD frame and spindle bond"},
+    ],
+    "3d-printer-architecture": [
+        {"id": "ac_inlet", "label": "AC inlet, fuse, switch", "category": "source", "verify": "IEC rating, fuse size, line/neutral switching, strain relief"},
+        {"id": "psu", "label": "24 VDC PSU", "category": "power", "verify": "heater, motor, fan, LED, and toolhead current budget"},
+        {"id": "controller", "label": "Motion controller", "category": "control", "verify": "MCU voltage, heater MOSFET ratings, thermistor inputs, fan outputs"},
+        {"id": "toolhead", "label": "Toolhead board / harness", "category": "control", "verify": "CAN/USB wiring, termination, connector pinout, power injection"},
+        {"id": "hotend", "label": "Hotend heater and sensor", "category": "load", "verify": "heater wattage, thermistor/RTD type, ferrules, thermal-runaway config"},
+        {"id": "bed", "label": "Heated bed / SSR / MOSFET", "category": "load", "verify": "AC or DC bed topology, SSR heat sink, fuse, earth bond"},
+        {"id": "sensors", "label": "Probe, endstops, filament sensors", "category": "sensor", "verify": "signal voltage, pullups, cable routing, noise separation"},
+        {"id": "frame_ground", "label": "Frame earth / DC return policy", "category": "safety", "verify": "metal frame bond, PSU chassis, shield/drain handling"},
+    ],
+    "electrical-system": [
+        {"id": "source", "label": "Power source", "category": "source", "verify": "voltage, phase, available current, fault current"},
+        {"id": "disconnect", "label": "Disconnect", "category": "protection", "verify": "accessible isolation and proper AC/DC rating"},
+        {"id": "ocpd", "label": "Fuse / breaker", "category": "protection", "verify": "source-side protection and interrupt rating"},
+        {"id": "conversion", "label": "Power conversion", "category": "conversion", "verify": "input/output rating, efficiency, heat, surge/starting current"},
+        {"id": "controller", "label": "Controller", "category": "control", "verify": "signal levels, isolation, I/O protection"},
+        {"id": "loads", "label": "Loads", "category": "load", "verify": "steady current, surge current, duty cycle"},
+        {"id": "grounding", "label": "Grounding / bonding", "category": "safety", "verify": "equipment ground, DC return, shield termination"},
+    ],
+}
+
+
+ELECTRICAL_WIRE_GAUGE_TABLE = [
+    {"awg": "18", "planningAmpacityA": 7, "ohmsPer1000Ft": 6.385},
+    {"awg": "16", "planningAmpacityA": 10, "ohmsPer1000Ft": 4.016},
+    {"awg": "14", "planningAmpacityA": 15, "ohmsPer1000Ft": 2.525},
+    {"awg": "12", "planningAmpacityA": 20, "ohmsPer1000Ft": 1.588},
+    {"awg": "10", "planningAmpacityA": 30, "ohmsPer1000Ft": 0.999},
+    {"awg": "8", "planningAmpacityA": 40, "ohmsPer1000Ft": 0.6282},
+    {"awg": "6", "planningAmpacityA": 55, "ohmsPer1000Ft": 0.3951},
+    {"awg": "4", "planningAmpacityA": 70, "ohmsPer1000Ft": 0.2485},
+    {"awg": "2", "planningAmpacityA": 95, "ohmsPer1000Ft": 0.1563},
+    {"awg": "1/0", "planningAmpacityA": 125, "ohmsPer1000Ft": 0.0983},
+    {"awg": "2/0", "planningAmpacityA": 145, "ohmsPer1000Ft": 0.0779},
+    {"awg": "4/0", "planningAmpacityA": 195, "ohmsPer1000Ft": 0.0490},
+]
+
+
+def electrical_component_library_for_domain(domain):
+    return list(ELECTRICAL_COMPONENT_LIBRARY.get(domain) or ELECTRICAL_COMPONENT_LIBRARY["electrical-system"])
+
+
+def numeric_matches(pattern, text):
+    values = []
+    for match in re.finditer(pattern, text, re.I):
+        try:
+            values.append(float(match.group(1)))
+        except (TypeError, ValueError):
+            pass
+    return values
+
+
+def extract_electrical_design_inputs(prompt):
+    text = str(prompt or "").lower()
+    voltages = numeric_matches(r"(\d+(?:\.\d+)?)\s*(?:vdc|vac|volts?|v)\b", text)
+    currents = numeric_matches(r"(\d+(?:\.\d+)?)\s*(?:amps?|ampere|a)\b", text)
+    watts = numeric_matches(r"(\d+(?:\.\d+)?)\s*(?:watts?|w)\b", text)
+    feet = numeric_matches(r"(\d+(?:\.\d+)?)\s*(?:ft|feet|foot)\b", text)
+    meters = numeric_matches(r"(\d+(?:\.\d+)?)\s*(?:m|meter|meters)\b", text)
+    if meters and not feet:
+        feet = [value * 3.28084 for value in meters]
+    inferred_current = None
+    if currents:
+        inferred_current = max(currents)
+    elif watts and voltages:
+        inferred_current = max(watts) / max(voltages)
+    return {
+        "voltages": voltages,
+        "currents": currents,
+        "watts": watts,
+        "oneWayFeet": max(feet) if feet else None,
+        "estimatedCurrentA": inferred_current,
+        "continuousLikely": text_has_any(text, ("continuous", "solar", "battery", "inverter", "heater", "spindle", "vfd")),
+    }
+
+
+def select_wire_gauge(current_a, voltage_v=None, one_way_feet=None, max_drop_pct=3.0):
+    if not current_a or current_a <= 0:
+        return {
+            "ok": False,
+            "reason": "No load current was provided or derivable from watts and voltage.",
+            "requiredInputs": ["load current or watts", "system voltage", "one-way wire length"],
+        }
+    design_current = current_a * 1.25
+    candidates = []
+    for row in ELECTRICAL_WIRE_GAUGE_TABLE:
+        if row["planningAmpacityA"] < design_current:
+            continue
+        drop_v = None
+        drop_pct = None
+        if voltage_v and one_way_feet:
+            drop_v = current_a * row["ohmsPer1000Ft"] * (one_way_feet * 2.0) / 1000.0
+            drop_pct = (drop_v / voltage_v) * 100.0 if voltage_v else None
+            if drop_pct is not None and drop_pct > max_drop_pct:
+                continue
+        candidate = {
+            **row,
+            "designCurrentA": round(design_current, 2),
+            "voltageDropV": round(drop_v, 3) if drop_v is not None else None,
+            "voltageDropPct": round(drop_pct, 2) if drop_pct is not None else None,
+        }
+        candidates.append(candidate)
+    if candidates:
+        return {
+            "ok": True,
+            "recommendation": candidates[0],
+            "basis": "Conservative planning check using 125 percent design current and copper conductor resistance. Verify final sizing against code, insulation rating, temperature, conduit fill, and equipment terminals.",
+            "maxDropPct": max_drop_pct,
+        }
+    return {
+        "ok": False,
+        "reason": "No gauge in the built-in quick-check table satisfies both planning ampacity and voltage-drop target.",
+        "designCurrentA": round(design_current, 2),
+        "maxDropPct": max_drop_pct,
+    }
+
+
+def electrical_rules_for_domain(domain):
+    rules = [
+        {"id": "source-ocpd", "severity": "P1", "category": "Protection", "rule": "Put correctly rated over-current protection as close to each source as practical.", "verify": "Fuse/breaker type, interrupt rating, AC/DC voltage rating, current rating, and enclosure rating."},
+        {"id": "wire-sizing", "severity": "P1", "category": "Sizing", "rule": "Size conductors from continuous current, surge current, one-way length, temperature, conduit fill, and acceptable voltage drop.", "verify": "Do not rely on color or connector size as proof of ampacity."},
+        {"id": "grounding", "severity": "P1", "category": "Safety", "rule": "Show the equipment grounding/bonding path separately from signal reference or DC return assumptions.", "verify": "Frame/chassis/PE bonds, shield drains, neutral-ground bond location, and fault-current path."},
+        {"id": "segregation", "severity": "P2", "category": "Routing", "rule": "Separate noisy/high-power wiring from low-level signals and sensors.", "verify": "Physical routing, shielding, twisted pairs, ferrules, strain relief, and connector labels."},
+        {"id": "pinout", "severity": "P2", "category": "Documentation", "rule": "Every connector needs pin number, signal name, voltage, polarity, wire color if used, and destination.", "verify": "Cross-check against manufacturer manuals before energizing."},
+    ]
+    if domain == "solar-grid-battery":
+        rules.extend(
+            [
+                {"id": "pv-voc", "severity": "P1", "category": "PV", "rule": "Check PV string Voc at lowest expected temperature against inverter MPPT absolute maximum.", "verify": "Module datasheet Voc temp coefficient, string count, local minimum temperature."},
+                {"id": "rapid-shutdown", "severity": "P1", "category": "PV", "rule": "Document rapid shutdown and DC disconnect requirements before selecting hardware.", "verify": "Local code, inverter compatibility, module-level electronics if required."},
+                {"id": "battery-fault", "severity": "P1", "category": "Battery", "rule": "Battery protection must be sized for available fault current and inverter surge behavior.", "verify": "Class T or manufacturer-approved fuse, disconnect, cable rating, BMS/contactor limits."},
+                {"id": "transfer-neutral", "severity": "P1", "category": "AC", "rule": "Transfer switch and neutral-ground bonding topology must match inverter manual and local code.", "verify": "Separately derived system behavior, neutral switching, generator/inverter mode, inspection requirements."},
+                {"id": "surge-protection", "severity": "P2", "category": "Protection", "rule": "Consider surge protective devices on PV, AC service, and critical-load outputs.", "verify": "SPD type, grounding conductor length, service configuration."},
+            ]
+        )
+    elif domain == "cnc-machine-architecture":
+        rules.extend(
+            [
+                {"id": "hardwired-estop", "severity": "P1", "category": "Safety", "rule": "E-stop must remove hazardous motion/spindle energy through hardware, not just software pause.", "verify": "Safety relay, drive enable/STO, contactor behavior, restart prevention."},
+                {"id": "vfd-shield", "severity": "P1", "category": "Noise", "rule": "VFD-to-spindle wiring should use shielded motor cable with documented PE/shield termination.", "verify": "VFD manual, spindle frame bond, cable rating, routing away from signals."},
+                {"id": "limits-failsafe", "severity": "P2", "category": "Sensors", "rule": "Limit/home/probe inputs should be fail-safe and noise hardened.", "verify": "Normally-closed where practical, shielded cable, debounce/filtering, isolated inputs."},
+                {"id": "cabinet-layout", "severity": "P2", "category": "Layout", "rule": "Separate VFD/motor power, drive power, control power, and signal wiring zones inside the cabinet.", "verify": "Wire duct zones, PE bus, ferrules, labels, ventilation."},
+            ]
+        )
+    elif domain == "3d-printer-architecture":
+        rules.extend(
+            [
+                {"id": "thermal-runaway", "severity": "P1", "category": "Firmware", "rule": "Heater wiring and firmware thermal protection must be treated as one safety system.", "verify": "Heater wattage, sensor type, max_power, min/max temp, thermal runaway behavior."},
+                {"id": "bed-power", "severity": "P1", "category": "Heated Bed", "rule": "AC beds, DC beds, SSRs, and MOSFETs need separate protection and heat checks.", "verify": "Fuse, SSR current derating, heat sink, terminal rating, earth bond."},
+                {"id": "can-toolhead", "severity": "P2", "category": "Toolhead", "rule": "CAN/USB toolhead wiring needs termination, power injection, shield/drain, and connector pinout documented.", "verify": "Board manual, bus length, bitrate, termination resistance, spare-current budget."},
+                {"id": "sensor-routing", "severity": "P2", "category": "Sensors", "rule": "Thermistors, probes, and endstops should be routed away from heater and motor current where possible.", "verify": "Twisted pair/shielding if needed, connector locking, strain relief."},
+            ]
+        )
+    return rules
+
+
+def missing_electrical_inputs(domain, inputs):
+    missing = []
+    if not inputs.get("voltages"):
+        missing.append("system voltage for each power domain")
+    if not inputs.get("estimatedCurrentA"):
+        missing.append("load current or wattage for each branch")
+    if not inputs.get("oneWayFeet"):
+        missing.append("one-way wire length for voltage-drop checks")
+    if domain == "solar-grid-battery":
+        missing.extend(["PV module datasheet and string count", "battery chemistry/voltage/Ah or kWh", "inverter model/manual", "critical-load list and surge loads"])
+    elif domain == "cnc-machine-architecture":
+        missing.extend(["spindle/VFD model and input current", "drive voltage/current", "E-stop/safety relay topology", "controller I/O voltage"])
+    elif domain == "3d-printer-architecture":
+        missing.extend(["PSU current rating", "heater wattage", "bed topology", "controller/toolhead board pinouts"])
+    return missing[:12]
+
+
+def build_electrical_design_rules(prompt, spec):
+    domain = spec.get("domain") or engineering_diagram_domain(prompt)
+    inputs = extract_electrical_design_inputs(prompt)
+    voltage = max(inputs["voltages"]) if inputs.get("voltages") else None
+    wire = select_wire_gauge(inputs.get("estimatedCurrentA"), voltage_v=voltage, one_way_feet=inputs.get("oneWayFeet"))
+    return {
+        "ok": True,
+        "version": "2026-07-03",
+        "domain": domain,
+        "detectedInputs": inputs,
+        "componentLibrary": electrical_component_library_for_domain(domain),
+        "rules": electrical_rules_for_domain(domain),
+        "wireSizing": wire,
+        "missingInputs": missing_electrical_inputs(domain, inputs),
+        "disclaimer": "Engineering planning aid only. Verify final wiring against manufacturer manuals, applicable electrical/machine-safety code, listed component ratings, and qualified inspection where required.",
+    }
+
+
+def electrical_rules_report_text(prompt, spec, rules):
+    inputs = rules.get("detectedInputs") or {}
+    wire = rules.get("wireSizing") or {}
+    components = rules.get("componentLibrary") or []
+    rule_rows = rules.get("rules") or []
+    missing = rules.get("missingInputs") or []
+    detected = [
+        f"- Voltages detected: {inputs.get('voltages') or 'none'}",
+        f"- Currents detected: {inputs.get('currents') or 'none'}",
+        f"- Watts detected: {inputs.get('watts') or 'none'}",
+        f"- One-way length detected: {round(inputs.get('oneWayFeet'), 2) if inputs.get('oneWayFeet') else 'none'} ft",
+        f"- Estimated branch current: {round(inputs.get('estimatedCurrentA'), 2) if inputs.get('estimatedCurrentA') else 'not enough data'} A",
+    ]
+    if wire.get("ok"):
+        rec = wire.get("recommendation") or {}
+        wire_text = (
+            f"First-pass wire check: AWG {rec.get('awg')} or larger for {rec.get('designCurrentA')} A design current"
+            + (f", estimated drop {rec.get('voltageDropPct')} percent" if rec.get("voltageDropPct") is not None else "")
+            + "."
+        )
+    else:
+        wire_text = f"First-pass wire check: {wire.get('reason', 'missing inputs')}."
+    lines = [
+        f"# Electrical Design Rules - {spec.get('title', 'Engineering Diagram')}",
+        "",
+        rules.get("disclaimer", ""),
+        "",
+        "## Detected Inputs",
+        "",
+        *detected,
+        "",
+        "## Wire Sizing Quick Check",
+        "",
+        wire_text,
+        "",
+        "Basis: conservative planning check only; final wire size depends on code, insulation temperature, terminal rating, conductor material, conduit fill, bundling, ambient temperature, duty cycle, and equipment manuals.",
+        "",
+        "## Component Library Seed",
+        "",
+    ]
+    lines.extend(f"- {item['label']} ({item['category']}): verify {item['verify']}." for item in components)
+    lines.extend(["", "## Rules To Apply", ""])
+    lines.extend(f"- [{item['severity']}] {item['category']}: {item['rule']} Verify: {item['verify']}" for item in rule_rows)
+    lines.extend(["", "## Missing Inputs", ""])
+    lines.extend(f"- {item}" for item in missing)
+    lines.extend(["", "## Original Prompt", "", "```text", compact(prompt, 1600), "```", ""])
+    return "\n".join(lines)
+
+
+def electrical_component_csv_text(rules):
+    lines = ["id,label,category,verify"]
+    for item in rules.get("componentLibrary") or []:
+        cells = [item.get("id", ""), item.get("label", ""), item.get("category", ""), item.get("verify", "")]
+        lines.append(",".join('"' + str(cell).replace('"', '""') + '"' for cell in cells))
+    return "\n".join(lines) + "\n"
+
+
+def electrical_wire_sizing_csv_text(rules):
+    inputs = rules.get("detectedInputs") or {}
+    wire = rules.get("wireSizing") or {}
+    rec = wire.get("recommendation") or {}
+    rows = [
+        ["field", "value"],
+        ["detected_voltages", inputs.get("voltages") or ""],
+        ["detected_currents", inputs.get("currents") or ""],
+        ["detected_watts", inputs.get("watts") or ""],
+        ["one_way_feet", inputs.get("oneWayFeet") or ""],
+        ["estimated_current_a", inputs.get("estimatedCurrentA") or ""],
+        ["wire_check_ok", wire.get("ok")],
+        ["recommended_awg", rec.get("awg") or ""],
+        ["design_current_a", rec.get("designCurrentA") or wire.get("designCurrentA") or ""],
+        ["voltage_drop_v", rec.get("voltageDropV") or ""],
+        ["voltage_drop_pct", rec.get("voltageDropPct") or ""],
+        ["basis", wire.get("basis") or wire.get("reason") or ""],
+    ]
+    return "\n".join(",".join('"' + str(cell).replace('"', '""') + '"' for cell in row) for row in rows) + "\n"
+
+
 def dot_id(value):
     return re.sub(r"[^A-Za-z0-9_]", "_", str(value or "node")).strip("_") or "node"
 
@@ -12942,6 +13232,8 @@ def kicad_quote(value):
 
 
 def kicad_starter_schematic_text(spec):
+    rules = (spec.get("electricalRules") or {}).get("rules") or []
+    missing = (spec.get("electricalRules") or {}).get("missingInputs") or []
     text_lines = [
         spec.get("title", "Engineering Diagram"),
         "",
@@ -12950,6 +13242,12 @@ def kicad_starter_schematic_text(spec):
         "",
         "Connections:",
         *[f"- {source} -> {target}: {label} ({kind})" for source, target, label, kind in spec.get("edges", [])[:24]],
+        "",
+        "Electrical rules:",
+        *[f"- [{item.get('severity')}] {item.get('rule')}" for item in rules[:10]],
+        "",
+        "Missing inputs:",
+        *[f"- {item}" for item in missing[:10]],
         "",
         "Next: replace these text blocks with real symbols, connector pin numbers, nets, ERC rules, footprints, and BOM data.",
     ]
@@ -13004,6 +13302,12 @@ def engineering_diagram_readme_text(prompt, spec, paths, tools):
     checks = "\n".join(f"- [ ] {item}" for item in spec.get("checks", []))
     nodes = "\n".join(f"- {node['label']}: {node.get('note', '')}" for node in spec.get("nodes", []))
     edges = "\n".join(f"- {source} -> {target}: {label} ({kind})" for source, target, label, kind in spec.get("edges", []))
+    rules = spec.get("electricalRules") or {}
+    missing = "\n".join(f"- {item}" for item in rules.get("missingInputs", []))
+    rule_summary = "\n".join(
+        f"- [{item.get('severity')}] {item.get('category')}: {item.get('rule')}"
+        for item in (rules.get("rules") or [])[:10]
+    )
     return f"""# {spec['title']}
 
 Generated by Codex CLI UI engineering diagram pack.
@@ -13015,6 +13319,10 @@ Generated by Codex CLI UI engineering diagram pack.
 - Mermaid source: `{paths.get('mermaidPath')}`
 - draw.io import: `{paths.get('drawioPath')}`
 - Wiring/net CSV: `{paths.get('netlistCsvPath')}`
+- Electrical rules report: `{paths.get('rulesReportPath')}`
+- Electrical rules JSON: `{paths.get('rulesJsonPath')}`
+- Component library/BOM seed: `{paths.get('componentCsvPath')}`
+- Wire sizing quick check: `{paths.get('wireSizingCsvPath')}`
 - KiCad starter project: `{paths.get('kicadProjectPath')}`
 - KiCad starter schematic: `{paths.get('kicadSchematicPath')}`
 
@@ -13027,6 +13335,14 @@ Generated by Codex CLI UI engineering diagram pack.
 ## Engineering checks before build
 
 {checks}
+
+## Electrical rules applied
+
+{rule_summary}
+
+## Missing inputs
+
+{missing}
 
 ## Blocks
 
@@ -13047,6 +13363,8 @@ Generated by Codex CLI UI engineering diagram pack.
 def stage_engineering_diagram_artifact(messages, cwd="", target_path=None):
     prompt = latest_user_text(messages)
     spec = engineering_diagram_spec(prompt)
+    electrical_rules = build_electrical_design_rules(prompt, spec)
+    spec["electricalRules"] = electrical_rules
     slug = slugify(prompt, fallback=spec["domain"])[:64]
     timestamp = time.strftime("%Y%m%d-%H%M%S")
     target = Path(target_path).expanduser() if target_path else LOCAL_DIAGRAM_OUTPUT_DIR / f"{timestamp}-{slug}"
@@ -13056,6 +13374,10 @@ def stage_engineering_diagram_artifact(messages, cwd="", target_path=None):
     mermaid_path = target / f"{slug}.mmd"
     drawio_path = target / f"{slug}.drawio"
     netlist_path = target / f"{slug}_wiring_netlist.csv"
+    rules_report_path = target / f"{slug}_electrical_rules.md"
+    rules_json_path = target / f"{slug}_electrical_rules.json"
+    component_csv_path = target / f"{slug}_component_library.csv"
+    wire_sizing_csv_path = target / f"{slug}_wire_sizing.csv"
     kicad_dir = target / "kicad_starter"
     kicad_dir.mkdir(exist_ok=True)
     kicad_project_path = kicad_dir / f"{slug}.kicad_pro"
@@ -13083,6 +13405,10 @@ def stage_engineering_diagram_artifact(messages, cwd="", target_path=None):
     mermaid_path.write_text(mermaid_diagram_text(spec), encoding="utf-8")
     drawio_path.write_text(drawio_xml_text(spec), encoding="utf-8")
     netlist_path.write_text(diagram_csv_text(spec), encoding="utf-8")
+    rules_report_path.write_text(electrical_rules_report_text(prompt, spec, electrical_rules), encoding="utf-8")
+    rules_json_path.write_text(json.dumps(electrical_rules, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    component_csv_path.write_text(electrical_component_csv_text(electrical_rules), encoding="utf-8")
+    wire_sizing_csv_path.write_text(electrical_wire_sizing_csv_text(electrical_rules), encoding="utf-8")
     kicad_project_path.write_text(kicad_starter_project_text(spec["title"]), encoding="utf-8")
     kicad_schematic_path.write_text(kicad_starter_schematic_text(spec), encoding="utf-8")
     kicad_notes_path.write_text(
@@ -13094,6 +13420,12 @@ def stage_engineering_diagram_artifact(messages, cwd="", target_path=None):
                 "",
                 "Next schematic inputs needed:",
                 *[f"- {item}" for item in spec.get("checks", [])],
+                "",
+                "Rules report:",
+                f"- {rules_report_path}",
+                "",
+                "Missing electrical inputs:",
+                *[f"- {item}" for item in electrical_rules.get("missingInputs", [])],
                 "",
             ]
         ),
@@ -13113,6 +13445,10 @@ def stage_engineering_diagram_artifact(messages, cwd="", target_path=None):
         "mermaidPath": str(mermaid_path),
         "drawioPath": str(drawio_path),
         "netlistCsvPath": str(netlist_path),
+        "rulesReportPath": str(rules_report_path),
+        "rulesJsonPath": str(rules_json_path),
+        "componentCsvPath": str(component_csv_path),
+        "wireSizingCsvPath": str(wire_sizing_csv_path),
         "kicadProjectPath": str(kicad_project_path),
         "kicadSchematicPath": str(kicad_schematic_path),
         "kicadNotesPath": str(kicad_notes_path),
@@ -13126,8 +13462,16 @@ def engineering_diagram_working_notes(result):
     notes = []
     tools = result.get("tools") or {}
     spec = result.get("spec") or {}
+    electrical_rules = spec.get("electricalRules") or {}
+    wire = electrical_rules.get("wireSizing") or {}
     notes.append(f"Classified diagram domain as {spec.get('domain', 'unknown')}.")
-    notes.append("Generated Graphviz DOT, SVG preview, Mermaid source, draw.io import XML, wiring/net CSV, and KiCad starter notes.")
+    notes.append("Generated Graphviz DOT, SVG preview, Mermaid source, draw.io import XML, wiring/net CSV, electrical rules files, and KiCad starter notes.")
+    notes.append(f"Applied {len(electrical_rules.get('rules') or [])} electrical design rules and {len(electrical_rules.get('componentLibrary') or [])} component-library entries.")
+    if wire.get("ok"):
+        rec = wire.get("recommendation") or {}
+        notes.append(f"Wire-sizing quick check produced AWG {rec.get('awg')} as a first-pass planning result.")
+    else:
+        notes.append("Wire-sizing quick check is waiting on voltage/current/length inputs.")
     if tools.get("dotRendered"):
         notes.append(f"Rendered SVG with Graphviz at {tools.get('dotPath')}.")
     else:
@@ -13150,6 +13494,16 @@ def format_engineering_diagram_answer(result):
         )
     spec = result.get("spec") or {}
     tools = result.get("tools") or {}
+    electrical_rules = spec.get("electricalRules") or {}
+    wire = electrical_rules.get("wireSizing") or {}
+    if wire.get("ok"):
+        rec = wire.get("recommendation") or {}
+        wire_summary = (
+            f"Wire sizing quick check: AWG {rec.get('awg')} or larger for {rec.get('designCurrentA')} A design current"
+            + (f", about {rec.get('voltageDropPct')} percent drop." if rec.get("voltageDropPct") is not None else ".")
+        )
+    else:
+        wire_summary = f"Wire sizing quick check: {wire.get('reason', 'needs voltage/current/length inputs')}."
     lines = [
         f"I created an engineering diagram package for {spec.get('title', 'the requested system')}.",
         "",
@@ -13158,11 +13512,17 @@ def format_engineering_diagram_answer(result):
         f"- draw.io editable diagram: `{result.get('drawioPath')}`",
         f"- Mermaid source: `{result.get('mermaidPath')}`",
         f"- Wiring/net CSV: `{result.get('netlistCsvPath')}`",
+        f"- Electrical rules report: `{result.get('rulesReportPath')}`",
+        f"- Electrical rules JSON: `{result.get('rulesJsonPath')}`",
+        f"- Component library/BOM seed: `{result.get('componentCsvPath')}`",
+        f"- Wire sizing quick check: `{result.get('wireSizingCsvPath')}`",
         f"- KiCad starter project: `{result.get('kicadProjectPath')}`",
         f"- KiCad starter schematic: `{result.get('kicadSchematicPath')}`",
         f"- Engineering README: `{result.get('readmePath')}`",
         "",
-        "This is why: Graphviz gives a clean, repeatable block layout; draw.io gives an editable engineering drawing; the wiring/net CSV preserves connection intent; and the KiCad starter folder is the handoff point for true schematic work with pins, symbols, ERC, footprints, and BOM.",
+        "This is why: Graphviz gives a clean, repeatable block layout; draw.io gives an editable engineering drawing; the wiring/net CSV preserves connection intent; the rules pack checks protection, grounding, routing, wire sizing, and missing ratings; and the KiCad starter folder is the handoff point for true schematic work with pins, symbols, ERC, footprints, and BOM.",
+        "",
+        wire_summary,
         "",
         f"Tool status: Graphviz {'rendered the SVG' if tools.get('dotRendered') else 'fallback SVG was used'}; draw.io {'found' if tools.get('drawioPath') else 'not found'}; KiCad CLI {'found' if tools.get('kicadCliPath') else 'not found'}.",
         "",
@@ -14766,22 +15126,29 @@ def package_health_report():
                 diagram.get("drawioPath"),
                 diagram.get("mermaidPath"),
                 diagram.get("netlistCsvPath"),
+                diagram.get("rulesReportPath"),
+                diagram.get("rulesJsonPath"),
+                diagram.get("componentCsvPath"),
+                diagram.get("wireSizingCsvPath"),
                 diagram.get("kicadProjectPath"),
                 diagram.get("kicadSchematicPath"),
                 diagram.get("readmePath"),
             ]
             files_ok = all(path and Path(path).exists() and Path(path).stat().st_size > 0 for path in required_paths)
+            rules = (diagram.get("spec") or {}).get("electricalRules") or {}
         ok = (
             diagram_route.get("projectId") == "engineering-diagrams"
             and diagram.get("ok")
             and files_ok
             and (diagram.get("spec") or {}).get("domain") == "solar-grid-battery"
+            and len(rules.get("rules") or []) >= 8
+            and len(rules.get("componentLibrary") or []) >= 6
         )
         tools = diagram.get("tools") or {}
         add(
             "tools:engineering-diagram-pack",
             "pass" if ok else "fail",
-            f"Graphviz={'yes' if tools.get('dotPath') else 'no'}, draw.io={'yes' if tools.get('drawioPath') else 'no'}, KiCad CLI={'yes' if tools.get('kicadCliPath') else 'no'}",
+            f"Graphviz={'yes' if tools.get('dotPath') else 'no'}, draw.io={'yes' if tools.get('drawioPath') else 'no'}, KiCad CLI={'yes' if tools.get('kicadCliPath') else 'no'}, rules={len(rules.get('rules') or [])}",
         )
     except Exception as exc:
         add("tools:engineering-diagram-pack", "fail", str(exc))
@@ -17192,6 +17559,20 @@ class CodexUIHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 result = {"ok": False, "error": str(exc)}
             self.send_json(result)
+            return
+
+        if parsed.path == "/api/tools/electrical-design-rules":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self.send_error(400, "Invalid JSON")
+                return
+            messages = payload.get("messages") if isinstance(payload.get("messages"), list) else [{"role": "user", "text": payload.get("prompt") or ""}]
+            prompt = latest_user_text(messages)
+            spec = engineering_diagram_spec(prompt)
+            rules = build_electrical_design_rules(prompt, spec)
+            self.send_json({"ok": True, "spec": spec, "rules": rules})
             return
 
         if parsed.path == "/api/files/open":
