@@ -1473,6 +1473,20 @@ h1 {
   background: #f7faff;
 }
 
+.message.user.steering .message-body {
+  border-color: #f2c97d;
+  background: #fff9ec;
+}
+
+.message.user.steering .message-role::after {
+  content: " steer";
+  display: block;
+  color: #9a650b;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .message-attachments {
   display: flex;
   flex-wrap: wrap;
