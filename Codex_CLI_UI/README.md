@@ -71,8 +71,6 @@ The server binds to `127.0.0.1` by default and streams `codex exec --json` outpu
 - The right rail includes a live `Model Health` graph for Ollama, model stack, Manager pass timing, memory, disk, load, and Qidi reachability.
 - Active runs show concise `Working notes` in the assistant message while Codex is thinking and using tools.
 - The `Admin` screen includes topic cleanup, stable knowledge Promote/Delete controls, the Improvement Lab, saved golden-test counts, model warmup, performance benchmark runs, and a package health check.
-- The `Admin` screen also includes a 3D Printing Expert Pack card. It shows printer/material/source-vault coverage and can refresh official/manual sources into `data/source-vault/3d-printing`.
-- Printer and filament questions use the built-in printer profiles, material library, OrcaSlicer calibration workflow, and cached component docs before falling back to general research.
 
 Terminal shortcuts:
 
@@ -89,6 +87,46 @@ python3 import_codex_history.py
 ```
 
 This creates a compact local index in `data/` from `~/.codex/sessions`. The UI server injects relevant history snippets into new Codex runs.
+
+## Harvest Private History Tests
+
+```bash
+cd "$HOME/Applications/Codex_CLI_UI"
+python3 harvest_history_golden_tests.py --limit 120
+```
+
+This scans local Codex sessions and archived sessions, sanitizes obvious secrets, deduplicates user prompts, and writes private Slow-group golden tests into `data/golden_tests.json`. The public package includes the harvester only; it does not bundle personal chat history or generated private tests.
+
+Run a safe local batch through the live UI server:
+
+```bash
+python3 run_golden_batch.py --limit 12
+python3 run_golden_batch.py --offset 12 --limit 12
+```
+
+This selects private history-harvest tests that do not require live web, GitHub, credentials, downloads, or live printer actions, then records the batch result under `data/golden_batch_results/`.
+
+Run Tinman's curated engineering-domain sample set:
+
+```bash
+python3 run_golden_batch.py --group "Domain Samples" --source domain-sample --limit 56
+```
+
+The Domain Samples group covers 3D printing, CNC machining, solar/wind power, aerodynamics, CFD, engineering, and aviation. These are public-safe built-in guardrails, not private chat-history exports.
+
+Run the public CAD/CNC manufacturing question bank:
+
+```bash
+python3 run_golden_batch.py --group "Manufacturing Samples" --source manufacturing-sample --limit 100
+```
+
+Run the TinmanX1/Codex UI workflow scenario directly:
+
+```bash
+python3 run_golden_batch.py --ids scenario-tinmanx1-polymaker-steer-self-repair-release
+```
+
+The Manufacturing Samples group covers 50 CAD and 50 CNC machining prompts. The workflow scenario guards the Polymaker/Fiberon preset, Steer/Edit UI, self-healing Fix-this loop, GitHub release, and zip packaging behavior.
 
 ## Hybrid Cloud Research Setup
 

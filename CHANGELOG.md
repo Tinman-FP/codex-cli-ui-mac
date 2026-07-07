@@ -1,5 +1,14 @@
 # Changelog
 
+## v2026.07.15
+
+- Adds the Task Contract Gate so hard tasks define done, required proof, reject conditions, and gate status before an answer is accepted as complete.
+- Adds contract-aware response scorecards and live `/api/run` payload fields for task contracts, deliverables, assumptions, scorecards, and gate failures.
+- Adds a 50-question Fusion & Orca Samples regression pack covering Fusion 360 CAD/CAM workflows, OrcaSlicer Codex app/preset repair, Orca profile workflow, and Orca filament calibration.
+- Fixes Fusion 360 user-parameter prompts being mistaken for Orca pressure-advance or local slicer-profile pulls.
+- Fixes conceptual Orca filament/profile questions so they answer the workflow directly instead of dumping unrelated local profile data.
+- Runs and verifies the full local regression gauntlet: 12 hard cases, 50 Fusion/Orca samples, 100 manufacturing samples, 56 domain samples, and the TinmanX1 Polymaker workflow scenario.
+
 ## v2026.07.14
 
 - Adds the 3D Printing Expert Pack with printer profiles for Bambu H2D/X1C, Creality K2 Plus, Qidi Plus 4, Snapmaker U1, Rat Rig V-Core 4.1 IDEX Klipper, Sovol SV08 Max, and ELEGOO Centauri Carbon.

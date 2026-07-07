@@ -8,7 +8,11 @@ bash -n "$ROOT/install/Install Codex CLI UI.command"
 bash -n "$ROOT/install/Uninstall Codex CLI UI.command"
 
 echo "Checking Python"
-/usr/bin/python3 -m py_compile "$ROOT/Codex_CLI_UI/server.py" "$ROOT/Codex_CLI_UI/import_codex_history.py"
+/usr/bin/python3 -m py_compile \
+  "$ROOT/Codex_CLI_UI/server.py" \
+  "$ROOT/Codex_CLI_UI/import_codex_history.py" \
+  "$ROOT/Codex_CLI_UI/harvest_history_golden_tests.py" \
+  "$ROOT/Codex_CLI_UI/run_golden_batch.py"
 
 if [ -x /Applications/Codex.app/Contents/Resources/cua_node/bin/node ]; then
   /Applications/Codex.app/Contents/Resources/cua_node/bin/node --check "$ROOT/Codex_CLI_UI/app.js"
@@ -24,7 +28,7 @@ if find "$ROOT" -name .git -prune -o -type f \( -name 'codex_history_index.jsonl
   exit 1
 fi
 
-if rg -n --hidden --glob '!.git' --glob '!.git/**' --glob '!**/checks/verify_release.sh' --glob '!release/*.dmg' --glob '!*.icns' --glob '!*.png' \
+if rg -n --hidden --glob '!.git' --glob '!.git/**' --glob '!**/checks/verify_release.sh' --glob '!release/*.dmg' --glob '!release/*.zip' --glob '!*.icns' --glob '!*.png' \
   'williamtinney|/Users/williamtinney|192\.168\.|makersvpn|gho_|QIDI@|Flightops_Tracker' "$ROOT"; then
   echo "Privacy scan found a blocked pattern"
   exit 1

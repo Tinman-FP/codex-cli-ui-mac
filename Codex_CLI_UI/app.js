@@ -124,6 +124,7 @@ let config = {
 };
 let activeController = null;
 let pendingAttachments = [];
+let composerIntent = { kind: "", messageId: "" };
 const testBench = {
   running: false,
   activeId: "",
@@ -1305,6 +1306,9 @@ function renderMessages() {
     answer.className = "answer-text";
     renderMessageText(answer, message);
     body.appendChild(answer);
+    if (message.role === "user" && !message.running && String(message.text || "").trim()) {
+      body.appendChild(buildUserMessageActions(message));
+    }
     const responsePackage = buildResponsePackagePanel(message);
     if (responsePackage) body.appendChild(responsePackage);
     const thoughts = buildThoughtsCard(message);
@@ -1353,6 +1357,7 @@ function buildResponsePackagePanel(message) {
   const deliverables = responsePackageItems(message, "deliverables");
   const assumptions = responsePackageItems(message, "assumptions");
   const contract = message.taskContract || null;
+  const contractGate = message.contractGate || message.scorecard?.contractGate || null;
   const roleStyle = message.roleStyle || null;
   const scorecard = message.scorecard || null;
   if (!deliverables.length && !assumptions.length && !contract && !roleStyle && !scorecard) return null;
@@ -1403,10 +1408,13 @@ function buildResponsePackagePanel(message) {
     const summary = document.createElement("summary");
     const summaryTitle = document.createElement("span");
     summaryTitle.className = "answer-check-title";
-    summaryTitle.textContent = "Answer check";
+    summaryTitle.textContent = "Task contract";
     const score = document.createElement("span");
     score.className = `score-pill ${scorecard?.status || "pass"}`;
-    score.textContent = Number.isFinite(scorecard?.score) ? `${scorecard.score}%` : "Ready";
+    const gateText = contractGate?.status ? `${contractGate.status}` : "";
+    score.textContent = Number.isFinite(scorecard?.score)
+      ? `${scorecard.score}%${gateText ? ` · ${gateText}` : ""}`
+      : gateText || "Ready";
     summary.append(summaryTitle, score);
     details.appendChild(summary);
 
@@ -1415,6 +1423,16 @@ function buildResponsePackagePanel(message) {
       grid.className = "answer-check-grid";
       if (contract?.kind) grid.appendChild(buildAnswerCheckFact("Task", contract.kind));
       if (contract?.doneMeans) grid.appendChild(buildAnswerCheckFact("Done means", contract.doneMeans));
+      if (Array.isArray(contract?.mustDo) && contract.mustDo.length) {
+        grid.appendChild(buildAnswerCheckFact("Must do", contract.mustDo.join(", ")));
+      }
+      if (Array.isArray(contract?.requiredProof) && contract.requiredProof.length) {
+        grid.appendChild(buildAnswerCheckFact("Required proof", contract.requiredProof.join(", ")));
+      }
+      if (Array.isArray(contract?.rejectIf) && contract.rejectIf.length) {
+        grid.appendChild(buildAnswerCheckFact("Reject if", contract.rejectIf.slice(0, 4).join(", ")));
+      }
+      if (contractGate?.status) grid.appendChild(buildAnswerCheckFact("Gate", contractGate.status));
       if (contract?.role || roleStyle?.title) grid.appendChild(buildAnswerCheckFact("Role", contract?.role || roleStyle.title));
       if (roleStyle?.voice) grid.appendChild(buildAnswerCheckFact("Voice", roleStyle.voice));
       if (Array.isArray(roleStyle?.checklist) && roleStyle.checklist.length) {
@@ -1466,6 +1484,19 @@ function buildResponsePackagePanel(message) {
   return wrap.childElementCount ? wrap : null;
 }
 
+function buildUserMessageActions(message) {
+  const actions = document.createElement("div");
+  actions.className = "message-actions";
+  const edit = document.createElement("button");
+  edit.className = "message-action-button";
+  edit.type = "button";
+  edit.dataset.editMessageId = message.id;
+  edit.textContent = "Edit question";
+  edit.disabled = Boolean(activeController);
+  actions.appendChild(edit);
+  return actions;
+}
+
 function buildAnswerCheckFact(label, value) {
   const item = document.createElement("div");
   item.className = "answer-check-fact";
@@ -1487,7 +1518,7 @@ function buildFeedbackActions(message) {
   } else if (message.feedback === "good") {
     status.textContent = "Marked good";
   } else if (message.feedback === "fix") {
-    status.textContent = message.feedbackGoldenTest ? "Lesson saved + test" : "Lesson saved";
+    status.textContent = message.feedbackSelfHealing ? "Lesson saved + self-heal" : message.feedbackGoldenTest ? "Lesson saved + test" : "Lesson saved";
   } else if (message.feedback === "error") {
     status.textContent = "Feedback not saved";
   }
@@ -1508,7 +1539,14 @@ function buildFeedbackActions(message) {
   fix.textContent = "Fix this";
   fix.disabled = message.feedback === "saving";
 
-  actions.append(good, fix);
+  const steer = document.createElement("button");
+  steer.className = "feedback-button";
+  steer.type = "button";
+  steer.dataset.steerMessageId = message.id;
+  steer.textContent = "Steer";
+  steer.disabled = message.feedback === "saving";
+
+  actions.append(good, fix, steer);
   if (status.textContent) actions.appendChild(status);
   return actions;
 }
@@ -2855,8 +2893,21 @@ function workingIntroForPrompt(text, attachments = []) {
 async function sendPrompt() {
   const thread = currentThread();
   const text = els.promptInput.value.trim();
-  const attachments = pendingAttachments.slice();
+  let attachments = pendingAttachments.slice();
   if (!thread || (!text && !attachments.length) || activeController) return;
+  let editingIndex = -1;
+  let editingMessage = null;
+  if (composerIntent.kind === "edit" && composerIntent.messageId) {
+    editingIndex = findMessageIndexById(thread, composerIntent.messageId);
+    editingMessage = editingIndex >= 0 ? thread.messages[editingIndex] : null;
+    if (editingMessage?.role !== "user") {
+      editingIndex = -1;
+      editingMessage = null;
+    }
+    if (editingMessage && !attachments.length && Array.isArray(editingMessage.attachments)) {
+      attachments = editingMessage.attachments.slice();
+    }
+  }
 
   thread.cwd = els.cwdInput.value.trim() || config.cwd;
   thread.profile = thread.profile || config.profile;
@@ -2866,12 +2917,16 @@ async function sendPrompt() {
   thread.friendlinessLevel = normalizeFriendliness(thread.friendlinessLevel || config.friendlinessLevel);
   thread.humorLevel = normalizeHumor(thread.humorLevel || config.humorLevel);
   thread.webSearch = normalizeWebSearch(thread.webSearch || config.webSearch);
+  if (editingIndex >= 0) {
+    thread.messages = thread.messages.slice(0, editingIndex);
+  }
   thread.messages.push({ id: crypto.randomUUID(), role: "user", text, attachments });
   if (isUntitledThread(thread)) {
     thread.title = (text || attachments[0]?.name || "Attached file").split(/\s+/).slice(0, 7).join(" ");
   }
   thread.updatedAt = new Date().toISOString();
   pendingAttachments = [];
+  composerIntent = { kind: "", messageId: "" };
   els.promptInput.value = "";
   autoSizeTextarea();
   renderAttachmentTray();
@@ -3001,6 +3056,7 @@ async function runDeeperAnalysis(kind = "auto") {
     pending.deliverables = Array.isArray(payload.deliverables) ? payload.deliverables : [];
     pending.assumptions = Array.isArray(payload.assumptions) ? payload.assumptions : [];
     pending.scorecard = payload.scorecard || null;
+    pending.contractGate = payload.contractGate || null;
     pending.thoughts = Array.isArray(payload.thoughts) && payload.thoughts.length
       ? payload.thoughts
       : pending.thoughts;
@@ -3172,6 +3228,9 @@ async function runGoldenTest(test, signal) {
     warnings: [],
     logs: [],
     analyticalCore: null,
+    taskContract: null,
+    contractGate: null,
+    scorecard: null,
   };
   const response = await fetch("/api/run", {
     method: "POST",
@@ -3202,6 +3261,9 @@ async function runGoldenTest(test, signal) {
     if (event.type === "assistant") {
       run.answer = event.text || "";
       run.analyticalCore = event.analyticalCore || null;
+      run.taskContract = event.taskContract || null;
+      run.contractGate = event.contractGate || null;
+      run.scorecard = event.scorecard || null;
     }
     if (event.type === "thought") run.thoughts.push(event.text || "");
     if (event.type === "warning" || event.type === "error") run.warnings.push(event.text || event.type);
@@ -3236,6 +3298,9 @@ function evaluateGoldenTest(test, run) {
   const answer = String(run.answer || "").trim();
   const lower = answer.toLowerCase();
   const route = run.route || {};
+  const taskContract = run.taskContract || {};
+  const contractGate = run.contractGate || {};
+  const scorecard = run.scorecard || {};
   const checks = [];
 
   checks.push({
@@ -3324,6 +3389,41 @@ function evaluateGoldenTest(test, run) {
     });
   }
 
+  if (test.expectedContractKind) {
+    checks.push({
+      label: "contract-kind",
+      passed: taskContract.kind === test.expectedContractKind,
+      detail: `Expected ${test.expectedContractKind}; got ${taskContract.kind || "none"}.`,
+    });
+  }
+
+  if (test.expectedContractGate) {
+    checks.push({
+      label: "contract-gate",
+      passed: contractGate.status === test.expectedContractGate,
+      detail: `Expected ${test.expectedContractGate}; got ${contractGate.status || "none"}.`,
+    });
+  }
+
+  if (test.requiredContractProof?.length) {
+    const proofText = (taskContract.requiredProof || []).join(" ").toLowerCase();
+    const missing = test.requiredContractProof.filter((term) => !proofText.includes(term.toLowerCase()));
+    checks.push({
+      label: "contract-proof",
+      passed: missing.length === 0,
+      detail: missing.length ? `Missing: ${missing.join(", ")}` : "Contract proof terms found.",
+    });
+  }
+
+  if (test.minScorecard) {
+    const score = Number(scorecard.score || 0);
+    checks.push({
+      label: "scorecard",
+      passed: score >= Number(test.minScorecard),
+      detail: `Expected response scorecard >= ${test.minScorecard}; got ${score || "none"}.`,
+    });
+  }
+
   const passed = checks.every((check) => check.passed);
   return {
     status: passed ? "pass" : "fail",
@@ -3333,6 +3433,9 @@ function evaluateGoldenTest(test, run) {
     route,
     returnCode: run.returnCode,
     analyticalCore: run.analyticalCore,
+    taskContract: run.taskContract,
+    contractGate: run.contractGate,
+    scorecard: run.scorecard,
     thoughts: run.thoughts,
     warnings: run.warnings,
   };
@@ -3355,6 +3458,7 @@ function handleEvent(event, pending) {
     pending.deliverables = Array.isArray(event.deliverables) ? event.deliverables : [];
     pending.assumptions = Array.isArray(event.assumptions) ? event.assumptions : [];
     pending.scorecard = event.scorecard || null;
+    pending.contractGate = event.contractGate || null;
     renderMessages();
     return;
   }
@@ -3449,6 +3553,39 @@ function findMessageById(thread, id) {
   return (thread.messages || []).find((message) => message.id === id);
 }
 
+function findMessageIndexById(thread, id) {
+  return (thread.messages || []).findIndex((message) => message.id === id);
+}
+
+function setComposerText(text) {
+  els.promptInput.value = text;
+  autoSizeTextarea();
+  els.promptInput.focus();
+}
+
+function startEditMessage(messageId) {
+  const thread = currentThread();
+  const index = findMessageIndexById(thread, messageId);
+  const message = index >= 0 ? thread.messages[index] : null;
+  if (!message || message.role !== "user") return;
+  composerIntent = { kind: "edit", messageId };
+  setComposerText(message.text || "");
+  els.runState.textContent = "Editing question";
+  els.runState.className = "run-state warning";
+  appendLog("event", "editing earlier question; next send reruns from that point");
+}
+
+function startSteerMessage(messageId) {
+  const thread = currentThread();
+  const message = findMessageById(thread, messageId);
+  if (!message || message.role !== "assistant") return;
+  composerIntent = { kind: "steer", messageId };
+  setComposerText("Steer the previous answer this way: ");
+  els.runState.textContent = "Steer ready";
+  els.runState.className = "run-state warning";
+  appendLog("event", "steer prompt prepared for the previous answer");
+}
+
 function latestUserPromptForMessage(thread, message) {
   const index = (thread.messages || []).indexOf(message);
   for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
@@ -3500,6 +3637,9 @@ async function sendMessageFeedback(messageId, rating) {
         note,
         prompt: latestUserPromptForMessage(thread, message),
         answer: message.text || "",
+        messages: thread.messages.filter((item) => !item.running).slice(-8),
+        cwd: thread.cwd || config.cwd,
+        webSearch: thread.webSearch || config.webSearch,
         route: message.route || {},
         projectId: message.route?.projectId || message.adminTopic?.projectId || "general",
       }),
@@ -3510,6 +3650,7 @@ async function sendMessageFeedback(messageId, rating) {
     message.feedback = rating;
     message.feedbackNote = note;
     message.feedbackGoldenTest = payload.goldenTest || null;
+    message.feedbackSelfHealing = payload.selfHealing?.event?.patchQueued || payload.selfHealing?.event || null;
     if (payload.goldenTests) config.goldenTests = payload.goldenTests;
     if (payload.admin) config.admin = payload.admin;
     if (payload.goldenTest) appendLog("status", `Regression test saved: ${payload.goldenTest.name || payload.goldenTest.id}`);
@@ -3694,6 +3835,18 @@ els.conversation.addEventListener("click", (event) => {
   if (localPathLink) {
     event.preventDefault();
     openLocalPath(localPathLink.dataset.localPath);
+    return;
+  }
+  const editButton = event.target.closest("[data-edit-message-id]");
+  if (editButton && !activeController) {
+    event.preventDefault();
+    startEditMessage(editButton.dataset.editMessageId);
+    return;
+  }
+  const steerButton = event.target.closest("[data-steer-message-id]");
+  if (steerButton && !activeController) {
+    event.preventDefault();
+    startSteerMessage(steerButton.dataset.steerMessageId);
     return;
   }
   const button = event.target.closest("[data-feedback-id]");
