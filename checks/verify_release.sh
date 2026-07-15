@@ -25,7 +25,7 @@ if find "$ROOT" -name .git -prune -o -type f \( -name 'codex_history_index.jsonl
 fi
 
 if rg -n --hidden --glob '!.git' --glob '!.git/**' --glob '!**/checks/verify_release.sh' --glob '!release/*.dmg' --glob '!*.icns' --glob '!*.png' \
-  'williamtinney|/Users/williamtinney|192\.168\.|makersvpn|gho_|QIDI@|Flightops_Tracker' "$ROOT"; then
+  '/Users/[A-Za-z0-9._-]+|192\.168\.|makersvpn|Flightops_Tracker|gho_|QIDI@' "$ROOT"; then
   echo "Privacy scan found a blocked pattern"
   exit 1
 fi

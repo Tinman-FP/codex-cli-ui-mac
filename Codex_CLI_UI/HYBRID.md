@@ -82,7 +82,7 @@ Cloud Research requires an OpenAI API key in the UI service environment. Set it 
 ```bash
 launchctl setenv CODEX_FREE_ONLY 0
 launchctl setenv OPENAI_API_KEY <your-api-key>
-launchctl kickstart -k gui/$(id -u)/com.tinmanfp.codex-cli-ui
+launchctl kickstart -k gui/$(id -u)/com.localuser.codex-cli-ui
 ```
 
 Optional model override:
@@ -95,7 +95,7 @@ launchctl setenv LOCAL_REVIEW_MODEL deepseek-r1-8b
 launchctl setenv MANAGER_POLISH_MODEL gpt-oss-20b
 launchctl setenv CODEX_PREWARM_MODELS gpt-oss-20b
 launchctl setenv CODEX_MANAGER_DEPTH balanced
-launchctl kickstart -k gui/$(id -u)/com.tinmanfp.codex-cli-ui
+launchctl kickstart -k gui/$(id -u)/com.localuser.codex-cli-ui
 ```
 
 ## Next Architecture Step

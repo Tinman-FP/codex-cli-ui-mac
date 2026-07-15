@@ -6,16 +6,16 @@ This is a community package for Mac users who want a simple local Codex-style ch
 
 ## One-File Download
 
-Download the DMG from the `release/` folder or the GitHub Release:
+Download the current public ZIP from the `release/` folder or the GitHub Release:
 
 ```text
-Codex_CLI_UI_Mac_v2026.07.14.dmg
+Codex_CLI_UI_Public_v2026.07.15.zip
 ```
 
-Open the DMG and double-click:
+Unzip it and double-click:
 
 ```text
-Install Codex CLI UI.command
+install.command
 ```
 
 The installer copies files into your user account:

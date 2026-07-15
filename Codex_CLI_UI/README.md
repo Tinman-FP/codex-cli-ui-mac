@@ -4,6 +4,16 @@ A local Mac UI for the bundled Codex CLI and the local Ollama profiles.
 
 ## Run
 
+If you downloaded the public ZIP, unzip it and double-click `install.command`. It installs the app source into:
+
+```text
+$HOME/Applications/Codex_CLI_UI
+```
+
+The installer is intentionally conservative. It checks for `python3`, `ollama`, and Codex CLI, creates local `data/` and `logs/` folders, starts the UI when prerequisites are present, and does not install large tools, models, API keys, or private machine inventory.
+
+Manual run:
+
 ```bash
 cd "$HOME/Applications/Codex_CLI_UI"
 python3 server.py
@@ -54,6 +64,7 @@ The server binds to `127.0.0.1` by default and streams `codex exec --json` outpu
 - `Coder` uses `local-coder` with the free local Ollama `qwen2.5-coder-7b` alias. Use it for implementation-heavy app, script, and repo work.
 - `Review` uses direct local Ollama with the free `deepseek-r1-8b` alias. Use it for second opinions, bug hunts, and response-quality checks.
 - `Local Research` searches free public web pages, caches evidence locally in SQLite, then asks the local Ollama `gpt-oss-20b` model to write the grounded answer. This is the preferred no-pay path for shopping, part matching, current specs, and product research.
+- `Research + Apply` searches free public web pages, turns evidence into project-specific lessons, writes a local research/apply receipt, and now stages a Project Apply plan/manifest before claiming profile, preset, workflow, or project files changed.
 - `Cloud Research` uses the OpenAI Responses API for public web/general research when `OPENAI_API_KEY` is configured. It is disabled by default in free-only mode. It does not include the private startup inventory, machine list, SSH aliases, or local project history in the cloud prompt.
 - The UI passes the `Web` setting into each run. Local Codex can use it as a hint; Local Research requires it to be on.
 - The composer keeps the prompt box above a compact one-row options bar for `Mode`, `Access`, `Reasoning`, `Friendly`, `Humor`, and `Web`.
@@ -71,8 +82,6 @@ The server binds to `127.0.0.1` by default and streams `codex exec --json` outpu
 - The right rail includes a live `Model Health` graph for Ollama, model stack, Manager pass timing, memory, disk, load, and Qidi reachability.
 - Active runs show concise `Working notes` in the assistant message while Codex is thinking and using tools.
 - The `Admin` screen includes topic cleanup, stable knowledge Promote/Delete controls, the Improvement Lab, saved golden-test counts, model warmup, performance benchmark runs, and a package health check.
-- The `Admin` screen also includes a 3D Printing Expert Pack card. It shows printer/material/source-vault coverage and can refresh official/manual sources into `data/source-vault/3d-printing`.
-- Printer and filament questions use the built-in printer profiles, material library, OrcaSlicer calibration workflow, and cached component docs before falling back to general research.
 
 Terminal shortcuts:
 
@@ -90,6 +99,46 @@ python3 import_codex_history.py
 
 This creates a compact local index in `data/` from `~/.codex/sessions`. The UI server injects relevant history snippets into new Codex runs.
 
+## Harvest Private History Tests
+
+```bash
+cd "$HOME/Applications/Codex_CLI_UI"
+python3 harvest_history_golden_tests.py --limit 120
+```
+
+This scans local Codex sessions and archived sessions, sanitizes obvious secrets, deduplicates user prompts, and writes private Slow-group golden tests into `data/golden_tests.json`. The public package includes the harvester only; it does not bundle personal chat history or generated private tests.
+
+Run a safe local batch through the live UI server:
+
+```bash
+python3 run_golden_batch.py --limit 12
+python3 run_golden_batch.py --offset 12 --limit 12
+```
+
+This selects private history-harvest tests that do not require live web, GitHub, credentials, downloads, or live printer actions, then records the batch result under `data/golden_batch_results/`.
+
+Run Tinman's curated engineering-domain sample set:
+
+```bash
+python3 run_golden_batch.py --group "Domain Samples" --source domain-sample --limit 56
+```
+
+The Domain Samples group covers 3D printing, CNC machining, solar/wind power, aerodynamics, CFD, engineering, and aviation. These are public-safe built-in guardrails, not private chat-history exports.
+
+Run the public CAD/CNC manufacturing question bank:
+
+```bash
+python3 run_golden_batch.py --group "Manufacturing Samples" --source manufacturing-sample --limit 100
+```
+
+Run the TinmanX1/Codex UI workflow scenario directly:
+
+```bash
+python3 run_golden_batch.py --ids scenario-tinmanx1-polymaker-steer-self-repair-release
+```
+
+The Manufacturing Samples group covers 50 CAD and 50 CNC machining prompts. The workflow scenario guards the Polymaker/Fiberon preset, Steer/Edit UI, self-healing Fix-this loop, GitHub release, and zip packaging behavior.
+
 ## Hybrid Cloud Research Setup
 
 The official OpenAI CLI is installed with Homebrew:
@@ -103,7 +152,7 @@ To enable `Cloud Research` mode for the LaunchAgent-backed UI:
 ```bash
 launchctl setenv CODEX_FREE_ONLY 0
 launchctl setenv OPENAI_API_KEY <your-api-key>
-launchctl kickstart -k gui/$(id -u)/com.tinmanfp.codex-cli-ui
+launchctl kickstart -k gui/$(id -u)/com.localuser.codex-cli-ui
 ```
 
 Do not paste API keys into chat. Local Codex modes remain the right choice for files, shell commands, printers, VPN devices, SSH, and private Mac context.
@@ -132,7 +181,7 @@ launchctl setenv LOCAL_REVIEW_MODEL deepseek-r1-8b
 launchctl setenv MANAGER_POLISH_MODEL gpt-oss-20b
 launchctl setenv CODEX_PREWARM_MODELS gpt-oss-20b
 launchctl setenv CODEX_MANAGER_DEPTH balanced
-launchctl kickstart -k gui/$(id -u)/com.tinmanfp.codex-cli-ui
+launchctl kickstart -k gui/$(id -u)/com.localuser.codex-cli-ui
 ```
 
 Keep the `Web` toggle on for this mode. Turn it off when you want a fully offline local Codex run.
@@ -146,6 +195,15 @@ Pre-package check:
 ```bash
 python3 checks/verify_package_health.py
 ```
+
+Public-safe export dry run:
+
+```bash
+python3 tools/build_public_export.py --zip
+python3 tools/release_privacy_scan.py --root build/public-export/codex-cli-ui-public
+```
+
+Create public ZIPs from `build/public-export/codex-cli-ui-public.zip`, not from the live local working tree. The live tree intentionally contains Tinman's private machine inventory, local test history, generated work, and source-vault data under ignored runtime folders.
 
 Local tool API examples:
 
@@ -161,5 +219,5 @@ curl -X POST http://127.0.0.1:8765/api/tools/recover \
 ```
 
 ```bash
-"$HOME/Applications/Codex_CLI_UI/.venv/bin/python"
+$HOME/Applications/Codex_CLI_UI/.venv/bin/python
 ```

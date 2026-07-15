@@ -1,0 +1,22 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+
+# Local runtime state, private machine inventory, history, logs, and caches.
+data/
+logs/
+
+# Local project geometry inputs; keep public releases source-only by default.
+CPAP Inputs/
+Wind Turbine/
+
+# Local virtual environments and generated app bundles.
+.venv/
+build/
+
+# Temporary/package artifacts.
+*.tmp
+*.bak
+*.zip
+*.dmg
+*.pkg

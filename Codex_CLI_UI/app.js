@@ -1,4 +1,5 @@
 const storageKey = "codex-cli-ui-state-v1";
+const DEFAULT_ANSWER_SURFACE = "codex-style";
 
 const els = {
   profileLabel: document.getElementById("profileLabel"),
@@ -105,7 +106,7 @@ const els = {
 const state = loadState();
 let config = {
   profile: "local-fast",
-  cwd: "~/Documents/Codex",
+  cwd: "$HOME/Documents/Codex",
   accessLevel: "danger-full-access",
   reasoningLevel: "low",
   managerDepth: "balanced",
@@ -123,7 +124,14 @@ let config = {
   admin: null,
 };
 let activeController = null;
+let activeRun = null;
 let pendingAttachments = [];
+const MAX_BROWSER_UPLOAD_BYTES = 250 * 1024 * 1024;
+const nativeFilePickers = new Map();
+let composerIntent = { kind: "", messageId: "" };
+let staleAeroRecoveryRunning = false;
+let staleAeroRecoveryTimer = null;
+const staleAeroRecoveryIds = new Set();
 const testBench = {
   running: false,
   activeId: "",
@@ -230,13 +238,17 @@ function currentThread() {
 }
 
 function setRunning(isRunning) {
-  els.sendButton.disabled = isRunning;
+  const canSteer = Boolean(isRunning && activeRun);
+  els.sendButton.disabled = isRunning && !canSteer;
   els.attachButton.disabled = isRunning;
   els.fileInput.disabled = isRunning;
   if (els.runDeeperButton) els.runDeeperButton.disabled = isRunning;
   if (els.runAeroButton) els.runAeroButton.disabled = isRunning;
   if (els.runStructuralButton) els.runStructuralButton.disabled = isRunning;
-  els.promptInput.disabled = isRunning;
+  els.promptInput.disabled = isRunning && !canSteer;
+  els.promptInput.placeholder = canSteer ? "Steer Codex while he works" : "Ask Codex";
+  els.sendButton.title = canSteer ? "Send steering note" : "Send";
+  els.sendButton.setAttribute("aria-label", canSteer ? "Send steering note" : "Send");
   els.newThreadButton.disabled = isRunning;
   els.adminNavButton.disabled = isRunning;
   els.modeSelect.disabled = isRunning;
@@ -256,7 +268,7 @@ function setRunning(isRunning) {
   if (els.selfHealButton) els.selfHealButton.disabled = isRunning;
   if (els.refreshPrintingPackButton) els.refreshPrintingPackButton.disabled = isRunning;
   if (isRunning) {
-    els.runState.textContent = "Running";
+    els.runState.textContent = canSteer ? "Running · steer ready" : "Running";
     els.runState.className = "run-state warning";
   }
 }
@@ -291,6 +303,7 @@ function render() {
   renderLogs();
   renderMonitorSummary();
   saveState();
+  scheduleStaleAeroRecovery();
 }
 
 function renderSidebarMode() {
@@ -542,6 +555,16 @@ const ENGINEERING_PACKS = {
     action: "FEA",
     toolIds: ["calculix", "gmsh", "freecad", "paraview", "openscad"],
   },
+  reasoning: {
+    label: "Reasoning Tools",
+    action: "",
+    toolIds: ["ast-grep", "tree-sitter-cli", "shellcheck", "hyperfine"],
+  },
+  codeQuality: {
+    label: "Code Quality",
+    action: "",
+    toolIds: ["ruff", "pytest", "mypy"],
+  },
 };
 
 function capabilityTools() {
@@ -582,11 +605,13 @@ function setPackChip(element, textElement, status) {
 function renderEngineeringStatus() {
   const aero = engineeringPackState(ENGINEERING_PACKS.aero);
   const structural = engineeringPackState(ENGINEERING_PACKS.structural);
+  const reasoning = engineeringPackState(ENGINEERING_PACKS.reasoning);
+  const codeQuality = engineeringPackState(ENGINEERING_PACKS.codeQuality);
   const combined = {
-    state: aero.state === "ready" && structural.state === "ready" ? "ready" : aero.installed + structural.installed ? "partial" : "missing",
-    installed: aero.installed + structural.installed,
-    total: aero.total + structural.total,
-    missing: [...aero.missing, ...structural.missing],
+    state: aero.state === "ready" && structural.state === "ready" && reasoning.state === "ready" && codeQuality.state === "ready" ? "ready" : aero.installed + structural.installed + reasoning.installed + codeQuality.installed ? "partial" : "missing",
+    installed: aero.installed + structural.installed + reasoning.installed + codeQuality.installed,
+    total: aero.total + structural.total + reasoning.total + codeQuality.total,
+    missing: [...aero.missing, ...structural.missing, ...reasoning.missing, ...codeQuality.missing],
   };
   setPackChip(els.aeroPackStatus, els.aeroPackText, aero);
   setPackChip(els.structuralPackStatus, els.structuralPackText, structural);
@@ -623,9 +648,13 @@ function renderEngineeringAdmin() {
     const action = document.createElement("button");
     action.className = "icon-text-button";
     action.type = "button";
-    action.disabled = Boolean(activeController);
-    action.innerHTML = `<span>${kind === "aero" ? "⇥" : "⌁"}</span><span>Run ${pack.action}</span>`;
-    action.addEventListener("click", () => runDeeperAnalysis(kind));
+    action.disabled = !pack.action || Boolean(activeController);
+    action.innerHTML = pack.action
+      ? `<span>${kind === "aero" ? "⇥" : "⌁"}</span><span>Run ${pack.action}</span>`
+      : `<span>✓</span><span>Inventory Only</span>`;
+    if (pack.action) {
+      action.addEventListener("click", () => runDeeperAnalysis(kind));
+    }
 
     card.append(header, toolList, action);
     els.engineeringAdminGrid.appendChild(card);
@@ -896,6 +925,19 @@ function renderSelfHealing(summary) {
         next.textContent = item.nextAction || "";
         copy.append(meta, title, recommendation);
         if (next.textContent) copy.appendChild(next);
+        if (item.workOrder && Object.keys(item.workOrder).length) {
+          const work = document.createElement("p");
+          const probes = Array.isArray(item.workOrder.localProbes) ? item.workOrder.localProbes.slice(0, 2).join(" · ") : "";
+          const targets = Array.isArray(item.workOrder.patchTargets) ? item.workOrder.patchTargets.slice(0, 2).join(" · ") : "";
+          const validation = Array.isArray(item.workOrder.validation) ? item.workOrder.validation.slice(0, 2).join(" · ") : "";
+          work.textContent = [
+            item.workOrder.capability ? `Capability: ${item.workOrder.capability}` : "",
+            probes ? `Probe: ${probes}` : "",
+            targets ? `Patch: ${targets}` : "",
+            validation ? `Verify: ${validation}` : "",
+          ].filter(Boolean).join(" | ");
+          if (work.textContent) copy.appendChild(work);
+        }
 
         const actions = document.createElement("div");
         actions.className = "improvement-actions";
@@ -1274,7 +1316,7 @@ function renderMessages() {
       touchedIds = true;
     }
     const node = document.createElement("article");
-    node.className = `message ${message.role}${message.running ? " running" : ""}`;
+    node.className = `message ${message.role}${message.running ? " running" : ""}${message.steering ? " steering" : ""}${isCodexStyleAnswer(message) ? " codex-style" : ""}`;
     const role = document.createElement("div");
     role.className = "message-role";
     role.textContent = message.role === "user" ? "You" : "Codex";
@@ -1285,14 +1327,14 @@ function renderMessages() {
       renderMessageAttachments(body, message.attachments);
     }
 
-    if (message.role === "assistant" && message.route) {
+    if (message.role === "assistant" && message.route && showResponseDiagnostics(message)) {
       const route = document.createElement("div");
       route.className = "route-badge";
       route.textContent = routeLabel(message.route);
       body.appendChild(route);
     }
 
-    if (message.role === "assistant" && message.adminTopic) {
+    if (message.role === "assistant" && message.adminTopic && showResponseDiagnostics(message)) {
       const topic = document.createElement("div");
       topic.className = `admin-topic-badge${message.adminTopic.volatile ? " volatile" : ""}`;
       topic.textContent = message.adminTopic.volatile
@@ -1305,6 +1347,9 @@ function renderMessages() {
     answer.className = "answer-text";
     renderMessageText(answer, message);
     body.appendChild(answer);
+    if (message.role === "user" && !message.running && String(message.text || "").trim()) {
+      body.appendChild(buildUserMessageActions(message));
+    }
     const responsePackage = buildResponsePackagePanel(message);
     if (responsePackage) body.appendChild(responsePackage);
     const thoughts = buildThoughtsCard(message);
@@ -1322,6 +1367,9 @@ function renderMessages() {
 
 function buildThoughtsCard(message) {
   if (message.role !== "assistant" || !Array.isArray(message.thoughts) || !message.thoughts.length) {
+    return null;
+  }
+  if (!message.running && !showResponseDiagnostics(message)) {
     return null;
   }
   const thoughts = document.createElement("details");
@@ -1348,11 +1396,26 @@ function responsePackageItems(message, key) {
   return Array.isArray(message?.[key]) ? message[key].filter(Boolean) : [];
 }
 
+function isCodexStyleAnswer(message) {
+  if (message?.role !== "assistant") return false;
+  const mode = message.displayMode?.answerSurface || DEFAULT_ANSWER_SURFACE;
+  return mode === "codex-style";
+}
+
+function showResponseDiagnostics(message) {
+  if (message?.role !== "assistant") return false;
+  if (message?.displayMode?.showDiagnostics === true) return true;
+  if (message?.displayMode?.showDiagnostics === false) return false;
+  return Boolean(state.showResponseDiagnostics);
+}
+
 function buildResponsePackagePanel(message) {
   if (message.role !== "assistant") return null;
+  if (!showResponseDiagnostics(message)) return null;
   const deliverables = responsePackageItems(message, "deliverables");
   const assumptions = responsePackageItems(message, "assumptions");
   const contract = message.taskContract || null;
+  const contractGate = message.contractGate || message.scorecard?.contractGate || null;
   const roleStyle = message.roleStyle || null;
   const scorecard = message.scorecard || null;
   if (!deliverables.length && !assumptions.length && !contract && !roleStyle && !scorecard) return null;
@@ -1365,10 +1428,14 @@ function buildResponsePackagePanel(message) {
     card.className = "deliverables-card";
     const title = document.createElement("div");
     title.className = "package-title";
-    title.textContent = `Deliverables · ${deliverables.length}`;
+    const visibleDeliverables = deliverables.slice(0, 3);
+    const hiddenDeliverables = deliverables.slice(3);
+    title.textContent = hiddenDeliverables.length
+      ? `Files · ${visibleDeliverables.length} of ${deliverables.length}`
+      : `Files · ${deliverables.length}`;
     card.appendChild(title);
 
-    deliverables.forEach((deliverable) => {
+    const appendDeliverableRow = (deliverable, parent) => {
       const row = document.createElement("div");
       row.className = `deliverable-row ${deliverable.exists ? "exists" : "missing"}`;
       const main = document.createElement("div");
@@ -1390,8 +1457,19 @@ function buildResponsePackagePanel(message) {
       status.textContent = deliverable.exists ? "Found" : "Missing";
       meta.append(kind, status);
       row.append(main, meta);
-      card.appendChild(row);
-    });
+      parent.appendChild(row);
+    };
+
+    visibleDeliverables.forEach((deliverable) => appendDeliverableRow(deliverable, card));
+    if (hiddenDeliverables.length) {
+      const more = document.createElement("details");
+      more.className = "deliverables-more";
+      const summary = document.createElement("summary");
+      summary.textContent = `Supporting files · ${hiddenDeliverables.length}`;
+      more.appendChild(summary);
+      hiddenDeliverables.forEach((deliverable) => appendDeliverableRow(deliverable, more));
+      card.appendChild(more);
+    }
     wrap.appendChild(card);
   }
 
@@ -1403,10 +1481,13 @@ function buildResponsePackagePanel(message) {
     const summary = document.createElement("summary");
     const summaryTitle = document.createElement("span");
     summaryTitle.className = "answer-check-title";
-    summaryTitle.textContent = "Answer check";
+    summaryTitle.textContent = "Task contract";
     const score = document.createElement("span");
     score.className = `score-pill ${scorecard?.status || "pass"}`;
-    score.textContent = Number.isFinite(scorecard?.score) ? `${scorecard.score}%` : "Ready";
+    const gateText = contractGate?.status ? `${contractGate.status}` : "";
+    score.textContent = Number.isFinite(scorecard?.score)
+      ? `${scorecard.score}%${gateText ? ` · ${gateText}` : ""}`
+      : gateText || "Ready";
     summary.append(summaryTitle, score);
     details.appendChild(summary);
 
@@ -1415,6 +1496,16 @@ function buildResponsePackagePanel(message) {
       grid.className = "answer-check-grid";
       if (contract?.kind) grid.appendChild(buildAnswerCheckFact("Task", contract.kind));
       if (contract?.doneMeans) grid.appendChild(buildAnswerCheckFact("Done means", contract.doneMeans));
+      if (Array.isArray(contract?.mustDo) && contract.mustDo.length) {
+        grid.appendChild(buildAnswerCheckFact("Must do", contract.mustDo.join(", ")));
+      }
+      if (Array.isArray(contract?.requiredProof) && contract.requiredProof.length) {
+        grid.appendChild(buildAnswerCheckFact("Required proof", contract.requiredProof.join(", ")));
+      }
+      if (Array.isArray(contract?.rejectIf) && contract.rejectIf.length) {
+        grid.appendChild(buildAnswerCheckFact("Reject if", contract.rejectIf.slice(0, 4).join(", ")));
+      }
+      if (contractGate?.status) grid.appendChild(buildAnswerCheckFact("Gate", contractGate.status));
       if (contract?.role || roleStyle?.title) grid.appendChild(buildAnswerCheckFact("Role", contract?.role || roleStyle.title));
       if (roleStyle?.voice) grid.appendChild(buildAnswerCheckFact("Voice", roleStyle.voice));
       if (Array.isArray(roleStyle?.checklist) && roleStyle.checklist.length) {
@@ -1466,6 +1557,19 @@ function buildResponsePackagePanel(message) {
   return wrap.childElementCount ? wrap : null;
 }
 
+function buildUserMessageActions(message) {
+  const actions = document.createElement("div");
+  actions.className = "message-actions";
+  const edit = document.createElement("button");
+  edit.className = "message-action-button";
+  edit.type = "button";
+  edit.dataset.editMessageId = message.id;
+  edit.textContent = "Edit question";
+  edit.disabled = Boolean(activeController);
+  actions.appendChild(edit);
+  return actions;
+}
+
 function buildAnswerCheckFact(label, value) {
   const item = document.createElement("div");
   item.className = "answer-check-fact";
@@ -1487,7 +1591,9 @@ function buildFeedbackActions(message) {
   } else if (message.feedback === "good") {
     status.textContent = "Marked good";
   } else if (message.feedback === "fix") {
-    status.textContent = message.feedbackGoldenTest ? "Lesson saved + test" : "Lesson saved";
+    status.textContent = message.feedbackSelfHealing ? "Lesson saved + self-heal" : message.feedbackGoldenTest ? "Lesson saved + test" : "Lesson saved";
+  } else if (message.feedback === "crash-repair") {
+    status.textContent = "Crash repair queued";
   } else if (message.feedback === "error") {
     status.textContent = "Feedback not saved";
   }
@@ -1508,7 +1614,26 @@ function buildFeedbackActions(message) {
   fix.textContent = "Fix this";
   fix.disabled = message.feedback === "saving";
 
-  actions.append(good, fix);
+  const crashRepair = document.createElement("button");
+  crashRepair.className = "feedback-button warning";
+  crashRepair.type = "button";
+  crashRepair.dataset.crashRepairId = message.id;
+  crashRepair.textContent = "Repair crash";
+  crashRepair.title = "Use the saved server traceback to create a focused self-repair work order";
+  crashRepair.disabled = message.feedback === "saving";
+
+  const steer = document.createElement("button");
+  steer.className = "feedback-button";
+  steer.type = "button";
+  steer.dataset.steerMessageId = message.id;
+  steer.textContent = "Steer";
+  steer.disabled = message.feedback === "saving";
+
+  if (isServerCrashRecoveryMessage(message)) {
+    actions.append(fix, crashRepair, steer);
+  } else {
+    actions.append(good, fix, steer);
+  }
   if (status.textContent) actions.appendChild(status);
   return actions;
 }
@@ -2169,7 +2294,7 @@ function switchMonitorStage(stage) {
 
 function trackMonitorThought(text) {
   const lower = String(text || "").toLowerCase();
-  if (lower.includes("review pass") || lower.includes("deepseek-r1")) {
+  if (lower.includes("review pass") || lower.includes("deepseek-r1") || lower.includes("qwen3.6")) {
     if (monitor.activeStage !== "review") switchMonitorStage("review");
   } else if (lower.includes("polishing the final answer") || lower.includes("polish")) {
     if (monitor.activeStage !== "polish") switchMonitorStage("polish");
@@ -2651,14 +2776,16 @@ function renderRunControls() {
   els.managerDepthSelect.title = managerSelected
     ? "Controls how much local review and polish Manager runs"
     : "Only affects Manager mode";
-  const sandboxlessMode = engine === "openai" || engine === "local-research" || engine === "local-review";
+  const sandboxlessMode = engine === "openai" || engine === "local-research" || engine === "research-apply" || engine === "local-review";
   els.accessSelect.disabled = Boolean(activeController) || sandboxlessMode;
   els.accessSelect.title = sandboxlessMode
     ? engine === "openai"
       ? "Cloud Research does not use local filesystem sandbox access"
       : engine === "local-review"
         ? "Review uses direct local Ollama, not the Codex sandbox"
-        : "Local Research uses public web fetches and Ollama, not the Codex sandbox"
+        : engine === "research-apply"
+          ? "Research + Apply uses public web fetches, Ollama, and local receipt files"
+          : "Local Research uses public web fetches and Ollama, not the Codex sandbox"
     : "";
   const webEnabled = normalizeWebSearch(thread.webSearch || config.webSearch) === "live";
   els.webAccessToggle.setAttribute("aria-checked", String(webEnabled));
@@ -2704,6 +2831,7 @@ function routeLabel(route) {
   const engineLabels = {
     cloud: "cloud",
     "local-research": "local research",
+    "research-apply": "research + apply",
     "local-review": "local review",
     "local-rule": "local rule",
     "local-status": "local status",
@@ -2725,28 +2853,93 @@ function appendLog(kind, text) {
   saveState();
 }
 
-async function fileToBase64(file) {
-  const buffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  const chunkSize = 0x8000;
-  let binary = "";
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+function nativeFilePickerAvailable() {
+  return Boolean(window.webkit?.messageHandlers?.codexOpenFiles);
+}
+
+function openNativeFilePicker() {
+  return new Promise((resolve, reject) => {
+    if (!nativeFilePickerAvailable()) {
+      reject(new Error("Native file picker is not available"));
+      return;
+    }
+    const requestId = crypto.randomUUID();
+    const timeoutId = window.setTimeout(() => {
+      nativeFilePickers.delete(requestId);
+      reject(new Error("Native file picker timed out"));
+    }, 120000);
+    nativeFilePickers.set(requestId, {
+      resolve: (files) => {
+        window.clearTimeout(timeoutId);
+        resolve(files);
+      },
+      reject: (error) => {
+        window.clearTimeout(timeoutId);
+        reject(error);
+      },
+    });
+    try {
+      window.webkit.messageHandlers.codexOpenFiles.postMessage({ requestId });
+    } catch (error) {
+      nativeFilePickers.delete(requestId);
+      window.clearTimeout(timeoutId);
+      reject(error);
+    }
+  });
+}
+
+window.codexReceiveNativeFiles = function codexReceiveNativeFiles(payload) {
+  const requestId = payload?.requestId || "";
+  const pending = nativeFilePickers.get(requestId);
+  if (!pending) return;
+  nativeFilePickers.delete(requestId);
+  if (payload?.error) {
+    pending.reject(new Error(payload.error));
+    return;
   }
-  return btoa(binary);
+  pending.resolve(Array.isArray(payload?.files) ? payload.files : []);
+};
+
+function attachmentFromNativeFile(file) {
+  const path = String(file?.path || "");
+  const fallbackName = path.split("/").filter(Boolean).pop() || "attached file";
+  return {
+    id: crypto.randomUUID(),
+    name: String(file?.name || fallbackName),
+    size: Number(file?.size || 0),
+    type: String(file?.type || file?.contentType || "application/octet-stream"),
+    path,
+    source: "native-local-path",
+  };
+}
+
+async function handleNativeFiles(files) {
+  const selected = Array.from(files || []).filter((file) => file?.path);
+  if (!selected.length || activeController) return;
+  els.runState.textContent = "Attaching";
+  els.runState.className = "run-state warning";
+  for (const file of selected) {
+    const attachment = attachmentFromNativeFile(file);
+    pendingAttachments.push(attachment);
+    appendLog(
+      "event",
+      `Attached local file ${attachment.name} (${formatFileSize(attachment.size || 0)})`
+    );
+  }
+  renderAttachmentTray();
+  els.runState.textContent = "Attachment ready";
+  els.runState.className = "run-state ok";
 }
 
 async function uploadAttachment(file) {
-  const dataBase64 = await fileToBase64(file);
+  const form = new FormData();
+  form.append("file", file, file.name);
+  form.append("name", file.name);
+  form.append("size", String(file.size || 0));
+  form.append("type", file.type || "application/octet-stream");
   const response = await fetch("/api/files/upload", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      name: file.name,
-      size: file.size,
-      type: file.type || "application/octet-stream",
-      dataBase64,
-    }),
+    body: form,
   });
   if (!response.ok) {
     throw new Error(`Upload failed with HTTP ${response.status}`);
@@ -2767,6 +2960,16 @@ async function uploadAttachment(file) {
 async function handleFiles(files) {
   const selected = Array.from(files || []).filter((file) => file && file.name);
   if (!selected.length || activeController) return;
+  const tooLarge = selected.find((file) => Number(file.size || 0) > MAX_BROWSER_UPLOAD_BYTES);
+  if (tooLarge) {
+    appendLog(
+      "error",
+      `${tooLarge.name} is ${formatFileSize(tooLarge.size)}. Use the native + button so Codex can reference the local path instead of uploading a copy.`
+    );
+    els.runState.textContent = "Use + button";
+    els.runState.className = "run-state error";
+    return;
+  }
   els.runState.textContent = "Attaching";
   els.runState.className = "run-state warning";
   for (const file of selected) {
@@ -2790,6 +2993,18 @@ async function handleFiles(files) {
 function clientRecoveryMessage(error, thread) {
   const reason = error?.message || "local load failure";
   const cwd = thread?.cwd || config.cwd;
+  const messages = recoveryMessagesForThread(thread, null);
+  if (isAeroCfdRecoveryPrompt(messages)) {
+    return [
+      "I did not complete the aero/CFD build yet.",
+      "",
+      `This is why: the local run returned \`${reason}\`, and the browser could not get a server-side aero recovery answer before falling back.`,
+      "",
+      "You should also consider: retry the run or click Aero/Deeper Analysis. For this kind of wind-turbine STEP request, the correct recovery path is geometry resolution, STEP-to-solver-surface conversion, surface repair/check, one case for 3 mph, 5 mph, and 15 mph, then volume mesh, solver run, report, and revised STEP only after the CFD result is real.",
+      "",
+      `Last working directory: \`${cwd}\`.`,
+    ].join("\n");
+  }
   return [
     "I hit a local runtime/load failure before I could confirm the requested action was completed.",
     "",
@@ -2799,6 +3014,113 @@ function clientRecoveryMessage(error, thread) {
     "",
     `Last working directory: \`${cwd}\`.`,
   ].join("\n");
+}
+
+function recoveryMessagesForThread(thread, pending) {
+  const messages = thread?.messages || [];
+  const pendingIndex = pending?.id ? messages.findIndex((message) => message.id === pending.id) : -1;
+  const scoped = pendingIndex >= 0 ? messages.slice(0, pendingIndex + 1) : messages;
+  return scoped.filter((message) => !message.running && (!pending || message !== pending));
+}
+
+function latestUserTextFromMessages(messages) {
+  for (let index = (messages || []).length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === "user") return String(message.text || "");
+  }
+  return "";
+}
+
+function attachmentTextFromMessages(messages) {
+  return (messages || [])
+    .flatMap((message) => Array.isArray(message?.attachments) ? message.attachments : [])
+    .map((attachment) => `${attachment?.name || ""} ${attachment?.path || ""}`)
+    .join(" ");
+}
+
+function isAeroCfdRecoveryPrompt(messages) {
+  const text = `${latestUserTextFromMessages(messages)} ${attachmentTextFromMessages(messages)}`.toLowerCase();
+  if (!text.trim()) return false;
+  const hasAero = /\b(aero|aerodynamic|cfd|openfoam|wind turbine|airfoil|blade|propeller|drag|lift)\b/.test(text);
+  const hasAnalysis = /\b(run|model|simulate|simulation|solver|mesh|surface|performance|report|revised step|step file output)\b/.test(text);
+  const hasGeometry = /\.(step|stp|stl|obj|3mf)\b/.test(text) || /\battached\b/.test(text);
+  return hasAero && (hasAnalysis || hasGeometry);
+}
+
+function isGenericLoadFailureText(text) {
+  return /runtime\/load failure|local runtime\/load failure|load failed|no final message returned|local worker returned|run returned/i.test(String(text || ""));
+}
+
+function isServerCrashRecoveryMessage(message) {
+  if (message?.recovery?.kind === "server-crash") return true;
+  return /server-crash-recovery|server crash shield|server raised `|server raised /i.test(String(message?.text || ""));
+}
+
+function serverCrashRepairNote(message) {
+  const recovery = message?.recovery || {};
+  const logPath = recovery.logPath || extractLocalPathFromText(message?.text, "server-exceptions.log") || "logs/server-exceptions.log";
+  const errorName = recovery.errorName || "server exception";
+  const errorText = recovery.errorText || message?.text || "";
+  return [
+    "Treat this as a server crash repair, not normal answer feedback.",
+    `Use the saved traceback at ${logPath}.`,
+    `Crash class: ${errorName}.`,
+    `Crash detail: ${compactLabel(errorText, 260)}.`,
+    "Reproduce the original request, patch the route/tool branch that raised, add or update a regression, run package health, then retry the original prompt.",
+  ].join(" ");
+}
+
+function extractLocalPathFromText(text, suffix = "") {
+  const match = String(text || "").match(/\/(?:Users|Applications|Volumes|private\/tmp|tmp|var\/folders)\/[^\s`"'<>)]*/);
+  if (!match) return "";
+  const clean = cleanLocalPathLabel(match[0]);
+  if (suffix && !clean.endsWith(suffix)) return "";
+  return clean;
+}
+
+function applyRecoveryPayloadToPending(pending, payload) {
+  pending.text = payload.text || payload.error || "The recovery path finished without a final message.";
+  pending.displayMode = payload.displayMode || { answerSurface: DEFAULT_ANSWER_SURFACE, showDiagnostics: false, showReceiptsWhenDone: false };
+  if (payload.route) pending.route = payload.route;
+  if (payload.adminTopic) pending.adminTopic = payload.adminTopic;
+  if (payload.taskContract) pending.taskContract = payload.taskContract;
+  if (payload.roleStyle) pending.roleStyle = payload.roleStyle;
+  if (Array.isArray(payload.deliverables)) pending.deliverables = payload.deliverables;
+  if (Array.isArray(payload.assumptions)) pending.assumptions = payload.assumptions;
+  if (payload.scorecard) pending.scorecard = payload.scorecard;
+  if (payload.contractGate) pending.contractGate = payload.contractGate;
+  if (payload.analyticalCore) pending.analyticalCore = payload.analyticalCore;
+  if (payload.recovery) pending.recovery = payload.recovery;
+  if (Array.isArray(payload.thoughts) && payload.thoughts.length) {
+    pending.thoughts = payload.thoughts;
+  }
+}
+
+async function recoverWithEngineeringTool(thread, pending, error, messagesOverride = null) {
+  const messages = Array.isArray(messagesOverride) ? messagesOverride : recoveryMessagesForThread(thread, pending);
+  if (!isAeroCfdRecoveryPrompt(messages)) return false;
+  try {
+    addThought(pending, "Primary recovery failed, so I am trying the dedicated Aero/CFD analysis tool.");
+    const response = await fetch("/api/tools/deeper-analysis", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "aero",
+        cwd: thread.cwd,
+        messages,
+        recoveryFrom: error?.message || String(error || "load failed"),
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload.text) throw new Error(payload.error || `aero recovery ${response.status}`);
+    applyRecoveryPayloadToPending(pending, payload);
+    addThought(pending, "Recovered through the dedicated Aero/CFD tool path.");
+    return true;
+  } catch (toolError) {
+    appendLog("warning", `Aero/CFD recovery tool failed: ${toolError.message}`);
+    addThought(pending, `Aero/CFD recovery tool was unavailable: ${toolError.message}`);
+    return false;
+  }
 }
 
 async function recoverRunFailure(thread, pending, error) {
@@ -2812,15 +3134,16 @@ async function recoverRunFailure(thread, pending, error) {
         webSearch: thread.webSearch,
         error: error?.message || String(error || "load failed"),
         runtimeNotes: pending.thoughts || [],
-        messages: thread.messages.filter((message) => !message.running && message !== pending),
+        messages: recoveryMessagesForThread(thread, pending),
       }),
     });
     if (!response.ok) throw new Error(`recover ${response.status}`);
     const payload = await response.json();
     if (!payload.ok || !payload.text) throw new Error(payload.error || "no recovery text");
-    pending.text = payload.text;
-    if (payload.route) pending.route = payload.route;
-    if (payload.adminTopic) pending.adminTopic = payload.adminTopic;
+    applyRecoveryPayloadToPending(pending, payload);
+    if (isGenericLoadFailureText(pending.text) && await recoverWithEngineeringTool(thread, pending, error)) {
+      return true;
+    }
     if (payload.toolRecovery?.issue) {
       addThought(pending, `Tool recovery: ${payload.toolRecovery.issue.title || payload.toolRecovery.status || "recovery planned"}.`);
     }
@@ -2828,9 +3151,71 @@ async function recoverRunFailure(thread, pending, error) {
     return true;
   } catch (recoverError) {
     appendLog("warning", `Recovery answer failed: ${recoverError.message}`);
+    if (await recoverWithEngineeringTool(thread, pending, error)) return true;
     pending.text = clientRecoveryMessage(error, thread);
     addThought(pending, "Local recovery endpoint was unavailable, so the browser wrote a safe fallback note.");
     return false;
+  }
+}
+
+function staleAeroFailureMessages(thread) {
+  return (thread?.messages || []).filter((message) => (
+    message?.role === "assistant"
+    && !message.running
+    && message.id
+    && isGenericLoadFailureText(message.text)
+    && isAeroCfdRecoveryPrompt(recoveryMessagesForThread(thread, message))
+  ));
+}
+
+function scheduleStaleAeroRecovery() {
+  if (staleAeroRecoveryRunning || activeController) return;
+  if (staleAeroRecoveryTimer) window.clearTimeout(staleAeroRecoveryTimer);
+  staleAeroRecoveryTimer = window.setTimeout(() => {
+    staleAeroRecoveryTimer = null;
+    autoRecoverStaleAeroFailures();
+  }, 500);
+}
+
+async function autoRecoverStaleAeroFailures() {
+  if (staleAeroRecoveryRunning || activeController) return;
+  const thread = currentThread();
+  const message = staleAeroFailureMessages(thread).find((item) => !staleAeroRecoveryIds.has(item.id));
+  if (!thread || !message) return;
+
+  staleAeroRecoveryRunning = true;
+  staleAeroRecoveryIds.add(message.id);
+  message.running = true;
+  message.feedback = message.feedback || "fix";
+  addThought(message, "Auto-recovering stale Aero/CFD load-failure answer.");
+  els.runState.textContent = "Recovering";
+  els.runState.className = "run-state warning";
+  renderMessages();
+
+  try {
+    const scopedMessages = recoveryMessagesForThread(thread, message);
+    const recovered = await recoverWithEngineeringTool(thread, message, new Error(message.text || "load failed"), scopedMessages);
+    if (recovered) {
+      message.feedbackSelfHealing = message.feedbackSelfHealing || { recovered: true, source: "stale-aero-auto-recovery" };
+      els.runState.textContent = "Recovered";
+      els.runState.className = "run-state ok";
+      appendLog("event", "Auto-recovered stale Aero/CFD load-failure answer");
+    } else {
+      els.runState.textContent = "Recovery needs review";
+      els.runState.className = "run-state warning";
+      appendLog("warning", "Stale Aero/CFD auto-recovery did not produce a replacement answer");
+    }
+  } catch (error) {
+    els.runState.textContent = "Recovery failed";
+    els.runState.className = "run-state error";
+    appendLog("warning", `Stale Aero/CFD auto-recovery failed: ${error.message}`);
+  } finally {
+    message.running = false;
+    staleAeroRecoveryRunning = false;
+    thread.updatedAt = new Date().toISOString();
+    saveState();
+    render();
+    await refreshAdmin();
   }
 }
 
@@ -2852,11 +3237,82 @@ function workingIntroForPrompt(text, attachments = []) {
   return "I’m on it, Tinman. I’ll check the right path and bring back the answer in plain English.";
 }
 
-async function sendPrompt() {
+async function sendLiveSteer() {
   const thread = currentThread();
   const text = els.promptInput.value.trim();
-  const attachments = pendingAttachments.slice();
-  if (!thread || (!text && !attachments.length) || activeController) return;
+  if (!thread || !activeRun || !text) return;
+  const pending = activeRun.pending;
+  const steerMessage = {
+    id: crypto.randomUUID(),
+    role: "user",
+    text: `Steer while working: ${text}`,
+    steering: true,
+    createdAt: new Date().toISOString(),
+  };
+  const pendingIndex = findMessageIndexById(thread, pending?.id);
+  if (pendingIndex >= 0) {
+    thread.messages.splice(pendingIndex, 0, steerMessage);
+  } else {
+    thread.messages.push(steerMessage);
+  }
+  pending.steeringNotes = pending.steeringNotes || [];
+  pending.steeringNotes.push(text);
+  if (pending.steeringNotes.length > 8) pending.steeringNotes.splice(0, pending.steeringNotes.length - 8);
+  els.promptInput.value = "";
+  autoSizeTextarea();
+  thread.updatedAt = new Date().toISOString();
+  addThought(pending, `Tinman steering received: ${compactLabel(text, 160)}`);
+  render();
+  saveState();
+
+  try {
+    const response = await fetch("/api/run/steer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        runId: activeRun.id,
+        text,
+        threadId: thread.id,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || `steer ${response.status}`);
+    }
+    els.runState.textContent = "Steer sent";
+    els.runState.className = "run-state warning";
+    appendLog("event", `live steer sent: ${compactLabel(text, 120)}`);
+  } catch (error) {
+    pending.steeringFailed = true;
+    addThought(pending, `Steering note could not reach the worker: ${error.message}`);
+    els.runState.textContent = "Steer failed";
+    els.runState.className = "run-state error";
+    appendLog("error", `live steer failed: ${error.message}`);
+  }
+}
+
+async function sendPrompt() {
+  if (activeController) {
+    await sendLiveSteer();
+    return;
+  }
+  const thread = currentThread();
+  const text = els.promptInput.value.trim();
+  let attachments = pendingAttachments.slice();
+  if (!thread || (!text && !attachments.length)) return;
+  let editingIndex = -1;
+  let editingMessage = null;
+  if (composerIntent.kind === "edit" && composerIntent.messageId) {
+    editingIndex = findMessageIndexById(thread, composerIntent.messageId);
+    editingMessage = editingIndex >= 0 ? thread.messages[editingIndex] : null;
+    if (editingMessage?.role !== "user") {
+      editingIndex = -1;
+      editingMessage = null;
+    }
+    if (editingMessage && !attachments.length && Array.isArray(editingMessage.attachments)) {
+      attachments = editingMessage.attachments.slice();
+    }
+  }
 
   thread.cwd = els.cwdInput.value.trim() || config.cwd;
   thread.profile = thread.profile || config.profile;
@@ -2866,17 +3322,20 @@ async function sendPrompt() {
   thread.friendlinessLevel = normalizeFriendliness(thread.friendlinessLevel || config.friendlinessLevel);
   thread.humorLevel = normalizeHumor(thread.humorLevel || config.humorLevel);
   thread.webSearch = normalizeWebSearch(thread.webSearch || config.webSearch);
+  if (editingIndex >= 0) {
+    thread.messages = thread.messages.slice(0, editingIndex);
+  }
   thread.messages.push({ id: crypto.randomUUID(), role: "user", text, attachments });
   if (isUntitledThread(thread)) {
     thread.title = (text || attachments[0]?.name || "Attached file").split(/\s+/).slice(0, 7).join(" ");
   }
   thread.updatedAt = new Date().toISOString();
   pendingAttachments = [];
+  composerIntent = { kind: "", messageId: "" };
   els.promptInput.value = "";
   autoSizeTextarea();
   renderAttachmentTray();
   render();
-  setRunning(true);
 
   const pending = {
     id: crypto.randomUUID(),
@@ -2886,6 +3345,14 @@ async function sendPrompt() {
     thoughts: [],
   };
   thread.messages.push(pending);
+  const runId = crypto.randomUUID();
+  activeRun = {
+    id: runId,
+    threadId: thread.id,
+    pending,
+    startedAt: new Date().toISOString(),
+  };
+  setRunning(true);
   renderMessages();
 
   activeController = new AbortController();
@@ -2904,6 +3371,7 @@ async function sendPrompt() {
         friendlinessLevel: thread.friendlinessLevel,
         humorLevel: thread.humorLevel,
         webSearch: thread.webSearch,
+        runId,
         messages: thread.messages.filter((message) => !message.running),
       }),
       signal: activeController.signal,
@@ -2915,6 +3383,9 @@ async function sendPrompt() {
 
     await readStream(response.body, (event) => handleEvent(event, pending));
     if (!pending.text.trim()) pending.text = "No final message returned.";
+    if (isGenericLoadFailureText(pending.text) && isAeroCfdRecoveryPrompt(recoveryMessagesForThread(thread, pending))) {
+      await recoverWithEngineeringTool(thread, pending, new Error(pending.text));
+    }
     pending.running = false;
     els.runState.textContent = "Complete";
     els.runState.className = "run-state ok";
@@ -2926,6 +3397,7 @@ async function sendPrompt() {
     els.runState.className = "run-state warning";
   } finally {
     activeController = null;
+    activeRun = null;
     thread.updatedAt = new Date().toISOString();
     await refreshAdmin();
     setRunning(false);
@@ -2994,6 +3466,7 @@ async function runDeeperAnalysis(kind = "auto") {
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || `analysis ${response.status}`);
     pending.text = payload.text || payload.error || "The deeper analysis finished without a final message.";
+    pending.displayMode = payload.displayMode || { answerSurface: DEFAULT_ANSWER_SURFACE, showDiagnostics: false, showReceiptsWhenDone: false };
     pending.route = payload.route || null;
     pending.adminTopic = payload.adminTopic || null;
     pending.taskContract = payload.taskContract || null;
@@ -3001,6 +3474,7 @@ async function runDeeperAnalysis(kind = "auto") {
     pending.deliverables = Array.isArray(payload.deliverables) ? payload.deliverables : [];
     pending.assumptions = Array.isArray(payload.assumptions) ? payload.assumptions : [];
     pending.scorecard = payload.scorecard || null;
+    pending.contractGate = payload.contractGate || null;
     pending.thoughts = Array.isArray(payload.thoughts) && payload.thoughts.length
       ? payload.thoughts
       : pending.thoughts;
@@ -3172,6 +3646,9 @@ async function runGoldenTest(test, signal) {
     warnings: [],
     logs: [],
     analyticalCore: null,
+    taskContract: null,
+    contractGate: null,
+    scorecard: null,
   };
   const response = await fetch("/api/run", {
     method: "POST",
@@ -3202,6 +3679,9 @@ async function runGoldenTest(test, signal) {
     if (event.type === "assistant") {
       run.answer = event.text || "";
       run.analyticalCore = event.analyticalCore || null;
+      run.taskContract = event.taskContract || null;
+      run.contractGate = event.contractGate || null;
+      run.scorecard = event.scorecard || null;
     }
     if (event.type === "thought") run.thoughts.push(event.text || "");
     if (event.type === "warning" || event.type === "error") run.warnings.push(event.text || event.type);
@@ -3236,6 +3716,9 @@ function evaluateGoldenTest(test, run) {
   const answer = String(run.answer || "").trim();
   const lower = answer.toLowerCase();
   const route = run.route || {};
+  const taskContract = run.taskContract || {};
+  const contractGate = run.contractGate || {};
+  const scorecard = run.scorecard || {};
   const checks = [];
 
   checks.push({
@@ -3324,6 +3807,41 @@ function evaluateGoldenTest(test, run) {
     });
   }
 
+  if (test.expectedContractKind) {
+    checks.push({
+      label: "contract-kind",
+      passed: taskContract.kind === test.expectedContractKind,
+      detail: `Expected ${test.expectedContractKind}; got ${taskContract.kind || "none"}.`,
+    });
+  }
+
+  if (test.expectedContractGate) {
+    checks.push({
+      label: "contract-gate",
+      passed: contractGate.status === test.expectedContractGate,
+      detail: `Expected ${test.expectedContractGate}; got ${contractGate.status || "none"}.`,
+    });
+  }
+
+  if (test.requiredContractProof?.length) {
+    const proofText = (taskContract.requiredProof || []).join(" ").toLowerCase();
+    const missing = test.requiredContractProof.filter((term) => !proofText.includes(term.toLowerCase()));
+    checks.push({
+      label: "contract-proof",
+      passed: missing.length === 0,
+      detail: missing.length ? `Missing: ${missing.join(", ")}` : "Contract proof terms found.",
+    });
+  }
+
+  if (test.minScorecard) {
+    const score = Number(scorecard.score || 0);
+    checks.push({
+      label: "scorecard",
+      passed: score >= Number(test.minScorecard),
+      detail: `Expected response scorecard >= ${test.minScorecard}; got ${score || "none"}.`,
+    });
+  }
+
   const passed = checks.every((check) => check.passed);
   return {
     status: passed ? "pass" : "fail",
@@ -3333,6 +3851,9 @@ function evaluateGoldenTest(test, run) {
     route,
     returnCode: run.returnCode,
     analyticalCore: run.analyticalCore,
+    taskContract: run.taskContract,
+    contractGate: run.contractGate,
+    scorecard: run.scorecard,
     thoughts: run.thoughts,
     warnings: run.warnings,
   };
@@ -3347,6 +3868,8 @@ function handleEvent(event, pending) {
 
   if (event.type === "assistant") {
     pending.text = event.text || "";
+    pending.displayMode = event.displayMode || { answerSurface: DEFAULT_ANSWER_SURFACE, showDiagnostics: false, showReceiptsWhenDone: false };
+    if (event.recovery) pending.recovery = event.recovery;
     if (event.adminTopic) {
       pending.adminTopic = event.adminTopic;
     }
@@ -3355,6 +3878,7 @@ function handleEvent(event, pending) {
     pending.deliverables = Array.isArray(event.deliverables) ? event.deliverables : [];
     pending.assumptions = Array.isArray(event.assumptions) ? event.assumptions : [];
     pending.scorecard = event.scorecard || null;
+    pending.contractGate = event.contractGate || null;
     renderMessages();
     return;
   }
@@ -3381,6 +3905,9 @@ function handleEvent(event, pending) {
 
   if (event.type === "status") {
     startMonitorRun(event);
+    if (event.recovery) {
+      pending.recovery = event.recovery;
+    }
     if (event.route) {
       pending.route = event.route;
     }
@@ -3401,6 +3928,8 @@ function handleEvent(event, pending) {
         ? "Starting OpenAI Cloud Research."
         : event.engine === "local-research"
           ? "Starting Local Research with free web sources and Ollama."
+          : event.engine === "research-apply"
+            ? "Starting Research + Apply with free web sources, Ollama, and a local project receipt."
           : event.engine === "local-review"
             ? `Starting Local Review with ${event.model || "Ollama"}.`
             : event.model
@@ -3449,6 +3978,39 @@ function findMessageById(thread, id) {
   return (thread.messages || []).find((message) => message.id === id);
 }
 
+function findMessageIndexById(thread, id) {
+  return (thread.messages || []).findIndex((message) => message.id === id);
+}
+
+function setComposerText(text) {
+  els.promptInput.value = text;
+  autoSizeTextarea();
+  els.promptInput.focus();
+}
+
+function startEditMessage(messageId) {
+  const thread = currentThread();
+  const index = findMessageIndexById(thread, messageId);
+  const message = index >= 0 ? thread.messages[index] : null;
+  if (!message || message.role !== "user") return;
+  composerIntent = { kind: "edit", messageId };
+  setComposerText(message.text || "");
+  els.runState.textContent = "Editing question";
+  els.runState.className = "run-state warning";
+  appendLog("event", "editing earlier question; next send reruns from that point");
+}
+
+function startSteerMessage(messageId) {
+  const thread = currentThread();
+  const message = findMessageById(thread, messageId);
+  if (!message || message.role !== "assistant") return;
+  composerIntent = { kind: "steer", messageId };
+  setComposerText("Steer the previous answer this way: ");
+  els.runState.textContent = "Steer ready";
+  els.runState.className = "run-state warning";
+  appendLog("event", "steer prompt prepared for the previous answer");
+}
+
 function latestUserPromptForMessage(thread, message) {
   const index = (thread.messages || []).indexOf(message);
   for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
@@ -3461,6 +4023,9 @@ function latestUserPromptForMessage(thread, message) {
 }
 
 function defaultFixNoteForMessage(thread, message) {
+  if (isServerCrashRecoveryMessage(message)) {
+    return serverCrashRepairNote(message);
+  }
   const prompt = latestUserPromptForMessage(thread, message).toLowerCase();
   const answer = String(message?.text || "").toLowerCase();
   const notes = [];
@@ -3500,6 +4065,9 @@ async function sendMessageFeedback(messageId, rating) {
         note,
         prompt: latestUserPromptForMessage(thread, message),
         answer: message.text || "",
+        messages: thread.messages.filter((item) => !item.running).slice(-8),
+        cwd: thread.cwd || config.cwd,
+        webSearch: thread.webSearch || config.webSearch,
         route: message.route || {},
         projectId: message.route?.projectId || message.adminTopic?.projectId || "general",
       }),
@@ -3510,14 +4078,115 @@ async function sendMessageFeedback(messageId, rating) {
     message.feedback = rating;
     message.feedbackNote = note;
     message.feedbackGoldenTest = payload.goldenTest || null;
+    message.feedbackSelfHealing = payload.selfHealing?.event?.patchQueued || payload.selfHealing?.event || null;
     if (payload.goldenTests) config.goldenTests = payload.goldenTests;
     if (payload.admin) config.admin = payload.admin;
     if (payload.goldenTest) appendLog("status", `Regression test saved: ${payload.goldenTest.name || payload.goldenTest.id}`);
     appendLog("event", rating === "fix" ? "quality lesson saved" : "positive answer feedback saved");
+    if (rating === "fix" && isGenericLoadFailureText(message.text)) {
+      const scopedMessages = recoveryMessagesForThread(thread, message);
+      if (isAeroCfdRecoveryPrompt(scopedMessages)) {
+        els.runState.textContent = "Recovering";
+        els.runState.className = "run-state warning";
+        message.running = true;
+        addThought(message, "Fix this triggered the dedicated Aero/CFD recovery path.");
+        renderMessages();
+        const recovered = await recoverWithEngineeringTool(thread, message, new Error(message.text || "load failed"), scopedMessages);
+        message.running = false;
+        if (recovered) {
+          message.feedback = "fix";
+          message.feedbackSelfHealing = message.feedbackSelfHealing || { recovered: true };
+          els.runState.textContent = "Recovered";
+          els.runState.className = "run-state ok";
+          appendLog("event", "Fix this replaced the failed answer with Aero/CFD recovery output");
+        } else {
+          els.runState.textContent = "Lesson saved";
+          els.runState.className = "run-state warning";
+        }
+      }
+    }
     await refreshAdmin();
   } catch (error) {
+    message.running = false;
     message.feedback = "error";
     appendLog("warning", `Quality feedback was not saved: ${error.message}`);
+    window.setTimeout(() => {
+      if (message.feedback === "error") {
+        message.feedback = previousFeedback || "";
+        renderMessages();
+      }
+    }, 4000);
+  } finally {
+    saveState();
+    renderMessages();
+  }
+}
+
+async function repairServerCrashRecovery(messageId) {
+  const thread = currentThread();
+  const message = findMessageById(thread, messageId);
+  if (!thread || !message || message.feedback === "saving") return;
+  const recovery = message.recovery || {};
+  const note = serverCrashRepairNote(message);
+  const previousFeedback = message.feedback;
+  message.feedback = "saving";
+  message.running = true;
+  addThought(message, "Creating a server-crash self-repair work order from the saved traceback.");
+  els.runState.textContent = "Queuing crash repair";
+  els.runState.className = "run-state warning";
+  renderMessages();
+
+  try {
+    const response = await fetch("/api/self-healing/work-order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: latestUserPromptForMessage(thread, message),
+        answer: message.text || "",
+        error: recovery.errorText || message.text || "server-crash-recovery",
+        note,
+        messages: recoveryMessagesForThread(thread, message),
+        cwd: thread.cwd || config.cwd,
+        webSearch: thread.webSearch || config.webSearch,
+        route: message.route || {},
+        crashRecovery: recovery,
+        diagnosis: {
+          failureKind: "server-crash",
+          patchTarget: "server request handler, route classifier, or local tool path that raised",
+          recommendation: "Use server-exceptions.log as evidence, reproduce the original request, patch the traceback source, then rerun package health and focused regressions.",
+          nextAction: "Open the saved traceback, identify the helper that raised, add a regression for the original prompt family, and retry the request.",
+          safePatch: true,
+          gaps: [
+            {
+              kind: "server-crash",
+              severity: "high",
+              reason: recovery.errorText || "The server crash shield caught an uncaught /api/run exception.",
+            },
+          ],
+        },
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) throw new Error(payload.error || `work-order ${response.status}`);
+    message.feedback = "crash-repair";
+    message.feedbackSelfHealing = payload.patchItem || payload.workOrder || { recovered: true, source: "server-crash-repair" };
+    message.crashRepairWorkOrder = payload.workOrder || null;
+    message.running = false;
+    addThought(message, "Server-crash work order queued with the exception log as evidence.");
+    if (payload.workOrder?.retryOriginal) {
+      addThought(message, `Next proof: ${payload.workOrder.retryOriginal}`);
+    }
+    if (payload.admin) config.admin = payload.admin;
+    els.runState.textContent = "Crash repair queued";
+    els.runState.className = "run-state ok";
+    appendLog("event", "server crash self-repair work order queued");
+    await refreshAdmin();
+  } catch (error) {
+    message.running = false;
+    message.feedback = "error";
+    els.runState.textContent = "Crash repair failed";
+    els.runState.className = "run-state error";
+    appendLog("warning", `Server crash repair was not queued: ${error.message}`);
     window.setTimeout(() => {
       if (message.feedback === "error") {
         message.feedback = previousFeedback || "";
@@ -3625,10 +4294,11 @@ function engineValue(engine) {
     codex: 1,
     local: 1,
     "local-research": 2,
-    "local-review": 3,
-    openai: 4,
-    cloud: 4,
-    manager: 5,
+    "research-apply": 3,
+    "local-review": 4,
+    openai: 5,
+    cloud: 5,
+    manager: 6,
   };
   return values[engine] || 1;
 }
@@ -3694,6 +4364,24 @@ els.conversation.addEventListener("click", (event) => {
   if (localPathLink) {
     event.preventDefault();
     openLocalPath(localPathLink.dataset.localPath);
+    return;
+  }
+  const editButton = event.target.closest("[data-edit-message-id]");
+  if (editButton && !activeController) {
+    event.preventDefault();
+    startEditMessage(editButton.dataset.editMessageId);
+    return;
+  }
+  const steerButton = event.target.closest("[data-steer-message-id]");
+  if (steerButton && !activeController) {
+    event.preventDefault();
+    startSteerMessage(steerButton.dataset.steerMessageId);
+    return;
+  }
+  const crashRepairButton = event.target.closest("[data-crash-repair-id]");
+  if (crashRepairButton && !activeController) {
+    event.preventDefault();
+    repairServerCrashRecovery(crashRepairButton.dataset.crashRepairId);
     return;
   }
   const button = event.target.closest("[data-feedback-id]");
@@ -3774,8 +4462,17 @@ els.webAccessToggle.addEventListener("click", () => {
   renderRunControls();
 });
 
-els.attachButton.addEventListener("click", () => {
+els.attachButton.addEventListener("click", async () => {
   if (activeController) return;
+  if (nativeFilePickerAvailable()) {
+    try {
+      const files = await openNativeFilePicker();
+      await handleNativeFiles(files);
+      return;
+    } catch (error) {
+      appendLog("warning", `Native file picker failed: ${error.message}; using browser picker`);
+    }
+  }
   els.fileInput.click();
 });
 
