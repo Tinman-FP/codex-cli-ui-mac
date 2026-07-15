@@ -1,4 +1,4 @@
-set uiDir to POSIX path of (path to home folder) & "Applications/Codex_CLI_UI"
+set uiDir to "$HOME/Applications/Codex_CLI_UI"
 set uiUrl to "http://127.0.0.1:8765"
 
 try

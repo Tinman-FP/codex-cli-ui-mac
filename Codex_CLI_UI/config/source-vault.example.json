@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "vaults": [
+    {
+      "id": "3d-printing-manuals",
+      "name": "3D Printing Manuals",
+      "privatePath": "data/source-vault/3d-printing",
+      "publicSafe": false,
+      "contents": [
+        "printer manuals",
+        "toolhead board manuals",
+        "slicer calibration guides",
+        "filament datasheets"
+      ]
+    },
+    {
+      "id": "engineering-references",
+      "name": "Engineering References",
+      "privatePath": "data/source-vault/engineering",
+      "publicSafe": false,
+      "contents": [
+        "aero references",
+        "CFD notes",
+        "FEA examples",
+        "electrical equipment manuals"
+      ]
+    }
+  ],
+  "rule": "Source vault files stay local. Public releases may include URLs, attribution, and retrieval instructions, not private cached manuals unless license and privacy are cleared."
+}

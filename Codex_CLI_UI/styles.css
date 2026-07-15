@@ -13,7 +13,7 @@
   --warn: #a15c03;
   --danger: #bd2c2c;
   --shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
 }
 
 * {
@@ -1443,34 +1443,48 @@ h1 {
 
 .message {
   display: grid;
-  grid-template-columns: 82px minmax(0, 760px);
-  gap: 14px;
-  margin: 0 auto 18px;
-  max-width: 940px;
+  grid-template-columns: 72px minmax(0, 780px);
+  gap: 16px;
+  margin: 0 auto 22px;
+  max-width: 980px;
 }
 
 .message-role {
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 750;
-  padding-top: 10px;
+  font-size: 13px;
+  font-weight: 650;
+  padding-top: 1px;
   text-align: right;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .message-body {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
-  padding: 14px 15px;
-  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03);
+  border: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  box-shadow: none;
   overflow-wrap: anywhere;
-  line-height: 1.52;
+  line-height: 1.58;
 }
 
 .message.user .message-body {
-  border-color: #c8d8ff;
-  background: #f7faff;
+  border-color: transparent;
+  background: transparent;
+}
+
+.message.user.steering .message-body {
+  border-color: #f2c97d;
+  background: #fff9ec;
+}
+
+.message.user.steering .message-role::after {
+  content: " steer";
+  display: block;
+  color: #9a650b;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
 }
 
 .message-attachments {
@@ -1529,7 +1543,7 @@ h1 {
 }
 
 .message.assistant .message-body {
-  border-color: #d7e2dc;
+  border-color: transparent;
 }
 
 .message.running .message-body {
@@ -1554,11 +1568,11 @@ h1 {
 }
 
 .thoughts-card {
-  margin-bottom: 12px;
-  padding: 10px 11px;
-  border: 1px solid #d5e1ed;
+  margin: 4px 0 12px;
+  padding: 9px 10px;
+  border: 1px solid #d9dee3;
   border-radius: 8px;
-  background: #f8fbfd;
+  background: #f8f9fa;
   color: var(--muted-strong);
   font-size: 12px;
   line-height: 1.4;
@@ -1608,8 +1622,10 @@ h1 {
 }
 
 .answer-text {
-  display: grid;
-  gap: 10px;
+  display: block;
+  color: var(--text);
+  font-size: 14.5px;
+  letter-spacing: 0;
 }
 
 .response-package {
@@ -1632,6 +1648,23 @@ h1 {
   display: grid;
   gap: 7px;
   padding: 10px;
+}
+
+.deliverables-more {
+  display: grid;
+  gap: 7px;
+}
+
+.deliverables-more summary {
+  width: fit-content;
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.deliverables-more .deliverable-row {
+  margin-top: 7px;
 }
 
 .package-title,
@@ -1794,14 +1827,44 @@ h1 {
   flex: 0 0 auto;
 }
 
+.message-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.message-action-button {
+  border: 1px solid #cad8d0;
+  border-radius: 7px;
+  padding: 4px 8px;
+  background: #f7faf8;
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.message-action-button:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.message-action-button:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
 .feedback-actions {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid #e4ece7;
+  margin-top: 8px;
+  padding-top: 0;
+  border-top: 0;
+  opacity: 0.78;
 }
 
 .feedback-button {
@@ -1818,6 +1881,17 @@ h1 {
 .feedback-button:hover {
   border-color: var(--accent);
   color: var(--text);
+}
+
+.feedback-button.warning {
+  border-color: #e4b861;
+  background: #fff8e8;
+  color: #7a4b00;
+}
+
+.feedback-button.warning:hover {
+  border-color: var(--warn);
+  color: #5d3900;
 }
 
 .feedback-button:disabled {
@@ -1841,17 +1915,17 @@ h1 {
 .answer-text blockquote,
 .answer-text pre,
 .answer-text .table-wrap {
-  margin: 0;
+  margin: 0 0 10px;
 }
 
 .answer-text h2,
 .answer-text h3,
 .answer-text h4,
 .answer-text h5 {
-  margin: 4px 0 0;
+  margin: 14px 0 6px;
   color: var(--text);
-  font-size: 14px;
-  font-weight: 800;
+  font-size: 14.5px;
+  font-weight: 750;
   line-height: 1.35;
 }
 
@@ -1865,17 +1939,17 @@ h1 {
 
 .answer-text ul,
 .answer-text ol {
-  display: grid;
-  gap: 5px;
+  display: block;
   padding-left: 20px;
 }
 
 .answer-text li {
+  margin: 3px 0;
   padding-left: 2px;
 }
 
 .answer-text strong {
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .answer-text a {
@@ -1923,11 +1997,11 @@ h1 {
 
 .answer-text pre {
   overflow: auto;
-  border: 1px solid #d6dee6;
+  border: 1px solid #d8dee4;
   border-radius: 8px;
   padding: 12px;
-  background: #111820;
-  color: #dbe6f1;
+  background: #f6f8fa;
+  color: #17202a;
   white-space: pre;
 }
 
@@ -1943,7 +2017,7 @@ h1 {
 }
 
 .answer-text blockquote {
-  border-left: 3px solid #cbd8e5;
+  border-left: 3px solid #d0d7de;
   padding-left: 10px;
   color: var(--muted-strong);
 }
@@ -1993,6 +2067,10 @@ h1 {
 
 .answer-text tr:last-child td {
   border-bottom: 0;
+}
+
+.answer-text > :last-child {
+  margin-bottom: 0;
 }
 
 .composer-wrap {
@@ -2343,17 +2421,16 @@ input:focus {
   font-size: 20px;
   font-weight: 800;
   box-shadow: var(--shadow);
-  pointer-events: none;
+  cursor: pointer;
 }
 
 .file-input-overlay {
   position: absolute;
-  inset: 0;
-  width: 36px;
-  height: 46px;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
   opacity: 0;
-  cursor: pointer;
-  z-index: 2;
+  pointer-events: none;
   font-size: 0;
 }
 
@@ -2362,11 +2439,7 @@ input:focus {
   color: var(--text);
 }
 
-.file-input-overlay:focus-visible {
-  outline: none;
-}
-
-.attach-picker:focus-within .attach-button {
+.attach-button:focus-visible {
   border-color: var(--accent);
   outline: 3px solid rgba(37, 99, 235, 0.16);
 }
@@ -2378,10 +2451,6 @@ input:focus {
 .icon-button:disabled,
 .switch-button:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.attach-picker:has(.file-input-overlay:disabled) .attach-button {
   opacity: 0.55;
 }
 

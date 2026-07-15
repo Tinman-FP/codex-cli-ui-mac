@@ -1,0 +1,58 @@
+{
+  "createdAt": "2026-07-15T00:45:46Z",
+  "sourceRoot": "$LOCAL_SOURCE_ROOT",
+  "exportRoot": "$PUBLIC_EXPORT_ROOT",
+  "fileCount": 29,
+  "sanitizers": [
+    "absolute /Users/<name> paths replaced with $HOME",
+    "private RFC1918 IPv4 addresses replaced with 192.0.2.10",
+    "local username strings replaced with localuser"
+  ],
+  "excluded": [
+    "data/",
+    "logs/",
+    ".venv/",
+    "build/",
+    "CPAP Inputs/",
+    "Wind Turbine/",
+    "local generated CAD/CFD/FEA outputs",
+    "private source-vault documents",
+    "private chat-history golden tests"
+  ],
+  "copiedFiles": [
+    ".env.example",
+    ".gitignore",
+    "README.md",
+    "HYBRID.md",
+    "index.html",
+    "app.js",
+    "styles.css",
+    "server.py",
+    "run_golden_batch.py",
+    "import_codex_history.py",
+    "harvest_history_golden_tests.py",
+    "install.command",
+    "start.command",
+    "restart.command",
+    "launcher.applescript",
+    "cli-fast-launcher.applescript",
+    "cli-careful-launcher.applescript",
+    "tools/build_public_export.py",
+    "tools/release_privacy_scan.py",
+    "tools/ratos-pi5-experimental/scripts/build-ratos-pi5-candidate.sh",
+    "tools/verify_golden_hidden_sweep.py",
+    "checks/verify_package_health.py",
+    "config/local-tools.example.json",
+    "config/machines.example.json",
+    "config/source-vault.example.json",
+    "docs/public-release-plan.md",
+    "native/CodexCLIUI.m",
+    "native/Info.plist",
+    "tests/manufacturing_questions.json"
+  ],
+  "privacyScan": {
+    "status": "pass",
+    "findingCount": 0,
+    "returncode": 0
+  }
+}
