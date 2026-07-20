@@ -1,0 +1,36 @@
+{
+  "suite": "feedback-scope-p13",
+  "provenance": {
+    "source": "Exercises project/objective feedback scoping with temporary synthetic feedback records; no raw user feedback or durable feedback state is used."
+  },
+  "case": {
+    "messages": [{"role": "user", "text": "Repair the requested CAD deliverable and verify the assembly constraints."}],
+    "route": {
+      "projectId": "cad-current-project",
+      "project": "CAD Current Project",
+      "objectivePlan": {"objectiveType": "cad-repair", "responseKind": "answer-or-act", "evidenceNeed": "none"}
+    },
+    "feedback": [
+      {
+        "id": "global-style",
+        "feedbackCategory": "too-generic",
+        "route": {"projectId": "printer-other-project", "project": "Printer Other Project", "objectivePlan": {"objectiveType": "printer-repair", "responseKind": "answer-or-act", "evidenceNeed": "none"}},
+        "note": "The prior answer was too generic."
+      },
+      {
+        "id": "unrelated-domain",
+        "failureKind": "wrong-artifact-route",
+        "route": {"projectId": "printer-other-project", "project": "Printer Other Project", "objectivePlan": {"objectiveType": "printer-repair", "responseKind": "answer-or-act", "evidenceNeed": "none"}},
+        "note": "The prior printer answer used the wrong expertise."
+      },
+      {
+        "id": "current-domain",
+        "failureKind": "missing-source-evidence",
+        "route": {"projectId": "cad-current-project", "project": "CAD Current Project", "objectivePlan": {"objectiveType": "cad-repair", "responseKind": "answer-or-act", "evidenceNeed": "none"}},
+        "note": "The CAD answer needs evidence for its material claim."
+      }
+    ],
+    "expectedIncludedCategories": ["too-generic", "missing-evidence"],
+    "expectedExcludedCategories": ["wrong-expertise"]
+  }
+}

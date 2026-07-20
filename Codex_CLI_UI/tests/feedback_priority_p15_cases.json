@@ -1,0 +1,123 @@
+{
+  "suite": "feedback-priority-p15",
+  "provenance": {
+    "source": "Uses temporary synthetic feedback records to prove that a matching objective lesson survives newer unrelated feedback; no user feedback or durable feedback state is read."
+  },
+  "policy": {
+    "minimumPressureCount": 13
+  },
+  "case": {
+    "messages": [
+      {
+        "role": "user",
+        "text": "Prepare the current CAD repair decision and cite evidence for the material choice."
+      }
+    ],
+    "route": {
+      "projectId": "cad-current-project",
+      "project": "CAD Current Project",
+      "objectivePlan": {
+        "objectiveType": "cad-repair",
+        "responseKind": "answer-or-act",
+        "evidenceNeed": "source-backed"
+      }
+    },
+    "feedback": [
+      {
+        "id": "objective-evidence",
+        "failureKind": "missing-source-evidence",
+        "note": "Cite the material evidence before recommending the CAD repair choice.",
+        "route": {
+          "projectId": "cad-previous-project",
+          "project": "CAD Previous Project",
+          "objectivePlan": {
+            "objectiveType": "cad-repair",
+            "responseKind": "answer-or-act",
+            "evidenceNeed": "source-backed"
+          }
+        }
+      },
+      {
+        "id": "unrelated-01",
+        "feedbackCategory": "wrong-expertise",
+        "note": "Use printer repair expertise for this unrelated task.",
+        "route": {"projectId": "printer-01", "project": "Printer 01", "objectivePlan": {"objectiveType": "printer-repair"}}
+      },
+      {
+        "id": "unrelated-02",
+        "feedbackCategory": "wrong-expertise",
+        "note": "Use printer repair expertise for this unrelated task.",
+        "route": {"projectId": "printer-02", "project": "Printer 02", "objectivePlan": {"objectiveType": "printer-repair"}}
+      },
+      {
+        "id": "unrelated-03",
+        "feedbackCategory": "wrong-expertise",
+        "note": "Use printer repair expertise for this unrelated task.",
+        "route": {"projectId": "printer-03", "project": "Printer 03", "objectivePlan": {"objectiveType": "printer-repair"}}
+      },
+      {
+        "id": "unrelated-04",
+        "feedbackCategory": "wrong-expertise",
+        "note": "Use printer repair expertise for this unrelated task.",
+        "route": {"projectId": "printer-04", "project": "Printer 04", "objectivePlan": {"objectiveType": "printer-repair"}}
+      },
+      {
+        "id": "unrelated-05",
+        "feedbackCategory": "wrong-expertise",
+        "note": "Use printer repair expertise for this unrelated task.",
+        "route": {"projectId": "printer-05", "project": "Printer 05", "objectivePlan": {"objectiveType": "printer-repair"}}
+      },
+      {
+        "id": "unrelated-06",
+        "feedbackCategory": "wrong-expertise",
+        "note": "Use printer repair expertise for this unrelated task.",
+        "route": {"projectId": "printer-06", "project": "Printer 06", "objectivePlan": {"objectiveType": "printer-repair"}}
+      },
+      {
+        "id": "unrelated-07",
+        "feedbackCategory": "wrong-expertise",
+        "note": "Use printer repair expertise for this unrelated task.",
+        "route": {"projectId": "printer-07", "project": "Printer 07", "objectivePlan": {"objectiveType": "printer-repair"}}
+      },
+      {
+        "id": "unrelated-08",
+        "feedbackCategory": "wrong-expertise",
+        "note": "Use printer repair expertise for this unrelated task.",
+        "route": {"projectId": "printer-08", "project": "Printer 08", "objectivePlan": {"objectiveType": "printer-repair"}}
+      },
+      {
+        "id": "unrelated-09",
+        "feedbackCategory": "wrong-expertise",
+        "note": "Use printer repair expertise for this unrelated task.",
+        "route": {"projectId": "printer-09", "project": "Printer 09", "objectivePlan": {"objectiveType": "printer-repair"}}
+      },
+      {
+        "id": "unrelated-10",
+        "feedbackCategory": "wrong-expertise",
+        "note": "Use printer repair expertise for this unrelated task.",
+        "route": {"projectId": "printer-10", "project": "Printer 10", "objectivePlan": {"objectiveType": "printer-repair"}}
+      },
+      {
+        "id": "unrelated-11",
+        "feedbackCategory": "wrong-expertise",
+        "note": "Use printer repair expertise for this unrelated task.",
+        "route": {"projectId": "printer-11", "project": "Printer 11", "objectivePlan": {"objectiveType": "printer-repair"}}
+      },
+      {
+        "id": "unrelated-12",
+        "feedbackCategory": "wrong-expertise",
+        "note": "Use printer repair expertise for this unrelated task.",
+        "route": {"projectId": "printer-12", "project": "Printer 12", "objectivePlan": {"objectiveType": "printer-repair"}}
+      },
+      {
+        "id": "unrelated-13",
+        "feedbackCategory": "wrong-expertise",
+        "note": "Use printer repair expertise for this unrelated task.",
+        "route": {"projectId": "printer-13", "project": "Printer 13", "objectivePlan": {"objectiveType": "printer-repair"}}
+      }
+    ],
+    "expectedSelectedIds": ["objective-evidence"],
+    "expectedSelectedScope": "objective",
+    "expectedExcludedCategories": ["wrong-expertise"]
+  }
+}

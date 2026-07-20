@@ -1,9 +1,39 @@
 const storageKey = "codex-cli-ui-state-v1";
 const DEFAULT_ANSWER_SURFACE = "codex-style";
+const mobileLogPanelQuery = window.matchMedia ? window.matchMedia("(max-width: 760px)") : null;
+const FEEDBACK_CATEGORIES = [
+  { value: "", label: "What missed?" },
+  { value: "misunderstood", label: "Misunderstood me" },
+  { value: "too-generic", label: "Too generic" },
+  { value: "too-verbose", label: "Too verbose" },
+  { value: "wrong-expertise", label: "Wrong expertise" },
+  { value: "missing-evidence", label: "Missing evidence" },
+  { value: "tone", label: "Tone missed" },
+];
+
+function feedbackCategoryLabel(value) {
+  return FEEDBACK_CATEGORIES.find((category) => category.value === value)?.label || "";
+}
+
+function feedbackReinforcementLabels(receipt, limit = 2) {
+  const items = Array.isArray(receipt?.items) ? receipt.items : [];
+  const labels = [];
+  for (const item of items) {
+    if (!item || item.kind !== "correction") continue;
+    const label = String(item.label || feedbackCategoryLabel(item.category) || "").trim();
+    if (!label || labels.includes(label)) continue;
+    labels.push(label);
+    if (labels.length >= limit) break;
+  }
+  return labels;
+}
 
 const els = {
+  appShell: document.getElementById("appShell"),
   profileLabel: document.getElementById("profileLabel"),
   newThreadButton: document.getElementById("newThreadButton"),
+  mobileNewThreadButton: document.getElementById("mobileNewThreadButton"),
+  mobileViewSelect: document.getElementById("mobileViewSelect"),
   projectsNavButton: document.getElementById("projectsNavButton"),
   adminNavButton: document.getElementById("adminNavButton"),
   chatsNavButton: document.getElementById("chatsNavButton"),
@@ -22,6 +52,18 @@ const els = {
   cwdInput: document.getElementById("cwdInput"),
   threadTitle: document.getElementById("threadTitle"),
   threadMeta: document.getElementById("threadMeta"),
+  toggleSessionCompassButton: document.getElementById("toggleSessionCompassButton"),
+  sessionCompassPanel: document.getElementById("sessionCompassPanel"),
+  sessionCompassForm: document.getElementById("sessionCompassForm"),
+  sessionCompassPhase: document.getElementById("sessionCompassPhase"),
+  sessionCompassObjective: document.getElementById("sessionCompassObjective"),
+  sessionCompassDecisions: document.getElementById("sessionCompassDecisions"),
+  sessionCompassEvidence: document.getElementById("sessionCompassEvidence"),
+  sessionCompassOpenQuestions: document.getElementById("sessionCompassOpenQuestions"),
+  sessionCompassNextStep: document.getElementById("sessionCompassNextStep"),
+  saveSessionCompassButton: document.getElementById("saveSessionCompassButton"),
+  clearSessionCompassButton: document.getElementById("clearSessionCompassButton"),
+  sessionCompassStatus: document.getElementById("sessionCompassStatus"),
   conversation: document.getElementById("conversation"),
   testBench: document.getElementById("testBench"),
   adminPanel: document.getElementById("adminPanel"),
@@ -30,14 +72,26 @@ const els = {
   adminProjectTree: document.getElementById("adminProjectTree"),
   adminKnowledgeList: document.getElementById("adminKnowledgeList"),
   adminRecentList: document.getElementById("adminRecentList"),
+  workingProfileForm: document.getElementById("workingProfileForm"),
+  workingProfileProjectSelect: document.getElementById("workingProfileProjectSelect"),
+  workingProfileObjective: document.getElementById("workingProfileObjective"),
+  workingProfileAnswerStyle: document.getElementById("workingProfileAnswerStyle"),
+  workingProfileTerminology: document.getElementById("workingProfileTerminology"),
+  workingProfileConstraints: document.getElementById("workingProfileConstraints"),
+  workingProfileConfirm: document.getElementById("workingProfileConfirm"),
+  saveWorkingProfileButton: document.getElementById("saveWorkingProfileButton"),
+  clearWorkingProfileButton: document.getElementById("clearWorkingProfileButton"),
+  workingProfileStatus: document.getElementById("workingProfileStatus"),
   refreshAdminButton: document.getElementById("refreshAdminButton"),
   warmModelButton: document.getElementById("warmModelButton"),
   runBenchmarkButton: document.getElementById("runBenchmarkButton"),
   packageHealthButton: document.getElementById("packageHealthButton"),
+  packageHealthFilterButton: document.getElementById("packageHealthFilterButton"),
   selfHealButton: document.getElementById("selfHealButton"),
   benchmarkSummaryGrid: document.getElementById("benchmarkSummaryGrid"),
   benchmarkList: document.getElementById("benchmarkList"),
   packageHealthList: document.getElementById("packageHealthList"),
+  verificationSummaryList: document.getElementById("verificationSummaryList"),
   engineeringAdminGrid: document.getElementById("engineeringAdminGrid"),
   refreshPrintingPackButton: document.getElementById("refreshPrintingPackButton"),
   printingPackSummaryGrid: document.getElementById("printingPackSummaryGrid"),
@@ -73,30 +127,29 @@ const els = {
   reasoningSelect: document.getElementById("reasoningSelect"),
   friendlinessSelect: document.getElementById("friendlinessSelect"),
   humorSelect: document.getElementById("humorSelect"),
+  textScaleSelect: document.getElementById("textScaleSelect"),
   webAccessToggle: document.getElementById("webAccessToggle"),
   webAccessLabel: document.getElementById("webAccessLabel"),
   copyButton: document.getElementById("copyButton"),
   toggleLogButton: document.getElementById("toggleLogButton"),
   promptInput: document.getElementById("promptInput"),
   sendButton: document.getElementById("sendButton"),
+  cancelRunButton: document.getElementById("cancelRunButton"),
   runState: document.getElementById("runState"),
   logPanel: document.getElementById("logPanel"),
+  monitorPanel: document.getElementById("monitorPanel"),
+  runLogPanel: document.getElementById("runLogPanel"),
+  toggleMonitorPanelButton: document.getElementById("toggleMonitorPanelButton"),
+  toggleRunLogPanelButton: document.getElementById("toggleRunLogPanelButton"),
   clearLogButton: document.getElementById("clearLogButton"),
   logOutput: document.getElementById("logOutput"),
   logSubtitle: document.getElementById("logSubtitle"),
   monitorCanvas: document.getElementById("monitorCanvas"),
-  stripMonitorCanvas: document.getElementById("stripMonitorCanvas"),
   monitorStatusText: document.getElementById("monitorStatusText"),
-  stripStatusText: document.getElementById("stripStatusText"),
   monitorManagerPill: document.getElementById("monitorManagerPill"),
   monitorOllamaText: document.getElementById("monitorOllamaText"),
-  stripOllamaText: document.getElementById("stripOllamaText"),
   monitorRouteText: document.getElementById("monitorRouteText"),
-  stripRouteText: document.getElementById("stripRouteText"),
   monitorPassText: document.getElementById("monitorPassText"),
-  stripPassText: document.getElementById("stripPassText"),
-  stripPrinterText: document.getElementById("stripPrinterText"),
-  stripManagerText: document.getElementById("stripManagerText"),
   monitorMemoryText: document.getElementById("monitorMemoryText"),
   monitorDiskText: document.getElementById("monitorDiskText"),
   monitorPrinterText: document.getElementById("monitorPrinterText"),
@@ -106,12 +159,13 @@ const els = {
 const state = loadState();
 let config = {
   profile: "local-fast",
-  cwd: "$HOME/Documents/Codex",
+  cwd: "~/Documents/Codex",
   accessLevel: "danger-full-access",
   reasoningLevel: "low",
   managerDepth: "balanced",
   friendlinessLevel: "warm",
   humorLevel: "light",
+  textScale: "normal",
   webSearch: "live",
   startupContext: null,
   startupSummary: null,
@@ -121,10 +175,14 @@ let config = {
   benchmarks: [],
   modelWarmup: null,
   packageHealth: null,
+  packageHealthBlockersOnly: false,
+  verificationSummary: null,
   admin: null,
 };
 let activeController = null;
 let activeRun = null;
+let activeRunTimer = null;
+let lastRunStateText = "";
 let pendingAttachments = [];
 const MAX_BROWSER_UPLOAD_BYTES = 250 * 1024 * 1024;
 const nativeFilePickers = new Map();
@@ -132,6 +190,98 @@ let composerIntent = { kind: "", messageId: "" };
 let staleAeroRecoveryRunning = false;
 let staleAeroRecoveryTimer = null;
 const staleAeroRecoveryIds = new Set();
+let activeWorkingProfileProjectId = "";
+const PROMPT_STARTER_SETS = {
+  chat: [
+    {
+      label: "Local diagnosis",
+      prompt: "Find the real blocker using local evidence first. Fix what you can safely, then tell me what changed and how you verified it.",
+      guidance: "Best with the failing command, local path, exact error, desired output, and any safety or rollback limits.",
+      reliability: "Use local evidence first and say when evidence is missing or weak.",
+      clarify: "Ask before destructive, expensive, live-machine, or long-running changes.",
+      safety: "Avoid unsafe instructions and offer a safer diagnostic path.",
+      balance: "Report the strongest path and meaningful alternatives without forcing a single answer.",
+    },
+    {
+      label: "File inspection",
+      prompt: "Inspect the attached or named local file, summarize what matters, and give me the next useful action.",
+      guidance: "Best with the file path, what decision you need, desired depth, and output format.",
+      reliability: "Do not claim file contents until the local file has been opened or parsed.",
+      clarify: "Ask for the missing file or scope before spending time on the wrong artifact.",
+      safety: "Avoid exposing secrets or private data beyond the requested summary.",
+      balance: "Separate confirmed file facts from interpretation.",
+    },
+    {
+      label: "Recommendation",
+      prompt: "Compare the options using current evidence, reject weak matches, and give me a clear recommendation with caveats.",
+      guidance: "Best with the options, constraints, budget, timeline, preferred tone, length, and table/report format.",
+      reliability: "Use current evidence for specs, prices, laws, or compatibility claims.",
+      clarify: "Ask for must-have constraints before recommending a costly path.",
+      safety: "Flag medical, legal, financial, electrical, or mechanical review needs.",
+      balance: "Show why weak matches were rejected and where uncertainty remains.",
+    },
+    {
+      label: "Build + verify",
+      prompt: "Build the requested output locally, verify it, and give me the file path plus a short status report.",
+      guidance: "Best with acceptance criteria, target format, constraints, expected file name, and verification gate.",
+      reliability: "Only call the work done after a local artifact and verification receipt exist.",
+      clarify: "Ask before large downloads, destructive cleanup, live-device changes, or long solver runs.",
+      safety: "Keep risky operations gated by rollback, backup, and user-visible confirmation.",
+      balance: "Explain blockers plainly instead of padding with generated paths.",
+    },
+  ],
+  project: [
+    {
+      label: "Project cleanup",
+      prompt: "Review the current local project folders, identify duplicates or stale generated work, explain what is safe to remove, and keep a rollback path before deleting anything.",
+      guidance: "Best with the project folder, what can be regenerated, and what must be preserved.",
+      reliability: "Use local file sizes, timestamps, manifests, and receipts before recommending cleanup.",
+      clarify: "Ask before deleting live configs, source files, backups, or unique generated deliverables.",
+      safety: "Avoid destructive cleanup without a reversible plan.",
+      balance: "Separate safe cleanup, review-needed cleanup, and do-not-touch files.",
+    },
+    {
+      label: "Stable knowledge",
+      prompt: "Find the latest local facts for this project, update stable knowledge only when evidence is current, and show the exact facts that changed.",
+      guidance: "Best with the device, project, or topic name and the fact you want refreshed.",
+      reliability: "Prefer current local receipts, manuals, configs, and recent task state over memory.",
+      clarify: "Ask when two sources disagree or the latest state is not identifiable.",
+      safety: "Avoid turning unverified guesses into stable knowledge.",
+      balance: "Keep confirmed facts separate from assumptions.",
+    },
+    {
+      label: "Printer status",
+      prompt: "Check the known printer state, verify current IPs or service status from local evidence, and give me the next action without telling me to look up information you can access.",
+      guidance: "Best with the printer name, current symptom, network, and whether live actions are allowed.",
+      reliability: "Ping/API/local-state checks should drive the answer when available.",
+      clarify: "Ask before rebooting, reflashing, uploading configs, or touching a live print.",
+      safety: "Protect live machines and preserve backups before restoration steps.",
+      balance: "Distinguish reachable, configured, cached, and unknown printer state.",
+    },
+    {
+      label: "Release checkpoint",
+      prompt: "Summarize the current local verification receipts, remaining risks, and the smallest next test that would raise confidence without broad rewrites.",
+      guidance: "Best with the target feature, recent checkpoint, and required confidence level.",
+      reliability: "Use package health, replay, smoke, and checkpoint files as evidence.",
+      clarify: "Ask before pushing, deploying, or changing release scope.",
+      safety: "Call out privacy, security, accessibility, and rollback gaps.",
+      balance: "Prioritize high-value risks over cosmetic churn.",
+    },
+  ],
+};
+const PROMPT_STARTERS = PROMPT_STARTER_SETS.chat;
+const LONG_RUN_NOTICE_MS = 45 * 1000;
+const STUCK_RUN_NOTICE_MS = 3 * 60 * 1000;
+
+function currentPromptStarterWorkflow() {
+  if ((state.sidebarView || "chats") === "projects") return "project";
+  return "chat";
+}
+
+function promptStartersForCurrentWorkflow() {
+  return PROMPT_STARTER_SETS[currentPromptStarterWorkflow()] || PROMPT_STARTERS;
+}
+
 const testBench = {
   running: false,
   activeId: "",
@@ -163,14 +313,13 @@ async function init() {
   try {
     const response = await fetch("/api/config");
     config = await response.json();
+    config.textScale = normalizeTextScale(config.textScale);
     renderModeOptions();
   } catch (_error) {
     appendLog("warning", "Could not read server config");
   }
 
-  if (window.matchMedia("(max-width: 760px)").matches) {
-    els.logPanel.classList.add("collapsed");
-  }
+  installResponsiveRailBehavior();
 
   els.profileLabel.textContent = profileSummaryLabel(config.profile);
   if (!state.threads.length) {
@@ -184,6 +333,7 @@ async function init() {
     thread.reasoningLevel = config.reasoningLevel;
     thread.friendlinessLevel = config.friendlinessLevel;
     thread.humorLevel = config.humorLevel;
+    thread.textScale = normalizeTextScale(config.textScale);
   }
   render();
   startMonitor();
@@ -194,10 +344,46 @@ function loadState() {
   try {
     const parsed = JSON.parse(localStorage.getItem(storageKey));
     if (parsed && Array.isArray(parsed.threads)) {
-      return parsed;
+      parsed.monitorPanelMinimized = Boolean(parsed.monitorPanelMinimized);
+      parsed.runLogPanelMinimized = Boolean(parsed.runLogPanelMinimized);
+      const { state: sanitized, changed } = sanitizeInterruptedRuns(parsed);
+      if (changed) localStorage.setItem(storageKey, JSON.stringify(sanitized));
+      return sanitized;
     }
   } catch (_error) {}
-  return { activeThreadId: "", sidebarView: "chats", threads: [] };
+  return {
+    activeThreadId: "",
+    sidebarView: "chats",
+    monitorPanelMinimized: false,
+    runLogPanelMinimized: false,
+    threads: [],
+  };
+}
+
+function sanitizeInterruptedRuns(parsed) {
+  let changed = false;
+  const now = new Date().toISOString();
+  for (const thread of parsed.threads || []) {
+    let threadChanged = false;
+    for (const message of thread.messages || []) {
+      if (!message?.running) continue;
+      changed = true;
+      threadChanged = true;
+      message.running = false;
+      message.interrupted = true;
+      message.text = "Run interrupted by page reload.\n\nThis is why: the task state was preserved, but the browser cannot safely reconnect to the old local run stream. Use Edit question or Send again from this saved task when you are ready.";
+      message.displayMode = { answerSurface: DEFAULT_ANSWER_SURFACE, showDiagnostics: false, showReceiptsWhenDone: false };
+      message.thoughts = [...(message.thoughts || []), "Recovered after page reload without auto-starting duplicate work."].slice(-8);
+    }
+    if (threadChanged) {
+      thread.updatedAt = thread.updatedAt || now;
+      thread.logs = [
+        ...(thread.logs || []),
+        { time: now, kind: "warning", text: "Recovered an interrupted run after page reload; no duplicate run was started." },
+      ].slice(-200);
+    }
+  }
+  return { state: parsed, changed };
 }
 
 function saveState() {
@@ -218,8 +404,11 @@ function createThread() {
     managerDepth: config.managerDepth || "balanced",
     friendlinessLevel: config.friendlinessLevel || "warm",
     humorLevel: config.humorLevel || "light",
+    textScale: normalizeTextScale(config.textScale),
     webSearch: config.webSearch,
     adminTopic: null,
+    sessionCompass: null,
+    sessionCompassOpen: false,
     messages: [],
     logs: [],
   };
@@ -237,9 +426,260 @@ function currentThread() {
   return state.threads.find((thread) => thread.id === state.activeThreadId) || state.threads[0];
 }
 
+const SESSION_COMPASS_LIMITS = {
+  objective: 360,
+  decisions: 720,
+  evidence: 720,
+  openQuestions: 720,
+  nextStep: 420,
+};
+
+const SESSION_COMPASS_PHASES = {
+  active: "Active",
+  verifying: "Verifying",
+  "awaiting-decision": "Awaiting decision",
+  blocked: "Blocked",
+  complete: "Complete",
+};
+
+function compactSessionCompassText(value, limit) {
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, limit);
+}
+
+function sessionCompassPhase(value) {
+  const clean = String(value || "").trim().toLowerCase().replace(/[^a-z]+/g, "-").replace(/^-+|-+$/g, "");
+  return Object.hasOwn(SESSION_COMPASS_PHASES, clean) ? clean : "active";
+}
+
+function sessionCompassPhaseLabel(value) {
+  return SESSION_COMPASS_PHASES[sessionCompassPhase(value)];
+}
+
+function sessionCompassForThread(thread) {
+  const source = thread?.sessionCompass && typeof thread.sessionCompass === "object" ? thread.sessionCompass : {};
+  return {
+    phase: sessionCompassPhase(source.phase),
+    objective: compactSessionCompassText(source.objective, SESSION_COMPASS_LIMITS.objective),
+    decisions: compactSessionCompassText(source.decisions, SESSION_COMPASS_LIMITS.decisions),
+    evidence: compactSessionCompassText(source.evidence, SESSION_COMPASS_LIMITS.evidence),
+    openQuestions: compactSessionCompassText(source.openQuestions, SESSION_COMPASS_LIMITS.openQuestions),
+    nextStep: compactSessionCompassText(source.nextStep, SESSION_COMPASS_LIMITS.nextStep),
+    updatedAt: String(source.updatedAt || "").slice(0, 80),
+  };
+}
+
+function sessionCompassHasContent(compass) {
+  return Boolean(compass?.objective || compass?.decisions || compass?.evidence || compass?.openQuestions || compass?.nextStep);
+}
+
+function maybeSeedSessionCompassObjective(thread, text) {
+  const clean = compactSessionCompassText(text, SESSION_COMPASS_LIMITS.objective);
+  const compass = sessionCompassForThread(thread);
+  if (!clean || compass.objective || /^steer the previous answer/i.test(clean)) return;
+  thread.sessionCompass = { ...compass, phase: "active", objective: clean, updatedAt: new Date().toISOString() };
+}
+
+function renderSessionCompass() {
+  const thread = currentThread();
+  if (!thread || !els.sessionCompassPanel) return;
+  const compass = sessionCompassForThread(thread);
+  const open = Boolean(thread.sessionCompassOpen);
+  const inChat = (state.sidebarView || "chats") === "chats";
+  els.sessionCompassPanel.hidden = !inChat || !open;
+  if (els.toggleSessionCompassButton) {
+    els.toggleSessionCompassButton.hidden = !inChat;
+    const action = open ? "Close" : "Open";
+    els.toggleSessionCompassButton.title = `${action} session compass`;
+    els.toggleSessionCompassButton.setAttribute("aria-label", `${action} session compass`);
+    els.toggleSessionCompassButton.setAttribute("aria-expanded", String(open));
+  }
+  if (els.sessionCompassPhase) els.sessionCompassPhase.value = compass.phase;
+  if (els.sessionCompassObjective) els.sessionCompassObjective.value = compass.objective;
+  if (els.sessionCompassDecisions) els.sessionCompassDecisions.value = compass.decisions;
+  if (els.sessionCompassEvidence) els.sessionCompassEvidence.value = compass.evidence;
+  if (els.sessionCompassOpenQuestions) els.sessionCompassOpenQuestions.value = compass.openQuestions;
+  if (els.sessionCompassNextStep) els.sessionCompassNextStep.value = compass.nextStep;
+  if (els.sessionCompassStatus) {
+    els.sessionCompassStatus.textContent = !sessionCompassHasContent(compass)
+      ? "No task state saved."
+      : compass.nextStep
+        ? `${sessionCompassPhaseLabel(compass.phase)} in this chat. Next action saved.`
+        : `${sessionCompassPhaseLabel(compass.phase)} in this chat. Add the next move when ready.`;
+  }
+  const disabled = Boolean(activeController);
+  if (els.saveSessionCompassButton) els.saveSessionCompassButton.disabled = disabled;
+  if (els.clearSessionCompassButton) els.clearSessionCompassButton.disabled = disabled || !sessionCompassHasContent(compass);
+  [
+    els.sessionCompassPhase,
+    els.sessionCompassObjective,
+    els.sessionCompassDecisions,
+    els.sessionCompassEvidence,
+    els.sessionCompassOpenQuestions,
+    els.sessionCompassNextStep,
+  ].forEach((field) => {
+    if (field) field.disabled = disabled;
+  });
+}
+
+function sessionCompassUpdatesFromForm() {
+  return {
+    phase: sessionCompassPhase(els.sessionCompassPhase?.value),
+    objective: compactSessionCompassText(els.sessionCompassObjective?.value, SESSION_COMPASS_LIMITS.objective),
+    decisions: compactSessionCompassText(els.sessionCompassDecisions?.value, SESSION_COMPASS_LIMITS.decisions),
+    evidence: compactSessionCompassText(els.sessionCompassEvidence?.value, SESSION_COMPASS_LIMITS.evidence),
+    openQuestions: compactSessionCompassText(els.sessionCompassOpenQuestions?.value, SESSION_COMPASS_LIMITS.openQuestions),
+    nextStep: compactSessionCompassText(els.sessionCompassNextStep?.value, SESSION_COMPASS_LIMITS.nextStep),
+  };
+}
+
+function saveSessionCompass() {
+  const thread = currentThread();
+  if (!thread || activeController) return;
+  const updates = sessionCompassUpdatesFromForm();
+  thread.sessionCompass = sessionCompassHasContent(updates)
+    ? { ...updates, updatedAt: new Date().toISOString() }
+    : null;
+  thread.sessionCompassOpen = true;
+  thread.updatedAt = new Date().toISOString();
+  saveState();
+  render();
+}
+
+function clearSessionCompass() {
+  const thread = currentThread();
+  if (!thread || activeController || !sessionCompassHasContent(sessionCompassForThread(thread))) return;
+  if (!window.confirm("Clear this thread's session compass?")) return;
+  thread.sessionCompass = null;
+  thread.updatedAt = new Date().toISOString();
+  saveState();
+  render();
+}
+
+function completedSessionCompassDecision(decisions, completedStep) {
+  const completion = `Completed: ${compactSessionCompassText(completedStep, SESSION_COMPASS_LIMITS.nextStep)}`;
+  const cleanDecisions = compactSessionCompassText(decisions, SESSION_COMPASS_LIMITS.decisions);
+  if (!cleanDecisions) return compactSessionCompassText(completion, SESSION_COMPASS_LIMITS.decisions);
+  const retainedLength = Math.max(0, SESSION_COMPASS_LIMITS.decisions - completion.length - 1);
+  const retained = compactSessionCompassText(cleanDecisions, retainedLength);
+  return compactSessionCompassText(`${retained} ${completion}`, SESSION_COMPASS_LIMITS.decisions);
+}
+
+function applySessionCompassProgress(thread, pending) {
+  const progress = pending?.sessionCompassProgress;
+  if (!thread || Number(pending?.returnCode) !== 0 || progress?.kind !== "completed-next-step") return false;
+  const compass = sessionCompassForThread(thread);
+  const completedStep = compactSessionCompassText(progress.completedStep, SESSION_COMPASS_LIMITS.nextStep);
+  if (!completedStep || compass.nextStep !== completedStep) return false;
+  const nextStep = compactSessionCompassText(progress.nextStep, SESSION_COMPASS_LIMITS.nextStep);
+  thread.sessionCompass = {
+    ...compass,
+    phase: sessionCompassPhase(progress.phase || (nextStep ? "active" : "complete")),
+    decisions: completedSessionCompassDecision(compass.decisions, completedStep),
+    nextStep,
+    updatedAt: new Date().toISOString(),
+  };
+  thread.updatedAt = new Date().toISOString();
+  saveState();
+  appendLog(
+    "event",
+    nextStep
+      ? `session compass advanced to: ${compactLabel(nextStep, 120)}`
+      : "session compass marked the current step complete; choose the next move when ready",
+  );
+  return true;
+}
+
+function setRunState(text, tone = "warning", stage = "") {
+  const clean = String(text || "").trim() || "Working";
+  lastRunStateText = clean;
+  els.runState.textContent = clean;
+  els.runState.className = `run-state ${tone}`.trim();
+  els.runState.dataset.stage = stage || tone || "status";
+  els.runState.setAttribute("aria-label", `Codex status: ${clean}`);
+}
+
+function activeRunElapsedMs() {
+  if (!activeRun?.startedAt) return 0;
+  const started = Date.parse(activeRun.startedAt);
+  if (!Number.isFinite(started)) return 0;
+  return Math.max(0, Date.now() - started);
+}
+
+function updateActiveRunTiming() {
+  if (!activeRun || !els.runState) return;
+  const elapsedMs = activeRunElapsedMs();
+  const isLong = elapsedMs >= LONG_RUN_NOTICE_MS;
+  const isStuckWatch = elapsedMs >= STUCK_RUN_NOTICE_MS;
+  els.runState.dataset.elapsedMs = String(Math.round(elapsedMs));
+  els.runState.dataset.longTask = isLong ? "true" : "false";
+  els.runState.dataset.stuckWatch = isStuckWatch ? "true" : "false";
+  els.runState.dataset.recoveryPath = "steer-stop-retry";
+  els.runState.title = `Elapsed ${formatSeconds(elapsedMs)}. You can steer or stop this run; no ETA is assumed. If it times out, retry from the saved task.`;
+  if (isLong && lastRunStateText === "Working · request received") {
+    setRunState("Working · still running, steering available", "warning", "long-running");
+  }
+  if (isStuckWatch && !activeRun.stuckWatchLogged) {
+    activeRun.stuckWatchLogged = true;
+    appendLog("warning", "run has been active for several minutes; steering, stop, and retry recovery remain available");
+  }
+}
+
+function startActiveRunTiming() {
+  stopActiveRunTiming(false);
+  updateActiveRunTiming();
+  activeRunTimer = window.setInterval(updateActiveRunTiming, 1000);
+}
+
+function stopActiveRunTiming(keepLast = true) {
+  if (activeRunTimer) {
+    window.clearInterval(activeRunTimer);
+    activeRunTimer = null;
+  }
+  if (!keepLast || !els.runState) return;
+  const elapsedMs = activeRunElapsedMs();
+  els.runState.dataset.lastElapsedMs = String(Math.round(elapsedMs));
+  els.runState.title = `Last run took ${formatSeconds(elapsedMs)}.`;
+  delete els.runState.dataset.elapsedMs;
+  delete els.runState.dataset.longTask;
+  delete els.runState.dataset.stuckWatch;
+  delete els.runState.dataset.recoveryPath;
+}
+
+function setBackgroundTaskStatus(label, status, tone = "warning", stage = "background-running") {
+  const task = String(label || "Background task").trim();
+  const state = String(status || "running").trim();
+  setRunState(`${task} ${state}`, tone, stage);
+  els.runState.dataset.backgroundTask = task.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  els.runState.dataset.backgroundTaskStatus = state.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function progressTextFromThought(text) {
+  const lower = String(text || "").toLowerCase();
+  if (lower.includes("search") || lower.includes("source") || lower.includes("manual")) {
+    return "Working · checking sources";
+  }
+  if (lower.includes("review")) {
+    return "Working · reviewing";
+  }
+  if (lower.includes("polish")) {
+    return "Working · polishing answer";
+  }
+  if (lower.includes("recover")) {
+    return "Working · recovering";
+  }
+  if (lower.includes("tool") || lower.includes("analysis") || lower.includes("solver")) {
+    return "Working · using tools";
+  }
+  return activeRun ? "Working · progress update" : "";
+}
+
 function setRunning(isRunning) {
   const canSteer = Boolean(isRunning && activeRun);
   els.sendButton.disabled = isRunning && !canSteer;
+  if (els.cancelRunButton) {
+    els.cancelRunButton.hidden = !isRunning;
+    els.cancelRunButton.disabled = !isRunning;
+  }
   els.attachButton.disabled = isRunning;
   els.fileInput.disabled = isRunning;
   if (els.runDeeperButton) els.runDeeperButton.disabled = isRunning;
@@ -247,9 +687,13 @@ function setRunning(isRunning) {
   if (els.runStructuralButton) els.runStructuralButton.disabled = isRunning;
   els.promptInput.disabled = isRunning && !canSteer;
   els.promptInput.placeholder = canSteer ? "Steer Codex while he works" : "Ask Codex";
+  els.promptInput.setAttribute("aria-label", canSteer ? "Steering note for the active Codex run" : "Message Codex");
   els.sendButton.title = canSteer ? "Send steering note" : "Send";
   els.sendButton.setAttribute("aria-label", canSteer ? "Send steering note" : "Send");
+  els.conversation.setAttribute("aria-busy", isRunning ? "true" : "false");
   els.newThreadButton.disabled = isRunning;
+  if (els.mobileNewThreadButton) els.mobileNewThreadButton.disabled = isRunning;
+  if (els.mobileViewSelect) els.mobileViewSelect.disabled = isRunning;
   els.adminNavButton.disabled = isRunning;
   els.modeSelect.disabled = isRunning;
   els.managerDepthSelect.disabled = isRunning || (currentThread()?.profile || config.profile) !== "manager";
@@ -257,7 +701,19 @@ function setRunning(isRunning) {
   els.reasoningSelect.disabled = isRunning;
   els.friendlinessSelect.disabled = isRunning;
   els.humorSelect.disabled = isRunning;
+  els.textScaleSelect.disabled = isRunning;
   els.webAccessToggle.disabled = isRunning;
+  if (els.toggleSessionCompassButton) els.toggleSessionCompassButton.disabled = isRunning;
+  if (els.saveSessionCompassButton) els.saveSessionCompassButton.disabled = isRunning;
+  if (els.clearSessionCompassButton) els.clearSessionCompassButton.disabled = isRunning;
+  [
+    els.sessionCompassObjective,
+    els.sessionCompassDecisions,
+    els.sessionCompassOpenQuestions,
+    els.sessionCompassNextStep,
+  ].forEach((field) => {
+    if (field) field.disabled = isRunning;
+  });
   if (els.runQuickTestsButton) els.runQuickTestsButton.disabled = isRunning;
   if (els.runAllTestsButton) els.runAllTestsButton.disabled = isRunning;
   if (els.resetTestsButton) els.resetTestsButton.disabled = isRunning;
@@ -265,11 +721,14 @@ function setRunning(isRunning) {
   if (els.warmModelButton) els.warmModelButton.disabled = isRunning;
   if (els.runBenchmarkButton) els.runBenchmarkButton.disabled = isRunning;
   if (els.packageHealthButton) els.packageHealthButton.disabled = isRunning;
+  if (els.packageHealthFilterButton) els.packageHealthFilterButton.disabled = isRunning || !config.packageHealth;
   if (els.selfHealButton) els.selfHealButton.disabled = isRunning;
   if (els.refreshPrintingPackButton) els.refreshPrintingPackButton.disabled = isRunning;
+  if (els.workingProfileProjectSelect) els.workingProfileProjectSelect.disabled = isRunning;
+  if (els.saveWorkingProfileButton) els.saveWorkingProfileButton.disabled = isRunning;
+  if (els.clearWorkingProfileButton) els.clearWorkingProfileButton.disabled = isRunning || !workingProfileForProject(activeWorkingProfileProjectId);
   if (isRunning) {
-    els.runState.textContent = canSteer ? "Running · steer ready" : "Running";
-    els.runState.className = "run-state warning";
+    setRunState(canSteer ? "Working · steering available" : "Working · request received", "warning", canSteer ? "steer-ready" : "request-received");
   }
 }
 
@@ -279,7 +738,8 @@ function render() {
 
   els.cwdInput.value = thread.cwd || config.cwd;
   els.threadTitle.textContent = thread.title;
-  els.threadMeta.textContent = `${thread.messages.length} messages`;
+  const compass = sessionCompassForThread(thread);
+  els.threadMeta.textContent = `${thread.messages.length} messages${sessionCompassHasContent(compass) ? " · session context active" : ""}`;
   els.logSubtitle.textContent = thread.logs.length ? `${thread.logs.length} entries` : "No active run";
   thread.profile = thread.profile || config.profile;
   normalizeThreadProfile(thread);
@@ -288,6 +748,7 @@ function render() {
   thread.managerDepth = normalizeManagerDepth(thread.managerDepth || config.managerDepth);
   thread.friendlinessLevel = normalizeFriendliness(thread.friendlinessLevel || config.friendlinessLevel);
   thread.humorLevel = normalizeHumor(thread.humorLevel || config.humorLevel);
+  thread.textScale = normalizeTextScale(thread.textScale || config.textScale);
   thread.webSearch = normalizeWebSearch(thread.webSearch || config.webSearch);
   els.profileLabel.textContent = profileSummaryLabel(thread.profile);
 
@@ -296,14 +757,74 @@ function render() {
   renderAdmin();
   renderTestBench();
   renderSidebarMode();
+  renderSessionCompass();
   renderMessages();
   renderAttachmentTray();
   renderEngineeringStatus();
   renderRunControls();
   renderLogs();
   renderMonitorSummary();
+  renderRailPanels();
   saveState();
   scheduleStaleAeroRecovery();
+}
+
+function renderRailPanels() {
+  const monitorMinimized = Boolean(state.monitorPanelMinimized);
+  const runLogMinimized = Boolean(state.runLogPanelMinimized);
+  const logCollapsed = Boolean(els.logPanel?.classList.contains("collapsed"));
+  const panelsMinimized = monitorMinimized && runLogMinimized;
+
+  els.appShell?.classList.toggle("log-collapsed", logCollapsed);
+  els.appShell?.classList.toggle("rail-compact", panelsMinimized && !logCollapsed);
+  els.logPanel?.classList.toggle("monitor-minimized", monitorMinimized);
+  els.logPanel?.classList.toggle("run-log-minimized", runLogMinimized);
+  els.logPanel?.classList.toggle("panels-minimized", panelsMinimized);
+  els.monitorPanel?.classList.toggle("minimized", monitorMinimized);
+  els.runLogPanel?.classList.toggle("minimized", runLogMinimized);
+
+  updatePanelToggle(
+    els.toggleMonitorPanelButton,
+    monitorMinimized,
+    "Model Health"
+  );
+  updatePanelToggle(
+    els.toggleRunLogPanelButton,
+    runLogMinimized,
+    "Run Log"
+  );
+
+  if (els.toggleLogButton) {
+    const label = logCollapsed ? "Show right rail" : "Hide right rail";
+    els.toggleLogButton.title = label;
+    els.toggleLogButton.setAttribute("aria-label", label);
+    els.toggleLogButton.setAttribute("aria-expanded", String(!logCollapsed));
+  }
+}
+
+function updatePanelToggle(button, minimized, label) {
+  if (!button) return;
+  const action = minimized ? "Restore" : "Minimize";
+  button.title = `${action} ${label}`;
+  button.setAttribute("aria-label", `${action} ${label}`);
+  button.setAttribute("aria-expanded", String(!minimized));
+  const icon = button.querySelector("span");
+  if (icon) icon.textContent = minimized ? "+" : "-";
+}
+
+function installResponsiveRailBehavior() {
+  if (!mobileLogPanelQuery) return;
+  const collapseForPhone = (event) => {
+    if (!event.matches) return;
+    els.logPanel.classList.add("collapsed");
+    renderRailPanels();
+  };
+  collapseForPhone(mobileLogPanelQuery);
+  if (mobileLogPanelQuery.addEventListener) {
+    mobileLogPanelQuery.addEventListener("change", collapseForPhone);
+  } else if (mobileLogPanelQuery.addListener) {
+    mobileLogPanelQuery.addListener(collapseForPhone);
+  }
 }
 
 function renderSidebarMode() {
@@ -316,6 +837,9 @@ function renderSidebarMode() {
   els.adminNavButton.classList.toggle("active", view === "admin");
   els.chatsNavButton.classList.toggle("active", view === "chats");
   els.testsNavButton.classList.toggle("active", view === "tests");
+  if (els.mobileViewSelect && els.mobileViewSelect.value !== view) {
+    els.mobileViewSelect.value = view;
+  }
   els.testBench.hidden = view !== "tests";
   els.adminPanel.hidden = view !== "admin";
   els.conversation.hidden = view === "tests" || view === "admin";
@@ -391,13 +915,15 @@ function renderAdmin() {
   const golden = admin.goldenTestSummary || {};
   const selfHealing = admin.selfHealing || {};
   const selfPatchQueue = selfHealing.queue || {};
+  const workingProfiles = admin.workingProfiles || [];
+  const feedbackLearning = admin.interactionFeedbackLearning || {};
 
   if (els.adminCountText) {
     els.adminCountText.textContent = `${(improvement.openCount || 0) + (selfPatchQueue.openCount || 0) || admin.knowledgeCount || knowledge.length}`;
   }
 
   if (els.adminPanelSubtitle) {
-    els.adminPanelSubtitle.textContent = `${projects.length} project folder${projects.length === 1 ? "" : "s"} · ${admin.knowledgeCount || knowledge.length} stable learned note${(admin.knowledgeCount || knowledge.length) === 1 ? "" : "s"} · ${improvement.openCount || 0} open improvement${(improvement.openCount || 0) === 1 ? "" : "s"} · ${selfPatchQueue.openCount || 0} self-patch queued`;
+    els.adminPanelSubtitle.textContent = `${projects.length} project folder${projects.length === 1 ? "" : "s"} · ${admin.knowledgeCount || knowledge.length} stable learned note${(admin.knowledgeCount || knowledge.length) === 1 ? "" : "s"} · ${workingProfiles.length} confirmed working profile${workingProfiles.length === 1 ? "" : "s"} · ${improvement.openCount || 0} open improvement${(improvement.openCount || 0) === 1 ? "" : "s"} · ${selfPatchQueue.openCount || 0} self-patch queued`;
   }
 
   if (els.adminSummaryGrid) {
@@ -405,7 +931,10 @@ function renderAdmin() {
     [
       ["Projects", `${admin.projectCount || projects.length}`],
       ["Stable Notes", `${admin.knowledgeCount || knowledge.length}`],
+      ["Working Profiles", `${admin.workingProfileCount || workingProfiles.length}`],
       ["Quality Lessons", `${admin.qualityFeedbackCount || 0}`],
+      ["Validated Lessons", `${feedbackLearning.validatedPatternCount || 0}`],
+      ["Awaiting Feedback", `${feedbackLearning.awaitingValidationPatternCount || 0}`],
       ["Answer Examples", `${admin.responseExampleCount || 0}`],
       ["Improvements", `${improvement.openCount || 0}`],
       ["Self-Heal", `${selfHealing.count || 0}`],
@@ -427,13 +956,109 @@ function renderAdmin() {
   renderAdminNav(projects);
   renderBenchmarkPanel();
   renderPackageHealth();
+  renderVerificationSummary();
   renderEngineeringAdmin();
   renderPrintingExpertPack(admin.printingExpertPack || {});
   renderImprovementLab(improvement);
   renderSelfHealing(selfHealing);
+  renderWorkingProfile();
   renderAdminProjectTree(projects);
   renderAdminKnowledge(knowledge);
   renderAdminRecent(recent);
+}
+
+function workingProfileForProject(projectId) {
+  return (config.admin?.workingProfiles || []).find((profile) => profile.projectId === projectId) || null;
+}
+
+function renderWorkingProfile() {
+  if (!els.workingProfileProjectSelect) return;
+  const projects = config.admin?.workingProfileProjects || [];
+  const profiles = config.admin?.workingProfiles || [];
+  const currentValue = activeWorkingProfileProjectId || els.workingProfileProjectSelect.value;
+  const fallback = profiles[0]?.projectId || projects[0]?.id || "general";
+  const selectedProjectId = projects.some((project) => project.id === currentValue) ? currentValue : fallback;
+  activeWorkingProfileProjectId = selectedProjectId;
+
+  els.workingProfileProjectSelect.replaceChildren();
+  projects.forEach((project) => {
+    const option = document.createElement("option");
+    option.value = project.id;
+    option.textContent = project.name;
+    els.workingProfileProjectSelect.appendChild(option);
+  });
+  els.workingProfileProjectSelect.value = selectedProjectId;
+
+  const profile = workingProfileForProject(selectedProjectId) || {};
+  if (els.workingProfileObjective) els.workingProfileObjective.value = profile.objective || "";
+  if (els.workingProfileAnswerStyle) els.workingProfileAnswerStyle.value = profile.answerStyle || "";
+  if (els.workingProfileTerminology) els.workingProfileTerminology.value = profile.terminology || "";
+  if (els.workingProfileConstraints) els.workingProfileConstraints.value = profile.constraints || "";
+  if (els.workingProfileConfirm) els.workingProfileConfirm.checked = false;
+  if (els.workingProfileStatus) {
+    els.workingProfileStatus.textContent = profile.updatedAt ? "Confirmed project guidance is active." : "No confirmed guidance saved for this project.";
+  }
+  const disabled = Boolean(activeController);
+  if (els.saveWorkingProfileButton) els.saveWorkingProfileButton.disabled = disabled;
+  if (els.clearWorkingProfileButton) els.clearWorkingProfileButton.disabled = disabled || !profile.updatedAt;
+}
+
+function workingProfileUpdatesFromForm() {
+  return {
+    objective: els.workingProfileObjective?.value.trim() || "",
+    answerStyle: els.workingProfileAnswerStyle?.value.trim() || "",
+    terminology: els.workingProfileTerminology?.value.trim() || "",
+    constraints: els.workingProfileConstraints?.value.trim() || "",
+  };
+}
+
+async function saveWorkingProfile() {
+  if (activeController || !activeWorkingProfileProjectId) return;
+  if (!els.workingProfileConfirm?.checked) {
+    if (els.workingProfileStatus) els.workingProfileStatus.textContent = "Confirm the guidance before saving.";
+    return;
+  }
+  try {
+    const response = await fetch("/api/admin/working-profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "save",
+        projectId: activeWorkingProfileProjectId,
+        updates: workingProfileUpdatesFromForm(),
+        confirmed: true,
+      }),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || `working profile ${response.status}`);
+    config.admin = result.admin || config.admin;
+    appendLog("event", `working profile saved for ${result.profile?.projectName || activeWorkingProfileProjectId}`);
+    renderAdmin();
+  } catch (error) {
+    if (els.workingProfileStatus) els.workingProfileStatus.textContent = `Profile not saved: ${error.message}`;
+    appendLog("warning", `Working profile update failed: ${error.message}`);
+  }
+}
+
+async function clearWorkingProfile() {
+  if (activeController || !activeWorkingProfileProjectId) return;
+  const profile = workingProfileForProject(activeWorkingProfileProjectId);
+  if (!profile || !window.confirm("Clear this confirmed project guidance?")) return;
+  try {
+    const response = await fetch("/api/admin/working-profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "delete", projectId: activeWorkingProfileProjectId }),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || `working profile ${response.status}`);
+    config.admin = result.admin || config.admin;
+    appendLog("event", `working profile cleared for ${activeWorkingProfileProjectId}`);
+    renderAdmin();
+  } catch (error) {
+    if (els.workingProfileStatus) els.workingProfileStatus.textContent = `Profile not cleared: ${error.message}`;
+    appendLog("warning", `Working profile clear failed: ${error.message}`);
+  }
 }
 
 function renderBenchmarkPanel() {
@@ -520,17 +1145,34 @@ function renderPackageHealth() {
   if (!els.packageHealthList) return;
   els.packageHealthList.textContent = "";
   if (!report) {
+    if (els.packageHealthFilterButton) els.packageHealthFilterButton.disabled = true;
     const empty = document.createElement("div");
     empty.className = "admin-empty";
     empty.textContent = "Run Package Check before cutting the release bundle.";
     els.packageHealthList.appendChild(empty);
     return;
   }
+  const checks = report.checks || [];
+  const blockers = checks.filter((check) => check.status !== "pass");
+  const visibleChecks = config.packageHealthBlockersOnly ? blockers : checks;
+  if (els.packageHealthFilterButton) {
+    els.packageHealthFilterButton.disabled = !checks.length;
+    els.packageHealthFilterButton.classList.toggle("active", Boolean(config.packageHealthBlockersOnly));
+    const label = els.packageHealthFilterButton.querySelector("span:last-child");
+    if (label) label.textContent = config.packageHealthBlockersOnly ? "Show All" : "Show Blockers";
+  }
   const summary = document.createElement("div");
   summary.className = `package-health-summary ${report.status || "warn"}`;
-  summary.textContent = `${String(report.status || "unknown").toUpperCase()} · ${report.failed || 0} failed · ${report.warned || 0} warnings · ${formatSeconds(report.durationMs || 0)}`;
+  summary.textContent = `${String(report.status || "unknown").toUpperCase()} · ${report.failed || 0} failed · ${report.warned || 0} warnings · ${blockers.length} blockers · ${formatSeconds(report.durationMs || 0)}`;
   els.packageHealthList.appendChild(summary);
-  (report.checks || []).forEach((check) => {
+  if (config.packageHealthBlockersOnly && !blockers.length) {
+    const empty = document.createElement("div");
+    empty.className = "admin-empty";
+    empty.textContent = `No blockers. ${checks.length} checks passing.`;
+    els.packageHealthList.appendChild(empty);
+    return;
+  }
+  visibleChecks.forEach((check) => {
     const row = document.createElement("div");
     row.className = `package-health-row ${check.status || "warn"}`;
     const label = document.createElement("strong");
@@ -541,6 +1183,45 @@ function renderPackageHealth() {
     detail.textContent = check.detail || "";
     row.append(label, status, detail);
     els.packageHealthList.appendChild(row);
+  });
+}
+
+function renderVerificationSummary() {
+  const summary = config.verificationSummary;
+  if (!els.verificationSummaryList) return;
+  els.verificationSummaryList.textContent = "";
+  if (!summary) {
+    const empty = document.createElement("div");
+    empty.className = "admin-empty";
+    empty.textContent = "Refresh Admin or run Package Check to load the latest verification receipts.";
+    els.verificationSummaryList.appendChild(empty);
+    return;
+  }
+  const header = document.createElement("div");
+  header.className = `verification-summary-header ${summary.status || "warn"}`;
+  header.textContent = `${String(summary.status || "unknown").toUpperCase()} · ${summary.passed || 0}/${summary.total || 0} receipts · ${summary.checkedAt || "local"}`;
+  els.verificationSummaryList.appendChild(header);
+  (summary.items || []).forEach((item) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = `verification-summary-row ${item.status || "warn"}`;
+    row.disabled = !item.path;
+    row.title = item.path ? "Reveal receipt in Finder" : "No local receipt path";
+    const label = document.createElement("strong");
+    label.textContent = item.label || "receipt";
+    const metric = document.createElement("span");
+    metric.textContent = item.metric || item.status || "unknown";
+    const detail = document.createElement("em");
+    detail.textContent = item.detail || item.path || "";
+    const meta = document.createElement("small");
+    const age = item.age || "age unknown";
+    const nextAction = item.nextAction || "Refresh Admin.";
+    meta.textContent = `${age} · ${nextAction}`;
+    row.append(label, metric, detail, meta);
+    row.addEventListener("click", () => {
+      if (item.path) openLocalPath(item.path);
+    });
+    els.verificationSummaryList.appendChild(row);
   });
 }
 
@@ -830,17 +1511,17 @@ function renderSelfHealing(summary) {
   const queue = summary.queue || {};
   const recent = summary.recent || [];
   const patches = queue.items || [];
-  const byStatus = summary.byStatus || {};
+  const byStatus = summary.byEffectiveStatus || summary.byStatus || {};
 
   if (els.selfHealingSummaryGrid) {
     els.selfHealingSummaryGrid.textContent = "";
     [
       ["Events", `${summary.count || 0}`],
       ["Recovered", `${summary.recoveredCount || 0}`],
+      ["Resolved", `${summary.validatedResolvedCount || 0}`],
       ["Needs Approval", `${summary.approvalCount || 0}`],
       ["Queued", `${queue.openCount || 0}`],
-      ["Recipes", `${summary.recipeCount || 0}`],
-      ["Failed", `${byStatus["failed-validation"] || 0}`],
+      ["Open", `${summary.openActionCount || 0}`],
     ].forEach(([label, value]) => {
       const item = document.createElement("div");
       item.className = "admin-summary-item";
@@ -863,18 +1544,19 @@ function renderSelfHealing(summary) {
     } else {
       recent.slice(0, 10).forEach((item) => {
         const row = document.createElement("article");
-        row.className = `self-healing-row ${item.status || "observed"}`;
+        const effectiveStatus = item.effectiveStatus || item.status || "observed";
+        row.className = `self-healing-row ${effectiveStatus}`;
 
         const copy = document.createElement("div");
         copy.className = "self-healing-copy";
         const meta = document.createElement("div");
         meta.className = "improvement-meta";
         const status = document.createElement("span");
-        status.textContent = item.status || "observed";
+        status.textContent = effectiveStatus;
         const project = document.createElement("span");
         project.textContent = item.projectId || "general";
         const approval = document.createElement("span");
-        approval.textContent = item.needsApproval ? "approval" : item.recovered ? "recovered" : "checked";
+        approval.textContent = effectiveStatus === "validated-resolved" ? "resolved" : item.needsApproval ? "approval" : item.recovered ? "recovered" : "checked";
         meta.append(status, project, approval);
 
         const title = document.createElement("strong");
@@ -882,7 +1564,7 @@ function renderSelfHealing(summary) {
         const firstAction = (item.actions || [])[0];
         title.textContent = firstGap?.kind || firstAction?.recipe || item.trigger || "Self-healing event";
         const detail = document.createElement("p");
-        detail.textContent = firstAction?.detail || firstGap?.reason || item.prompt || "Validated local state.";
+        detail.textContent = item.resolutionProof || firstAction?.detail || firstGap?.reason || item.prompt || "Validated local state.";
         const time = document.createElement("em");
         time.textContent = item.time ? shortDate(new Date(item.time * 1000).toISOString()) : "";
         copy.append(meta, title, detail);
@@ -1060,13 +1742,23 @@ function renderAdminKnowledge(items) {
     promote.textContent = item.pinned ? "Reviewed" : "Promote";
     promote.disabled = Boolean(activeController) || Boolean(item.pinned);
     promote.addEventListener("click", () => updateKnowledgeItem(item.id, "promote"));
+    const edit = document.createElement("button");
+    edit.className = "tiny-action-button";
+    edit.type = "button";
+    edit.textContent = "Edit";
+    edit.disabled = Boolean(activeController);
+    edit.addEventListener("click", () => {
+      const nextLesson = window.prompt("Edit this stable knowledge note:", item.lesson || "");
+      if (nextLesson === null) return;
+      updateKnowledgeItem(item.id, "edit", { lesson: nextLesson });
+    });
     const remove = document.createElement("button");
     remove.className = "tiny-action-button danger";
     remove.type = "button";
     remove.textContent = "Delete";
     remove.disabled = Boolean(activeController);
     remove.addEventListener("click", () => updateKnowledgeItem(item.id, "delete"));
-    actions.append(promote, remove);
+    actions.append(promote, edit, remove);
     node.append(path, question, lesson, actions);
     els.adminKnowledgeList.appendChild(node);
   });
@@ -1219,6 +1911,7 @@ function resultStatusLabel(status) {
   if (status === "pass") return "Pass";
   if (status === "fail") return "Fail";
   if (status === "running") return "Running";
+  if (status === "cancelled") return "Cancelled";
   return "Idle";
 }
 
@@ -1244,9 +1937,54 @@ function formatFileSize(bytes) {
   return `${size} B`;
 }
 
+function normalizeAttachmentForRun(attachment) {
+  if (!attachment || typeof attachment !== "object") return null;
+  const path = String(attachment.path || "");
+  const fallbackName = path.split("/").filter(Boolean).pop() || "attached file";
+  const source = String(attachment.source || (path ? "native-local-path" : "uploaded-copy"));
+  return {
+    ...attachment,
+    id: attachment.id || crypto.randomUUID(),
+    name: String(attachment.name || fallbackName),
+    size: Number(attachment.size || 0),
+    type: String(attachment.type || attachment.contentType || "application/octet-stream"),
+    path,
+    source,
+    copied: source === "native-local-path" ? false : attachment.copied !== false,
+  };
+}
+
+function attachmentIdentity(attachment) {
+  const path = String(attachment?.path || "").trim();
+  if (path) return `path:${path}`;
+  const name = String(attachment?.name || "").trim().toLowerCase();
+  const size = Number(attachment?.size || 0);
+  const type = String(attachment?.type || attachment?.contentType || "").trim().toLowerCase();
+  return `file:${name}:${size}:${type}`;
+}
+
+function normalizeAttachmentList(attachments) {
+  const seen = new Set();
+  const normalized = [];
+  (attachments || []).forEach((attachment) => {
+    const item = normalizeAttachmentForRun(attachment);
+    if (!item) return;
+    const key = attachmentIdentity(item);
+    if (seen.has(key)) return;
+    seen.add(key);
+    normalized.push(item);
+  });
+  return normalized;
+}
+
+function mergeAttachmentLists(existingAttachments, newAttachments) {
+  return normalizeAttachmentList([...(existingAttachments || []), ...(newAttachments || [])]);
+}
+
 function buildAttachmentChip(attachment, options = {}) {
   const chip = document.createElement("span");
   chip.className = "attachment-chip";
+  chip.setAttribute("role", "listitem");
   chip.title = attachment.path || attachment.name || "attached file";
 
   const name = document.createElement("span");
@@ -1278,6 +2016,7 @@ function buildAttachmentChip(attachment, options = {}) {
 function renderAttachmentTray() {
   if (!els.attachmentTray) return;
   els.attachmentTray.innerHTML = "";
+  els.attachmentTray.setAttribute("aria-label", `Attached files${pendingAttachments.length ? `, ${pendingAttachments.length}` : ""}`);
   if (!pendingAttachments.length) {
     els.attachmentTray.hidden = true;
     return;
@@ -1292,6 +2031,8 @@ function renderMessageAttachments(container, attachments) {
   if (!Array.isArray(attachments) || !attachments.length) return;
   const wrap = document.createElement("div");
   wrap.className = "message-attachments";
+  wrap.setAttribute("role", "list");
+  wrap.setAttribute("aria-label", `Message attachments, ${attachments.length}`);
   attachments.forEach((attachment) => wrap.appendChild(buildAttachmentChip(attachment)));
   container.appendChild(wrap);
 }
@@ -1299,13 +2040,36 @@ function renderMessageAttachments(container, attachments) {
 function renderMessages() {
   const thread = currentThread();
   els.conversation.innerHTML = "";
+  els.conversation.setAttribute("aria-busy", activeRun ? "true" : "false");
   els.conversation.appendChild(buildStartupCard(Boolean(thread.messages.length)));
   let touchedIds = false;
 
   if (!thread.messages.length) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
-    empty.textContent = "Welcome, Tinman. The startup inventory is loaded and ready.";
+    const intro = document.createElement("p");
+    intro.textContent = "Ready, Tinman.";
+    const starters = document.createElement("div");
+    starters.className = "prompt-starter-grid";
+    starters.dataset.workflow = currentPromptStarterWorkflow();
+    starters.setAttribute("aria-label", "Prompt starters");
+    promptStartersForCurrentWorkflow().forEach((starter) => {
+      const button = document.createElement("button");
+      button.className = "prompt-starter-button";
+      button.type = "button";
+      button.dataset.promptStarter = starter.prompt;
+      button.dataset.workflow = starters.dataset.workflow;
+      button.dataset.promptGuidance = starter.guidance || "";
+      button.dataset.reliabilityCaveat = starter.reliability || "";
+      button.dataset.clarifyBeforeExpensive = starter.clarify || "";
+      button.dataset.safetyBoundary = starter.safety || "";
+      button.dataset.balanceCue = starter.balance || "";
+      button.textContent = starter.label;
+      button.title = [starter.prompt, starter.guidance].filter(Boolean).join(" ");
+      button.setAttribute("aria-label", [starter.label, starter.guidance].filter(Boolean).join(". "));
+      starters.appendChild(button);
+    });
+    empty.append(intro, starters);
     els.conversation.appendChild(empty);
     return;
   }
@@ -1316,7 +2080,10 @@ function renderMessages() {
       touchedIds = true;
     }
     const node = document.createElement("article");
-    node.className = `message ${message.role}${message.running ? " running" : ""}${message.steering ? " steering" : ""}${isCodexStyleAnswer(message) ? " codex-style" : ""}`;
+    node.className = `message ${message.role}${message.running ? " running" : ""}${message.steering ? " steering" : ""}${message.provisional ? " provisional" : ""}${isCodexStyleAnswer(message) ? " codex-style" : ""}`;
+    node.setAttribute("aria-label", `${message.role === "user" ? "User" : "Codex"} message${message.running ? ", running" : ""}${message.provisional ? ", draft" : ""}`);
+    if (message.provisional) node.dataset.provisional = "true";
+    if (message.running) node.setAttribute("aria-busy", "true");
     const role = document.createElement("div");
     role.className = "message-role";
     role.textContent = message.role === "user" ? "You" : "Codex";
@@ -1374,6 +2141,7 @@ function buildThoughtsCard(message) {
   }
   const thoughts = document.createElement("details");
   thoughts.className = "thoughts-card";
+  thoughts.setAttribute("aria-label", message.running ? "Current work notes" : "Work receipts");
   thoughts.open = Boolean(message.running);
   const thoughtsTitle = document.createElement("div");
   thoughtsTitle.className = "thoughts-title";
@@ -1417,8 +2185,15 @@ function buildResponsePackagePanel(message) {
   const contract = message.taskContract || null;
   const contractGate = message.contractGate || message.scorecard?.contractGate || null;
   const roleStyle = message.roleStyle || null;
+  const interactionDirector = message.interactionDirector || null;
+  const evidenceLedger = Array.isArray(message.evidenceLedger) ? message.evidenceLedger : [];
+  const evidenceClaimGate = message.evidenceClaimGate || null;
+  const expertiseConfidence = message.expertiseConfidence || null;
   const scorecard = message.scorecard || null;
-  if (!deliverables.length && !assumptions.length && !contract && !roleStyle && !scorecard) return null;
+  const preSendReview = message.preSendReview || null;
+  const feedbackGuidance = message.feedbackGuidance || null;
+  const feedbackGuidanceItems = Array.isArray(feedbackGuidance?.items) ? feedbackGuidance.items : [];
+  if (!deliverables.length && !assumptions.length && !evidenceLedger.length && !evidenceClaimGate && !expertiseConfidence && !contract && !roleStyle && !interactionDirector && !scorecard && !preSendReview && !feedbackGuidanceItems.length) return null;
 
   const wrap = document.createElement("div");
   wrap.className = "response-package";
@@ -1474,7 +2249,7 @@ function buildResponsePackagePanel(message) {
   }
 
   const hasChecks = scorecard && Array.isArray(scorecard.checks) && scorecard.checks.length;
-  if (contract || roleStyle || assumptions.length || hasChecks) {
+  if (contract || roleStyle || interactionDirector || evidenceLedger.length || evidenceClaimGate || expertiseConfidence || assumptions.length || hasChecks || preSendReview || feedbackGuidanceItems.length) {
     const details = document.createElement("details");
     details.className = `answer-check-card ${scorecard?.status || "pass"}`;
     details.open = scorecard?.status === "review";
@@ -1491,7 +2266,7 @@ function buildResponsePackagePanel(message) {
     summary.append(summaryTitle, score);
     details.appendChild(summary);
 
-    if (contract || roleStyle) {
+    if (contract || roleStyle || interactionDirector || evidenceLedger.length || evidenceClaimGate || expertiseConfidence || preSendReview || feedbackGuidanceItems.length) {
       const grid = document.createElement("div");
       grid.className = "answer-check-grid";
       if (contract?.kind) grid.appendChild(buildAnswerCheckFact("Task", contract.kind));
@@ -1511,6 +2286,44 @@ function buildResponsePackagePanel(message) {
       if (Array.isArray(roleStyle?.checklist) && roleStyle.checklist.length) {
         grid.appendChild(buildAnswerCheckFact("Checklist", roleStyle.checklist.join(", ")));
       }
+      if (interactionDirector?.label || interactionDirector?.mode) {
+        grid.appendChild(buildAnswerCheckFact("Interaction", interactionDirector.label || interactionDirector.mode));
+      }
+      if (interactionDirector?.answerShape) {
+        grid.appendChild(buildAnswerCheckFact("Answer shape", interactionDirector.answerShape));
+      }
+      if (evidenceLedger.length) {
+        const summary = evidenceLedger.slice(0, 2).map((item) => {
+          const status = item.status || "open";
+          const source = item.sourceLabel || item.sourceType || "evidence";
+          return `${status} ${source}`;
+        }).join(", ");
+        grid.appendChild(buildAnswerCheckFact("Evidence", summary));
+      }
+      if (evidenceClaimGate?.status === "review") {
+        const assertions = Array.isArray(evidenceClaimGate.assertions) ? evidenceClaimGate.assertions.join(", ") : "";
+        grid.appendChild(buildAnswerCheckFact("Evidence gap", assertions ? `Unverified: ${assertions}` : "Evidence needs review"));
+      }
+      if (expertiseConfidence?.label) {
+        grid.appendChild(buildAnswerCheckFact("Confidence", expertiseConfidence.label));
+      }
+      if (preSendReview?.status) {
+        const flags = Array.isArray(preSendReview.flags) ? preSendReview.flags : [];
+        const reviewText = preSendReview.status === "revised"
+          ? `Tightened${flags.length ? `: ${flags.join(", ")}` : ""}`
+          : preSendReview.status === "review"
+            ? `Needs attention${flags.length ? `: ${flags.join(", ")}` : ""}`
+            : "Passed";
+        grid.appendChild(buildAnswerCheckFact("Final review", reviewText));
+      }
+      if (feedbackGuidanceItems.length) {
+        const lens = feedbackGuidanceItems.slice(0, 4).map((item) => {
+          const label = item.label || item.category || "Response quality";
+          const scope = item.scope ? ` (${item.scope})` : "";
+          return `${label}${scope}`;
+        }).join(", ");
+        grid.appendChild(buildAnswerCheckFact("Feedback lens", lens));
+      }
       details.appendChild(grid);
     }
 
@@ -1529,6 +2342,34 @@ function buildResponsePackagePanel(message) {
         tag.textContent = item.kind || "Note";
         const text = document.createElement("span");
         text.textContent = item.text || "";
+        row.append(tag, text);
+        group.appendChild(row);
+      });
+      details.appendChild(group);
+    }
+
+    if (evidenceLedger.length) {
+      const group = document.createElement("div");
+      group.className = "ledger-group";
+      const title = document.createElement("div");
+      title.className = "ledger-title";
+      title.textContent = "Decision evidence";
+      group.appendChild(title);
+      evidenceLedger.forEach((item) => {
+        const row = document.createElement("div");
+        row.className = `ledger-row ${item.status || "open"}`;
+        const tag = document.createElement("span");
+        tag.className = "ledger-tag";
+        tag.textContent = item.status || "Open";
+        const text = document.createElement("span");
+        const parts = [
+          item.claim,
+          item.sourceLabel || item.sourceType,
+          item.freshness ? `Freshness: ${item.freshness}` : "",
+          item.proof,
+          item.status === "open" && item.nextEvidence ? `Next: ${item.nextEvidence}` : "",
+        ].filter(Boolean);
+        text.textContent = parts.join(". ");
         row.append(tag, text);
         group.appendChild(row);
       });
@@ -1565,6 +2406,7 @@ function buildUserMessageActions(message) {
   edit.type = "button";
   edit.dataset.editMessageId = message.id;
   edit.textContent = "Edit question";
+  edit.setAttribute("aria-label", "Edit this question");
   edit.disabled = Boolean(activeController);
   actions.appendChild(edit);
   return actions;
@@ -1589,9 +2431,12 @@ function buildFeedbackActions(message) {
   if (message.feedback === "saving") {
     status.textContent = "Saving feedback";
   } else if (message.feedback === "good") {
-    status.textContent = "Marked good";
+    const reinforced = Array.isArray(message.feedbackReinforcement) ? message.feedbackReinforcement : [];
+    status.textContent = reinforced.length ? `Marked good: reinforced ${reinforced.join(", ")}` : "Marked good";
   } else if (message.feedback === "fix") {
-    status.textContent = message.feedbackSelfHealing ? "Lesson saved + self-heal" : message.feedbackGoldenTest ? "Lesson saved + test" : "Lesson saved";
+    const category = feedbackCategoryLabel(message.feedbackCategory);
+    const lesson = category ? `Lesson saved: ${category}` : "Lesson saved";
+    status.textContent = message.feedbackSelfHealing ? `${lesson} + self-heal` : message.feedbackGoldenTest ? `${lesson} + test` : lesson;
   } else if (message.feedback === "crash-repair") {
     status.textContent = "Crash repair queued";
   } else if (message.feedback === "error") {
@@ -1604,6 +2449,7 @@ function buildFeedbackActions(message) {
   good.dataset.feedbackId = message.id;
   good.dataset.feedbackRating = "good";
   good.textContent = "Good";
+  good.setAttribute("aria-label", "Mark this answer good");
   good.disabled = message.feedback === "saving";
 
   const fix = document.createElement("button");
@@ -1612,7 +2458,22 @@ function buildFeedbackActions(message) {
   fix.dataset.feedbackId = message.id;
   fix.dataset.feedbackRating = "fix";
   fix.textContent = "Fix this";
+  fix.setAttribute("aria-label", "Report this answer and save a lesson");
   fix.disabled = message.feedback === "saving";
+
+  const category = document.createElement("select");
+  category.className = "feedback-category-select";
+  category.dataset.feedbackCategoryFor = message.id;
+  category.setAttribute("aria-label", "What missed the mark in this answer?");
+  category.title = "Choose the issue this answer had before saving a Fix This lesson";
+  for (const option of FEEDBACK_CATEGORIES) {
+    const item = document.createElement("option");
+    item.value = option.value;
+    item.textContent = option.label;
+    category.appendChild(item);
+  }
+  category.value = message.feedbackCategory || "";
+  category.disabled = message.feedback === "saving";
 
   const crashRepair = document.createElement("button");
   crashRepair.className = "feedback-button warning";
@@ -1620,6 +2481,7 @@ function buildFeedbackActions(message) {
   crashRepair.dataset.crashRepairId = message.id;
   crashRepair.textContent = "Repair crash";
   crashRepair.title = "Use the saved server traceback to create a focused self-repair work order";
+  crashRepair.setAttribute("aria-label", "Repair this crash using the saved traceback");
   crashRepair.disabled = message.feedback === "saving";
 
   const steer = document.createElement("button");
@@ -1627,12 +2489,13 @@ function buildFeedbackActions(message) {
   steer.type = "button";
   steer.dataset.steerMessageId = message.id;
   steer.textContent = "Steer";
+  steer.setAttribute("aria-label", "Steer the current or next Codex run from this answer");
   steer.disabled = message.feedback === "saving";
 
   if (isServerCrashRecoveryMessage(message)) {
     actions.append(fix, crashRepair, steer);
   } else {
-    actions.append(good, fix, steer);
+    actions.append(good, category, fix, steer);
   }
   if (status.textContent) actions.appendChild(status);
   return actions;
@@ -1667,7 +2530,10 @@ function buildLocalPathLink(path, label, codeStyle = false) {
   anchor.href = "#";
   anchor.className = codeStyle ? "local-file-link code-link" : "local-file-link";
   anchor.dataset.localPath = clean;
-  anchor.title = "Reveal this local file in Finder";
+  anchor.dataset.localOnly = "true";
+  anchor.dataset.action = "finder-reveal";
+  anchor.title = "Local-only Finder reveal. This does not create a shareable link.";
+  anchor.setAttribute("aria-label", `Reveal local-only file ${label || clean} in Finder`);
   if (codeStyle) {
     const code = document.createElement("code");
     code.textContent = label || clean;
@@ -1884,6 +2750,7 @@ function buildMarkdownTable(lines) {
   const headerRow = document.createElement("tr");
   headerCells.forEach((cell) => {
     const th = document.createElement("th");
+    th.setAttribute("scope", "col");
     appendInlineMarkdown(th, cell);
     headerRow.appendChild(th);
   });
@@ -2027,16 +2894,21 @@ async function refreshHealth() {
     drawMonitor();
   } catch (_error) {
     if (els.monitorStatusText) els.monitorStatusText.textContent = "Telemetry unavailable";
-    if (els.stripStatusText) els.stripStatusText.textContent = "Telemetry unavailable";
     drawMonitor();
   }
 }
 
 async function refreshAdmin() {
   try {
-    const response = await fetch("/api/admin", { cache: "no-store" });
-    if (!response.ok) throw new Error(`admin ${response.status}`);
-    config.admin = await response.json();
+    const [adminResponse, verificationResponse] = await Promise.all([
+      fetch("/api/admin", { cache: "no-store" }),
+      fetch("/api/verification-summary", { cache: "no-store" }),
+    ]);
+    if (!adminResponse.ok) throw new Error(`admin ${adminResponse.status}`);
+    config.admin = await adminResponse.json();
+    if (verificationResponse.ok) {
+      config.verificationSummary = await verificationResponse.json();
+    }
     renderAdmin();
   } catch (_error) {
     appendLog("warning", "Admin cleanup summary unavailable");
@@ -2074,13 +2946,21 @@ async function startWarmup() {
 async function runPackageHealth() {
   if (activeController) return;
   if (els.packageHealthButton) els.packageHealthButton.disabled = true;
+  setBackgroundTaskStatus("Package check", "running", "warning", "background-running");
   try {
     const response = await fetch("/api/package-health", { cache: "no-store" });
     if (!response.ok) throw new Error(`package health ${response.status}`);
     config.packageHealth = await response.json();
+    try {
+      const verificationResponse = await fetch("/api/verification-summary", { cache: "no-store" });
+      if (verificationResponse.ok) config.verificationSummary = await verificationResponse.json();
+    } catch (_error) {}
     appendLog("event", `package health ${config.packageHealth.status}`);
+    const ok = config.packageHealth.status === "pass";
+    setBackgroundTaskStatus("Package check", ok ? "complete" : "needs review", ok ? "ok" : "warning", ok ? "background-complete" : "background-review");
     renderAdmin();
   } catch (error) {
+    setBackgroundTaskStatus("Package check", "failed", "error", "background-failed");
     appendLog("warning", `Package health check failed: ${error.message}`);
   } finally {
     if (els.packageHealthButton) els.packageHealthButton.disabled = Boolean(activeController);
@@ -2145,14 +3025,18 @@ async function runSelfHealingCheck() {
   }
 }
 
-async function updateKnowledgeItem(id, action) {
+async function updateKnowledgeItem(id, action, updates = {}) {
   if (!id || activeController) return;
   if (action === "delete" && !window.confirm("Delete this stable knowledge note?")) return;
+  if (action === "edit" && !String(updates.lesson || "").trim()) {
+    appendLog("warning", "Stable knowledge edit was empty; nothing changed");
+    return;
+  }
   try {
     const response = await fetch("/api/admin/knowledge", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, action }),
+      body: JSON.stringify({ id, action, updates }),
     });
     if (!response.ok) throw new Error(`knowledge ${response.status}`);
     const result = await response.json();
@@ -2215,7 +3099,7 @@ async function openLocalPath(path) {
     if (!response.ok || !result.ok) throw new Error(result.error || `open ${response.status}`);
     els.runState.textContent = result.action === "open" ? "Opened" : "Revealed";
     els.runState.className = "run-state ok";
-    appendLog("event", `Opened local path ${clean}`);
+    appendLog("event", `${result.action === "open" ? "Opened" : "Revealed"} local path ${clean}`);
   } catch (error) {
     els.runState.textContent = "Open failed";
     els.runState.className = "run-state error";
@@ -2324,25 +3208,14 @@ function renderMonitorSummary() {
   const ollamaText = health.ollama?.running
     ? `Online · ${health.ollama.modelCount || 0}`
     : "Offline";
-  const stripOllamaText = health.ollama?.running
-    ? `${health.ollama.modelCount || 0}`
-    : "Off";
   const routeText = compactLabel(monitor.lastRoute || "Idle", 18);
-  const stripRouteText = compactLabel(monitor.lastRoute || "Idle", 10);
   const passText = passSummary();
-  const stripDepthLabel = depth === "balanced" ? "Bal" : depthLabel;
   const printerText = printerSummaryText(health.printerSummary);
   if (els.monitorManagerPill) els.monitorManagerPill.textContent = depthLabel;
-  if (els.stripManagerText) els.stripManagerText.textContent = stripDepthLabel;
   if (els.monitorStatusText) els.monitorStatusText.textContent = statusText;
-  if (els.stripStatusText) els.stripStatusText.textContent = statusText;
   if (els.monitorOllamaText) els.monitorOllamaText.textContent = ollamaText;
-  if (els.stripOllamaText) els.stripOllamaText.textContent = stripOllamaText;
   if (els.monitorRouteText) els.monitorRouteText.textContent = routeText;
-  if (els.stripRouteText) els.stripRouteText.textContent = stripRouteText;
   if (els.monitorPassText) els.monitorPassText.textContent = passText;
-  if (els.stripPassText) els.stripPassText.textContent = passText;
-  if (els.stripPrinterText) els.stripPrinterText.textContent = printerText;
   if (els.monitorMemoryText) els.monitorMemoryText.textContent = health.memory?.percent ? `${health.memory.percent}%` : "--";
   if (els.monitorDiskText) els.monitorDiskText.textContent = health.disk?.freeLabel || "--";
   if (els.monitorPrinterText) els.monitorPrinterText.textContent = printerText;
@@ -2420,6 +3293,13 @@ function printerDetail(printer) {
   const state = titleLabel(printer.state || "online");
   const telemetry = printer.telemetry || {};
   const parts = [state];
+  const progress = Number(printer.progress);
+  if (Number.isFinite(progress) && progress > 0) {
+    const progressText = Number.isInteger(progress) ? `${progress}%` : `${progress.toFixed(1)}%`;
+    parts.push(progressText);
+  }
+  const remaining = printer.timeRemaining || formatPrinterRemaining(printer.timeRemainingSeconds);
+  if (remaining) parts.push(`ETA ${remaining}`);
   const nozzle = tempPair(telemetry.nozzle);
   const bed = tempPair(telemetry.bed);
   if (nozzle) parts.push(`N ${nozzle}`);
@@ -2429,6 +3309,18 @@ function printerDetail(printer) {
   }
   if (printer.authRequired) parts.push("auth");
   return compactLabel(parts.join(" | "), 64);
+}
+
+function formatPrinterRemaining(seconds) {
+  const total = Number(seconds);
+  if (!Number.isFinite(total) || total <= 0) return "";
+  const rounded = Math.max(0, Math.round(total));
+  const hours = Math.floor(rounded / 3600);
+  const minutes = Math.floor((rounded % 3600) / 60);
+  const secs = rounded % 60;
+  if (hours) return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+  if (minutes) return `${minutes}m`;
+  return `${secs}s`;
 }
 
 function tempPair(value) {
@@ -2471,52 +3363,6 @@ function drawMonitor() {
     ];
     panels.forEach((panel) => drawMonitorPanel(ctx, ...panel));
   }
-  drawStripMonitor();
-}
-
-function drawStripMonitor() {
-  const canvas = els.stripMonitorCanvas;
-  if (!canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  const width = Math.max(180, rect.width || 260);
-  const height = Math.max(42, rect.height || 54);
-  const scale = window.devicePixelRatio || 1;
-  if (canvas.width !== Math.round(width * scale) || canvas.height !== Math.round(height * scale)) {
-    canvas.width = Math.round(width * scale);
-    canvas.height = Math.round(height * scale);
-  }
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(scale, 0, 0, scale, 0, 0);
-  ctx.clearRect(0, 0, width, height);
-  drawMonitorBackground(ctx, width, height);
-  const plot = { x: 9, y: 8, w: width - 18, h: height - 22 };
-  const samples = monitor.samples.length ? monitor.samples : [
-    { memory: 38, disk: 58, load: 18 },
-    { memory: 44, disk: 57, load: 24 },
-    { memory: 41, disk: 56, load: 21 },
-    { memory: 49, disk: 56, load: 36 },
-    { memory: 46, disk: 55, load: 28 },
-    { memory: 52, disk: 55, load: 44 },
-  ];
-  drawSeries(ctx, plot, samples.map((item) => item.memory), "#ff65c8", true);
-  drawSeries(ctx, plot, samples.map((item) => item.disk), "#6fe7dc", false);
-  drawSeries(ctx, plot, samples.map((item) => item.load), "#f7c948", false);
-  drawSeries(ctx, plot, samples.map((item) => item.printers || 0), "#c5f467", false);
-  const health = monitor.health || {};
-  const online = health.ollama?.running;
-  ctx.fillStyle = online ? "#63e6be" : "#ff6b6b";
-  ctx.beginPath();
-  ctx.arc(width - 14, 14, 4, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#8fa4bd";
-  ctx.font = "700 8px ui-monospace, SFMono-Regular, Menlo, monospace";
-  ctx.fillText("MEM", 10, height - 7);
-  ctx.fillStyle = "#6fe7dc";
-  ctx.fillText("DISK", 38, height - 7);
-  ctx.fillStyle = "#f7c948";
-  ctx.fillText("LOAD", 72, height - 7);
-  ctx.fillStyle = "#c5f467";
-  ctx.fillText("PRN", 112, height - 7);
 }
 
 function drawMonitorBackground(ctx, width, height) {
@@ -2770,6 +3616,8 @@ function renderRunControls() {
   els.reasoningSelect.value = thread.reasoningLevel || config.reasoningLevel;
   els.friendlinessSelect.value = normalizeFriendliness(thread.friendlinessLevel || config.friendlinessLevel);
   els.humorSelect.value = normalizeHumor(thread.humorLevel || config.humorLevel);
+  els.textScaleSelect.value = normalizeTextScale(thread.textScale || config.textScale);
+  applyTextScale(thread.textScale || config.textScale);
   const engine = profileEngine(thread.profile || config.profile);
   const managerSelected = (thread.profile || config.profile) === "manager";
   els.managerDepthSelect.disabled = Boolean(activeController) || !managerSelected;
@@ -2910,6 +3758,7 @@ function attachmentFromNativeFile(file) {
     type: String(file?.type || file?.contentType || "application/octet-stream"),
     path,
     source: "native-local-path",
+    copied: false,
   };
 }
 
@@ -2941,10 +3790,15 @@ async function uploadAttachment(file) {
     method: "POST",
     body: form,
   });
-  if (!response.ok) {
-    throw new Error(`Upload failed with HTTP ${response.status}`);
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    payload = null;
   }
-  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload?.error || `Upload failed with HTTP ${response.status}`);
+  }
   if (!payload.ok) {
     throw new Error(payload.error || "Upload failed");
   }
@@ -2954,6 +3808,8 @@ async function uploadAttachment(file) {
     size: payload.size || file.size,
     type: payload.contentType || file.type || "application/octet-stream",
     path: payload.path || "",
+    source: payload.source || "uploaded-copy",
+    copied: payload.copied !== false,
   };
 }
 
@@ -3085,6 +3941,15 @@ function applyRecoveryPayloadToPending(pending, payload) {
   if (payload.adminTopic) pending.adminTopic = payload.adminTopic;
   if (payload.taskContract) pending.taskContract = payload.taskContract;
   if (payload.roleStyle) pending.roleStyle = payload.roleStyle;
+  if (payload.interactionDirector) pending.interactionDirector = payload.interactionDirector;
+  if (Array.isArray(payload.evidenceLedger)) pending.evidenceLedger = payload.evidenceLedger;
+  if (payload.evidenceClaimGate) pending.evidenceClaimGate = payload.evidenceClaimGate;
+  if (payload.expertiseConfidence) pending.expertiseConfidence = payload.expertiseConfidence;
+  if (payload.responseComposer) pending.responseComposer = payload.responseComposer;
+  if (payload.preSendReview) pending.preSendReview = payload.preSendReview;
+  if (payload.feedbackGuidance) pending.feedbackGuidance = payload.feedbackGuidance;
+  if (payload.workingProfile) pending.workingProfile = payload.workingProfile;
+  if (payload.sessionCompass) pending.sessionCompass = payload.sessionCompass;
   if (Array.isArray(payload.deliverables)) pending.deliverables = payload.deliverables;
   if (Array.isArray(payload.assumptions)) pending.assumptions = payload.assumptions;
   if (payload.scorecard) pending.scorecard = payload.scorecard;
@@ -3107,6 +3972,7 @@ async function recoverWithEngineeringTool(thread, pending, error, messagesOverri
       body: JSON.stringify({
         kind: "aero",
         cwd: thread.cwd,
+        sessionCompass: sessionCompassForThread(thread),
         messages,
         recoveryFrom: error?.message || String(error || "load failed"),
       }),
@@ -3132,6 +3998,7 @@ async function recoverRunFailure(thread, pending, error) {
         profile: thread.profile,
         cwd: thread.cwd,
         webSearch: thread.webSearch,
+        sessionCompass: sessionCompassForThread(thread),
         error: error?.message || String(error || "load failed"),
         runtimeNotes: pending.thoughts || [],
         messages: recoveryMessagesForThread(thread, pending),
@@ -3156,6 +4023,25 @@ async function recoverRunFailure(thread, pending, error) {
     addThought(pending, "Local recovery endpoint was unavailable, so the browser wrote a safe fallback note.");
     return false;
   }
+}
+
+function cancelCurrentRun() {
+  if (!activeController) return;
+  const runId = activeRun?.id || "";
+  const pending = activeRun?.pending || null;
+  if (pending) {
+    addThought(pending, "Tinman stopped this run before the final answer.");
+  }
+  setRunState("Cancelling", "warning", "cancelling");
+  appendLog("warning", "run cancellation requested");
+  if (runId) {
+    fetch("/api/run/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ runId }),
+    }).catch((error) => appendLog("warning", `cancel receipt failed: ${error.message}`));
+  }
+  activeController.abort();
 }
 
 function staleAeroFailureMessages(thread) {
@@ -3261,7 +4147,7 @@ async function sendLiveSteer() {
   els.promptInput.value = "";
   autoSizeTextarea();
   thread.updatedAt = new Date().toISOString();
-  addThought(pending, `Tinman steering received: ${compactLabel(text, 160)}`);
+  addThought(pending, `Tinman steering queued: ${compactLabel(text, 160)}`);
   render();
   saveState();
 
@@ -3279,14 +4165,16 @@ async function sendLiveSteer() {
     if (!response.ok || !payload.ok) {
       throw new Error(payload.error || `steer ${response.status}`);
     }
-    els.runState.textContent = "Steer sent";
-    els.runState.className = "run-state warning";
+    const steerCount = Number(payload.count || 0);
+    addThought(pending, payload.message || "Steering note accepted by the active run.");
+    setRunState(steerCount > 1 ? `Steer sent (${steerCount})` : "Steer sent", "warning", "steer-sent");
     appendLog("event", `live steer sent: ${compactLabel(text, 120)}`);
+    renderMessages();
+    saveState();
   } catch (error) {
     pending.steeringFailed = true;
     addThought(pending, `Steering note could not reach the worker: ${error.message}`);
-    els.runState.textContent = "Steer failed";
-    els.runState.className = "run-state error";
+    setRunState("Steer failed", "error", "steer-failed");
     appendLog("error", `live steer failed: ${error.message}`);
   }
 }
@@ -3298,7 +4186,7 @@ async function sendPrompt() {
   }
   const thread = currentThread();
   const text = els.promptInput.value.trim();
-  let attachments = pendingAttachments.slice();
+  let attachments = normalizeAttachmentList(pendingAttachments);
   if (!thread || (!text && !attachments.length)) return;
   let editingIndex = -1;
   let editingMessage = null;
@@ -3309,8 +4197,10 @@ async function sendPrompt() {
       editingIndex = -1;
       editingMessage = null;
     }
-    if (editingMessage && !attachments.length && Array.isArray(editingMessage.attachments)) {
-      attachments = editingMessage.attachments.slice();
+    if (editingMessage && Array.isArray(editingMessage.attachments) && !composerIntent.attachmentsSeeded) {
+      attachments = attachments.length
+        ? mergeAttachmentLists(editingMessage.attachments, attachments)
+        : normalizeAttachmentList(editingMessage.attachments);
     }
   }
 
@@ -3325,6 +4215,7 @@ async function sendPrompt() {
   if (editingIndex >= 0) {
     thread.messages = thread.messages.slice(0, editingIndex);
   }
+  maybeSeedSessionCompassObjective(thread, text);
   thread.messages.push({ id: crypto.randomUUID(), role: "user", text, attachments });
   if (isUntitledThread(thread)) {
     thread.title = (text || attachments[0]?.name || "Attached file").split(/\s+/).slice(0, 7).join(" ");
@@ -3353,6 +4244,9 @@ async function sendPrompt() {
     startedAt: new Date().toISOString(),
   };
   setRunning(true);
+  setRunState("Working · request received", "warning", "request-received");
+  startActiveRunTiming();
+  saveState();
   renderMessages();
 
   activeController = new AbortController();
@@ -3371,6 +4265,7 @@ async function sendPrompt() {
         friendlinessLevel: thread.friendlinessLevel,
         humorLevel: thread.humorLevel,
         webSearch: thread.webSearch,
+        sessionCompass: sessionCompassForThread(thread),
         runId,
         messages: thread.messages.filter((message) => !message.running),
       }),
@@ -3384,24 +4279,35 @@ async function sendPrompt() {
     await readStream(response.body, (event) => handleEvent(event, pending));
     if (!pending.text.trim()) pending.text = "No final message returned.";
     if (isGenericLoadFailureText(pending.text) && isAeroCfdRecoveryPrompt(recoveryMessagesForThread(thread, pending))) {
+      setRunState("Working · recovering", "warning", "recovering");
       await recoverWithEngineeringTool(thread, pending, new Error(pending.text));
     }
+    applySessionCompassProgress(thread, pending);
     pending.running = false;
-    els.runState.textContent = "Complete";
-    els.runState.className = "run-state ok";
+    setRunState("Complete", "ok", "complete");
   } catch (error) {
     pending.running = false;
+    if (error.name === "AbortError") {
+      pending.text = "Cancelled.\n\nThis is why: Tinman stopped the run before the final answer was delivered.";
+      addThought(pending, "Run cancelled by Tinman.");
+      setRunState("Cancelled", "warning", "cancelled");
+      setRunning(false);
+      appendLog("warning", "run cancelled");
+      return;
+    }
     appendLog("error", `Run stream failed: ${error.message}`);
+    setRunState("Working · recovering", "warning", "recovering");
     await recoverRunFailure(thread, pending, error);
-    els.runState.textContent = "Recovered";
-    els.runState.className = "run-state warning";
+    setRunState("Recovered", "warning", "recovered");
   } finally {
+    stopActiveRunTiming(true);
     activeController = null;
     activeRun = null;
     thread.updatedAt = new Date().toISOString();
     await refreshAdmin();
     setRunning(false);
     render();
+    restoreComposerFocusAfterRun();
   }
 }
 
@@ -3411,17 +4317,29 @@ function analysisKindLabel(kind) {
   return "deeper engineering";
 }
 
+function deeperAnalysisRecoveryAdvice(kind, label, errorMessage = "") {
+  const error = String(errorMessage || "").toLowerCase();
+  if (kind === "aero" || kind === "structural") {
+    return `If this is a geometry job, attach the STEP/STL/3MF file or confirm the local path, then retry the dedicated ${label} button.`;
+  }
+  if (/timeout|timed out|load failed|failed to fetch|network|aborted/.test(error)) {
+    return "Retry once from this same task. If it fails again, Use normal Send with the same prompt so Codex can answer from the saved task and report the exact blocker.";
+  }
+  return "Use normal Send with the same prompt, or choose Aero/FEA only when the request includes geometry or engineering files.";
+}
+
 async function runDeeperAnalysis(kind = "auto") {
   const thread = currentThread();
   if (!thread || activeController) return;
   thread.cwd = els.cwdInput.value.trim() || config.cwd;
   const label = analysisKindLabel(kind);
   let text = els.promptInput.value.trim();
-  const attachments = pendingAttachments.slice();
+  const attachments = normalizeAttachmentList(pendingAttachments);
   if (!text && attachments.length) {
     text = `Run ${label} analysis on the attached file${attachments.length === 1 ? "" : "s"}.`;
   }
   if (text || attachments.length) {
+    maybeSeedSessionCompassObjective(thread, text);
     thread.messages.push({ id: crypto.randomUUID(), role: "user", text, attachments });
     if (isUntitledThread(thread)) {
       thread.title = (text || attachments[0]?.name || label).split(/\s+/).slice(0, 7).join(" ");
@@ -3459,6 +4377,7 @@ async function runDeeperAnalysis(kind = "auto") {
       body: JSON.stringify({
         kind,
         cwd: thread.cwd,
+        sessionCompass: sessionCompassForThread(thread),
         messages,
       }),
       signal: activeController.signal,
@@ -3471,6 +4390,15 @@ async function runDeeperAnalysis(kind = "auto") {
     pending.adminTopic = payload.adminTopic || null;
     pending.taskContract = payload.taskContract || null;
     pending.roleStyle = payload.roleStyle || null;
+    pending.interactionDirector = payload.interactionDirector || null;
+    pending.evidenceLedger = Array.isArray(payload.evidenceLedger) ? payload.evidenceLedger : [];
+    pending.evidenceClaimGate = payload.evidenceClaimGate || null;
+    pending.expertiseConfidence = payload.expertiseConfidence || null;
+    pending.responseComposer = payload.responseComposer || null;
+    pending.preSendReview = payload.preSendReview || null;
+    pending.feedbackGuidance = payload.feedbackGuidance || null;
+    pending.workingProfile = payload.workingProfile || payload.route?.workingProfile || null;
+    pending.sessionCompass = payload.sessionCompass || payload.route?.sessionCompass || null;
     pending.deliverables = Array.isArray(payload.deliverables) ? payload.deliverables : [];
     pending.assumptions = Array.isArray(payload.assumptions) ? payload.assumptions : [];
     pending.scorecard = payload.scorecard || null;
@@ -3484,7 +4412,15 @@ async function runDeeperAnalysis(kind = "auto") {
     appendLog("event", `${payload.label || label} analysis ${payload.ok ? "complete" : "needs review"}`);
   } catch (error) {
     pending.running = false;
-    pending.text = `The ${label} analysis did not finish.\n\nThis is why: ${error.message}\n\nYou should also consider: attach the geometry file and try the dedicated FEA or Aero button.`;
+    if (error.name === "AbortError") {
+      pending.text = `Cancelled.\n\nThis is why: Tinman stopped the ${label} analysis before it finished.`;
+      pending.thoughts = [...(pending.thoughts || []), `${label} analysis cancelled by Tinman.`].slice(-8);
+      setRunState("Analysis cancelled", "warning", "cancelled");
+      setRunning(false);
+      appendLog("warning", `${label} analysis cancelled`);
+      return;
+    }
+    pending.text = `The ${label} analysis did not finish.\n\nThis is why: ${error.message}\n\nYou should also consider: ${deeperAnalysisRecoveryAdvice(kind, label, error.message)}`;
     els.runState.textContent = "Analysis failed";
     els.runState.className = "run-state error";
     appendLog("error", `${label} analysis failed: ${error.message}`);
@@ -3531,7 +4467,17 @@ async function runTestBench(tests) {
     els.runState.textContent = "Tests complete";
     els.runState.className = "run-state ok";
   } catch (error) {
-    if (error.name !== "AbortError") {
+    if (error.name === "AbortError") {
+      els.runState.textContent = "Tests cancelled";
+      els.runState.className = "run-state warning";
+      if (testBench.activeId) {
+        testBench.results[testBench.activeId] = {
+          status: "cancelled",
+          checks: [{ label: "runner", passed: false, detail: "Cancelled by Tinman" }],
+          answer: "Test run cancelled.",
+        };
+      }
+    } else {
       els.runState.textContent = "Tests failed";
       els.runState.className = "run-state error";
       if (testBench.activeId) {
@@ -3584,7 +4530,19 @@ async function runBenchmarkSuite() {
     els.runState.textContent = "Benchmark complete";
     els.runState.className = "run-state ok";
   } catch (error) {
-    if (error.name !== "AbortError") {
+    if (error.name === "AbortError") {
+      els.runState.textContent = "Benchmark cancelled";
+      els.runState.className = "run-state warning";
+      if (performanceBench.activeId) {
+        performanceBench.results[performanceBench.activeId] = {
+          name: benchmarkName(performanceBench.activeId),
+          status: "cancelled",
+          durationMs: 0,
+          answer: "Benchmark run cancelled.",
+          route: null,
+        };
+      }
+    } else {
       els.runState.textContent = "Benchmark failed";
       els.runState.className = "run-state error";
       if (performanceBench.activeId) {
@@ -3649,6 +4607,7 @@ async function runGoldenTest(test, signal) {
     taskContract: null,
     contractGate: null,
     scorecard: null,
+    objectivePlan: null,
   };
   const response = await fetch("/api/run", {
     method: "POST",
@@ -3675,6 +4634,7 @@ async function runGoldenTest(test, signal) {
     if (event.type === "status") {
       run.statusEvent = event;
       if (event.route) run.route = event.route;
+      if (event.route?.objectivePlan) run.objectivePlan = event.route.objectivePlan;
     }
     if (event.type === "assistant") {
       run.answer = event.text || "";
@@ -3682,6 +4642,7 @@ async function runGoldenTest(test, signal) {
       run.taskContract = event.taskContract || null;
       run.contractGate = event.contractGate || null;
       run.scorecard = event.scorecard || null;
+      run.objectivePlan = event.objectivePlan || run.objectivePlan || run.route?.objectivePlan || null;
     }
     if (event.type === "thought") run.thoughts.push(event.text || "");
     if (event.type === "warning" || event.type === "error") run.warnings.push(event.text || event.type);
@@ -3716,6 +4677,7 @@ function evaluateGoldenTest(test, run) {
   const answer = String(run.answer || "").trim();
   const lower = answer.toLowerCase();
   const route = run.route || {};
+  const objectivePlan = run.objectivePlan || route.objectivePlan || {};
   const taskContract = run.taskContract || {};
   const contractGate = run.contractGate || {};
   const scorecard = run.scorecard || {};
@@ -3740,6 +4702,22 @@ function evaluateGoldenTest(test, run) {
       label: "engine",
       passed: route.engine === test.expectedEngine,
       detail: `Expected ${test.expectedEngine}; got ${route.engine || "none"}.`,
+    });
+  }
+
+  if (test.expectedObjectiveType) {
+    checks.push({
+      label: "objective",
+      passed: objectivePlan.objectiveType === test.expectedObjectiveType,
+      detail: `Expected ${test.expectedObjectiveType}; got ${objectivePlan.objectiveType || "none"}.`,
+    });
+  }
+
+  if (test.expectedObjectiveResponseKind) {
+    checks.push({
+      label: "objective-response",
+      passed: objectivePlan.responseKind === test.expectedObjectiveResponseKind,
+      detail: `Expected ${test.expectedObjectiveResponseKind}; got ${objectivePlan.responseKind || "none"}.`,
     });
   }
 
@@ -3862,11 +4840,33 @@ function evaluateGoldenTest(test, run) {
 function handleEvent(event, pending) {
   if (event.type === "thought") {
     trackMonitorThought(event.text || "");
+    const progressText = progressTextFromThought(event.text || "");
+    if (progressText && progressText !== lastRunStateText) {
+      setRunState(progressText, "warning", "progress");
+    }
     addThought(pending, event.text || "Working...");
     return;
   }
 
+  if (event.type === "assistant_delta") {
+    setRunState("Working · drafting answer", "warning", "drafting");
+    if (!pending.provisional) pending.text = "";
+    pending.provisional = true;
+    pending.text += event.delta || event.text || "";
+    renderMessages();
+    return;
+  }
+
   if (event.type === "assistant") {
+    if (event.partial) {
+      setRunState("Working · drafting answer", "warning", "drafting");
+      pending.provisional = true;
+      pending.text = event.text || pending.text || "";
+      renderMessages();
+      return;
+    }
+    setRunState("Working · answer received", "warning", "answer-received");
+    pending.provisional = false;
     pending.text = event.text || "";
     pending.displayMode = event.displayMode || { answerSurface: DEFAULT_ANSWER_SURFACE, showDiagnostics: false, showReceiptsWhenDone: false };
     if (event.recovery) pending.recovery = event.recovery;
@@ -3875,6 +4875,18 @@ function handleEvent(event, pending) {
     }
     pending.taskContract = event.taskContract || null;
     pending.roleStyle = event.roleStyle || null;
+    pending.compositionStyle = event.compositionStyle || null;
+    pending.interactionDirector = event.interactionDirector || null;
+    pending.evidenceLedger = Array.isArray(event.evidenceLedger) ? event.evidenceLedger : [];
+    pending.evidenceClaimGate = event.evidenceClaimGate || null;
+    pending.expertiseConfidence = event.expertiseConfidence || null;
+    pending.responseComposer = event.responseComposer || null;
+    pending.preSendReview = event.preSendReview || null;
+    pending.feedbackGuidance = event.feedbackGuidance || null;
+    pending.workingProfile = event.workingProfile || event.route?.workingProfile || null;
+    pending.sessionCompass = event.sessionCompass || event.route?.sessionCompass || null;
+    pending.sessionCompassProgress = event.sessionCompassProgress || null;
+    pending.objectivePlan = event.objectivePlan || pending.route?.objectivePlan || null;
     pending.deliverables = Array.isArray(event.deliverables) ? event.deliverables : [];
     pending.assumptions = Array.isArray(event.assumptions) ? event.assumptions : [];
     pending.scorecard = event.scorecard || null;
@@ -3889,12 +4901,14 @@ function handleEvent(event, pending) {
   }
 
   if (event.type === "warning") {
+    setRunState("Working · needs attention", "warning", "warning");
     appendLog("warning", event.text || "warning");
     return;
   }
 
   if (event.type === "error") {
     const text = event.text || "The run hit an error before returning a final answer.";
+    setRunState("Run needs recovery", "error", "error");
     appendLog("error", text);
     if (!pending.text.trim()) {
       pending.text = text;
@@ -3905,11 +4919,16 @@ function handleEvent(event, pending) {
 
   if (event.type === "status") {
     startMonitorRun(event);
+    const routeName = event.route?.project || event.effectiveProfile || event.profile || "run";
+    setRunState(`Working · route ready: ${compactLabel(routeName, 36)}`, "warning", "route-ready");
     if (event.recovery) {
       pending.recovery = event.recovery;
     }
     if (event.route) {
       pending.route = event.route;
+      if (event.route.objectivePlan && !pending.objectivePlan) {
+        pending.objectivePlan = event.route.objectivePlan;
+      }
     }
     if (event.adminTopic) {
       pending.adminTopic = event.adminTopic;
@@ -3946,6 +4965,8 @@ function handleEvent(event, pending) {
 
   if (event.type === "done") {
     finishMonitorRun();
+    pending.returnCode = event.returnCode;
+    setRunState("Finalizing", "warning", "finalizing");
     appendLog("event", `run finished code=${event.returnCode}`);
     return;
   }
@@ -3993,11 +5014,12 @@ function startEditMessage(messageId) {
   const index = findMessageIndexById(thread, messageId);
   const message = index >= 0 ? thread.messages[index] : null;
   if (!message || message.role !== "user") return;
-  composerIntent = { kind: "edit", messageId };
+  pendingAttachments = normalizeAttachmentList(message.attachments || []);
+  composerIntent = { kind: "edit", messageId, attachmentsSeeded: true };
   setComposerText(message.text || "");
-  els.runState.textContent = "Editing question";
-  els.runState.className = "run-state warning";
-  appendLog("event", "editing earlier question; next send reruns from that point");
+  renderAttachmentTray();
+  setRunState("Editing question", "warning", "editing-question");
+  appendLog("event", "editing earlier question with its attachments; next send reruns from that point");
 }
 
 function startSteerMessage(messageId) {
@@ -4039,18 +5061,22 @@ function defaultFixNoteForMessage(thread, message) {
   if (/fibreseek|fiberseek|fibreseeker|fiberseeker|hotted|hotend|toolhead|continuous fiber|continuous fibre/.test(prompt)) {
     notes.push("For public printer hardware questions, infer obvious typos such as hotted->hotend, use public/spec research when web is enabled, and answer the engineering question directly.");
   }
+  if (/(find|source|buy|purchase|get).{0,120}(for sale|in stock|available|price|seller|vendor)|where (can|do) i (buy|get|find)|where to buy/.test(prompt)) {
+    notes.push("Treat product sourcing as current-web evidence work: find exact seller/source links, verify exact-match wording, and mention price/stock/shipping only when a source proves it.");
+  }
   if (!notes.length) {
     notes.push("Answer the actual question directly, explain why, and include what Tinman should consider or verify next.");
   }
   return notes.join(" ");
 }
 
-async function sendMessageFeedback(messageId, rating) {
+async function sendMessageFeedback(messageId, rating, feedbackCategory = "") {
   const thread = currentThread();
   const message = findMessageById(thread, messageId);
   if (!thread || !message || message.feedback === "saving") return;
 
-  const note = rating === "fix" ? defaultFixNoteForMessage(thread, message) : "";
+  const category = rating === "fix" ? String(feedbackCategory || "") : "";
+  const note = rating === "fix" && !category ? defaultFixNoteForMessage(thread, message) : "";
 
   const previousFeedback = message.feedback;
   message.feedback = "saving";
@@ -4063,12 +5089,23 @@ async function sendMessageFeedback(messageId, rating) {
       body: JSON.stringify({
         rating,
         note,
+        feedbackCategory: category,
         prompt: latestUserPromptForMessage(thread, message),
         answer: message.text || "",
         messages: thread.messages.filter((item) => !item.running).slice(-8),
         cwd: thread.cwd || config.cwd,
         webSearch: thread.webSearch || config.webSearch,
         route: message.route || {},
+        objectivePlan: message.objectivePlan || message.route?.objectivePlan || {},
+        compositionStyle: message.compositionStyle || {},
+        interactionDirector: message.interactionDirector || {},
+        evidenceLedger: Array.isArray(message.evidenceLedger) ? message.evidenceLedger : [],
+        evidenceClaimGate: message.evidenceClaimGate || {},
+        expertiseConfidence: message.expertiseConfidence || {},
+        responseComposer: message.responseComposer || {},
+        preSendReview: message.preSendReview || {},
+        feedbackGuidance: message.feedbackGuidance || {},
+        taskContract: message.taskContract || {},
         projectId: message.route?.projectId || message.adminTopic?.projectId || "general",
       }),
     });
@@ -4076,12 +5113,25 @@ async function sendMessageFeedback(messageId, rating) {
     const payload = await response.json();
     if (!payload.ok) throw new Error(payload.error || "feedback not saved");
     message.feedback = rating;
-    message.feedbackNote = note;
+    message.feedbackNote = payload.record?.note || note;
+    message.feedbackCategory = payload.record?.feedbackCategory || category;
+    message.feedbackReinforcement = rating === "good"
+      ? feedbackReinforcementLabels(payload.record?.feedbackGuidance || message.feedbackGuidance)
+      : [];
     message.feedbackGoldenTest = payload.goldenTest || null;
+    message.feedbackInteractionRegression = payload.interactionRegression || null;
     message.feedbackSelfHealing = payload.selfHealing?.event?.patchQueued || payload.selfHealing?.event || null;
+    if (payload.repairAction?.action === "replace-answer" && payload.repairAction.answer) {
+      message.text = payload.repairAction.answer;
+      message.route = payload.repairAction.route || message.route || {};
+      message.feedbackSelfHealing = payload.repairAction;
+      addThought(message, payload.repairAction.summary || "Fix this produced a repaired answer.");
+      appendLog("event", "Fix this replaced the answer with a repaired artifact result");
+    }
     if (payload.goldenTests) config.goldenTests = payload.goldenTests;
     if (payload.admin) config.admin = payload.admin;
     if (payload.goldenTest) appendLog("status", `Regression test saved: ${payload.goldenTest.name || payload.goldenTest.id}`);
+    if (payload.interactionRegression) appendLog("status", `Interaction regression saved: ${payload.interactionRegression.name || payload.interactionRegression.id}`);
     appendLog("event", rating === "fix" ? "quality lesson saved" : "positive answer feedback saved");
     if (rating === "fix" && isGenericLoadFailureText(message.text)) {
       const scopedMessages = recoveryMessagesForThread(thread, message);
@@ -4199,6 +5249,55 @@ async function repairServerCrashRecovery(messageId) {
   }
 }
 
+function parseJsonStreamLine(line) {
+  let text = String(line || "").trim();
+  if (!text) return [];
+  if (text.startsWith("data:")) text = text.slice(5).trim();
+  if (!text || text === "[DONE]") return [];
+  try {
+    return [JSON.parse(text)];
+  } catch (_error) {
+    // Fall through to tolerate accidental concatenated JSON objects.
+  }
+  const events = [];
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+    if (char === "{") {
+      if (depth === 0) start = index;
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        try {
+          events.push(JSON.parse(text.slice(start, index + 1)));
+        } catch (_error) {
+          return [];
+        }
+        start = -1;
+      }
+    }
+  }
+  return events;
+}
+
 async function readStream(body, onEvent) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -4206,11 +5305,12 @@ async function readStream(body, onEvent) {
 
   const processLine = (line) => {
     if (!line.trim()) return;
-    try {
-      onEvent(JSON.parse(line));
-    } catch (_error) {
+    const events = parseJsonStreamLine(line);
+    if (!events.length) {
       appendLog("warning", line);
+      return;
     }
+    for (const event of events) onEvent(event);
   };
 
   while (true) {
@@ -4223,6 +5323,7 @@ async function readStream(body, onEvent) {
       processLine(line);
     }
   }
+  buffer += decoder.decode();
   processLine(buffer);
 }
 
@@ -4254,6 +5355,14 @@ function normalizeFriendliness(value) {
 
 function normalizeHumor(value) {
   return ["off", "light", "playful"].includes(value) ? value : "light";
+}
+
+function normalizeTextScale(value) {
+  return value === "large" ? "large" : "normal";
+}
+
+function applyTextScale(value) {
+  document.documentElement.dataset.textScale = normalizeTextScale(value);
 }
 
 function clamp(value, min, max) {
@@ -4303,6 +5412,74 @@ function engineValue(engine) {
   return values[engine] || 1;
 }
 
+function focusTarget(element) {
+  if (!element) return;
+  element.focus({ preventScroll: false });
+  if (typeof element.scrollIntoView === "function") {
+    element.scrollIntoView({ block: "nearest" });
+  }
+}
+
+function restoreComposerFocusAfterRun() {
+  const active = document.activeElement;
+  const shouldRestore = !active
+    || active === document.body
+    || active === els.promptInput
+    || active === els.sendButton
+    || active === els.cancelRunButton;
+  if (shouldRestore) focusTarget(els.promptInput);
+}
+
+function isTypingTarget(target) {
+  if (!target) return false;
+  if (target.isContentEditable) return true;
+  const tagName = String(target.tagName || "").toLowerCase();
+  return ["input", "textarea", "select"].includes(tagName);
+}
+
+function handleGlobalKeyboardShortcuts(event) {
+  if (event.defaultPrevented) return;
+  const key = String(event.key || "").toLowerCase();
+  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+    event.preventDefault();
+    if (!els.sendButton.disabled) sendPrompt();
+    return;
+  }
+  if ((event.metaKey || event.ctrlKey) && event.key === "." && activeController) {
+    event.preventDefault();
+    cancelCurrentRun();
+    return;
+  }
+  if (event.key === "Escape" && document.activeElement !== els.promptInput) {
+    event.preventDefault();
+    focusTarget(els.promptInput);
+    return;
+  }
+  if (!event.altKey || event.metaKey || event.ctrlKey || event.shiftKey || isTypingTarget(event.target)) {
+    return;
+  }
+  if (key === "c") {
+    event.preventDefault();
+    state.sidebarView = "chats";
+    render();
+    focusTarget(els.conversation);
+    return;
+  }
+  if (key === "l") {
+    event.preventDefault();
+    els.logPanel.classList.remove("collapsed");
+    state.runLogPanelMinimized = false;
+    renderRailPanels();
+    saveState();
+    focusTarget(els.logOutput);
+    return;
+  }
+  if (key === "n" && !activeController) {
+    event.preventDefault();
+    els.newThreadButton.click();
+  }
+}
+
 els.newThreadButton.addEventListener("click", () => {
   if (activeController) return;
   createThread();
@@ -4310,6 +5487,25 @@ els.newThreadButton.addEventListener("click", () => {
   render();
   els.promptInput.focus();
 });
+
+if (els.mobileNewThreadButton) {
+  els.mobileNewThreadButton.addEventListener("click", () => {
+    if (activeController) return;
+    createThread();
+    state.sidebarView = "chats";
+    render();
+    els.promptInput.focus();
+  });
+}
+
+if (els.mobileViewSelect) {
+  els.mobileViewSelect.addEventListener("change", () => {
+    if (activeController) return;
+    state.sidebarView = els.mobileViewSelect.value || "chats";
+    if (state.sidebarView === "admin") refreshAdmin();
+    render();
+  });
+}
 
 els.projectsNavButton.addEventListener("click", () => {
   if (activeController) return;
@@ -4338,6 +5534,7 @@ els.testsNavButton.addEventListener("click", () => {
 
 els.clearThreadsButton.addEventListener("click", () => {
   if (activeController) return;
+  if (!window.confirm("Clear all chats?")) return;
   state.threads = [];
   createThread();
   render();
@@ -4360,6 +5557,13 @@ els.copyButton.addEventListener("click", async () => {
 });
 
 els.conversation.addEventListener("click", (event) => {
+  const promptStarter = event.target.closest("[data-prompt-starter]");
+  if (promptStarter && !activeController) {
+    event.preventDefault();
+    setComposerText(promptStarter.dataset.promptStarter || "");
+    setRunState("Prompt ready", "warning", "prompt-ready");
+    return;
+  }
   const localPathLink = event.target.closest("[data-local-path]");
   if (localPathLink) {
     event.preventDefault();
@@ -4386,12 +5590,39 @@ els.conversation.addEventListener("click", (event) => {
   }
   const button = event.target.closest("[data-feedback-id]");
   if (!button || activeController) return;
-  sendMessageFeedback(button.dataset.feedbackId, button.dataset.feedbackRating);
+  const actions = button.closest(".feedback-actions");
+  const category = actions?.querySelector("[data-feedback-category-for]")?.value || "";
+  sendMessageFeedback(button.dataset.feedbackId, button.dataset.feedbackRating, category);
 });
 
 els.toggleLogButton.addEventListener("click", () => {
   els.logPanel.classList.toggle("collapsed");
+  renderRailPanels();
 });
+
+if (els.toggleMonitorPanelButton) {
+  els.toggleMonitorPanelButton.addEventListener("click", () => {
+    state.monitorPanelMinimized = !state.monitorPanelMinimized;
+    renderRailPanels();
+    saveState();
+    if (!state.monitorPanelMinimized) {
+      window.requestAnimationFrame(drawMonitor);
+    }
+  });
+}
+
+if (els.toggleRunLogPanelButton) {
+  els.toggleRunLogPanelButton.addEventListener("click", () => {
+    state.runLogPanelMinimized = !state.runLogPanelMinimized;
+    renderRailPanels();
+    saveState();
+    if (!state.runLogPanelMinimized) {
+      window.requestAnimationFrame(() => {
+        els.logOutput.scrollTop = els.logOutput.scrollHeight;
+      });
+    }
+  });
+}
 
 els.cwdInput.addEventListener("change", () => {
   const thread = currentThread();
@@ -4449,6 +5680,14 @@ els.humorSelect.addEventListener("change", () => {
   if (activeController) return;
   const thread = currentThread();
   thread.humorLevel = normalizeHumor(els.humorSelect.value);
+  saveState();
+  renderRunControls();
+});
+
+els.textScaleSelect.addEventListener("change", () => {
+  if (activeController) return;
+  const thread = currentThread();
+  thread.textScale = normalizeTextScale(els.textScaleSelect.value);
   saveState();
   renderRunControls();
 });
@@ -4526,8 +5765,10 @@ els.promptInput.addEventListener("keydown", (event) => {
     sendPrompt();
   }
 });
+document.addEventListener("keydown", handleGlobalKeyboardShortcuts);
 
 els.sendButton.addEventListener("click", sendPrompt);
+if (els.cancelRunButton) els.cancelRunButton.addEventListener("click", cancelCurrentRun);
 if (els.runDeeperButton) els.runDeeperButton.addEventListener("click", () => runDeeperAnalysis("auto"));
 if (els.runAeroButton) els.runAeroButton.addEventListener("click", () => runDeeperAnalysis("aero"));
 if (els.runStructuralButton) els.runStructuralButton.addEventListener("click", () => runDeeperAnalysis("structural"));
@@ -4547,8 +5788,54 @@ els.refreshAdminButton.addEventListener("click", () => {
   refreshAdmin();
 });
 
+if (els.toggleSessionCompassButton) {
+  els.toggleSessionCompassButton.addEventListener("click", () => {
+    const thread = currentThread();
+    if (!thread || activeController) return;
+    thread.sessionCompassOpen = !thread.sessionCompassOpen;
+    saveState();
+    render();
+  });
+}
+
+if (els.sessionCompassForm) {
+  els.sessionCompassForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveSessionCompass();
+  });
+}
+
+if (els.clearSessionCompassButton) {
+  els.clearSessionCompassButton.addEventListener("click", clearSessionCompass);
+}
+
+if (els.workingProfileProjectSelect) {
+  els.workingProfileProjectSelect.addEventListener("change", () => {
+    if (activeController) return;
+    activeWorkingProfileProjectId = els.workingProfileProjectSelect.value || "general";
+    renderWorkingProfile();
+  });
+}
+
+if (els.workingProfileForm) {
+  els.workingProfileForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveWorkingProfile();
+  });
+}
+
+if (els.clearWorkingProfileButton) {
+  els.clearWorkingProfileButton.addEventListener("click", clearWorkingProfile);
+}
+
 els.warmModelButton.addEventListener("click", startWarmup);
 els.runBenchmarkButton.addEventListener("click", runBenchmarkSuite);
 els.packageHealthButton.addEventListener("click", runPackageHealth);
+if (els.packageHealthFilterButton) {
+  els.packageHealthFilterButton.addEventListener("click", () => {
+    config.packageHealthBlockersOnly = !config.packageHealthBlockersOnly;
+    renderPackageHealth();
+  });
+}
 els.selfHealButton.addEventListener("click", runSelfHealingCheck);
 if (els.refreshPrintingPackButton) els.refreshPrintingPackButton.addEventListener("click", refreshPrintingPackSources);

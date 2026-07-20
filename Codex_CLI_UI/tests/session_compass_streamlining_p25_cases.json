@@ -1,0 +1,34 @@
+{
+  "suite": "session-compass-streamlining-p25",
+  "provenance": {
+    "source": "Uses the redacted high-frequency continuation pattern to ensure a next-step reply stays decisive and carries only the continuity details that help the user act."
+  },
+  "cases": [
+    {
+      "id": "next-step-reply-is-compact-but-complete",
+      "messages": [{"role": "user", "text": "Great, what's next?"}],
+      "sessionCompass": {
+        "phase": "verifying",
+        "objective": "Finish the dashboard interaction work.",
+        "decisions": "Keep the right rail minimized by default.",
+        "evidence": "The desktop panel smoke check passed.",
+        "openQuestions": "Which compact status should be visible first?",
+        "nextStep": "Verify the panel on mobile."
+      },
+      "required": [
+        "Current state: Verifying.",
+        "Recommended next move: Verify the panel on mobile.",
+        "This advances Finish the dashboard interaction work.",
+        "Latest evidence: The desktop panel smoke check passed.",
+        "Decision already made: Keep the right rail minimized by default.",
+        "Keep open: Which compact status should be visible first?"
+      ],
+      "forbidden": [
+        "It advances the current objective:",
+        "It stays within the decision already made:",
+        "Keep this open while we do it:"
+      ],
+      "maxParagraphs": 3
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "suite": "feedback-traceability-p9",
+  "provenance": {
+    "source": "Links recurring derived human-feedback themes to redacted conversation scenarios without copying feedback text.",
+    "humanFeedbackRecords": 29,
+    "themeCounts": {
+      "misunderstood": 9,
+      "missing-evidence": 10,
+      "wrong-expertise": 3,
+      "too-generic": 2
+    }
+  },
+  "policy": {
+    "minimumThemeCount": 4,
+    "minimumScenarioCount": 2,
+    "themes": [
+      {
+        "id": "misunderstood",
+        "minimumSignals": 2,
+        "scenarioIds": [
+          "newest-project-pivot-replaces-earlier-focus",
+          "ambiguous-repair-asks-one-unblocker"
+        ]
+      },
+      {
+        "id": "missing-evidence",
+        "minimumSignals": 2,
+        "scenarioIds": [
+          "current-source-judgment-stays-traceable",
+          "recommendation-separates-source-and-inference",
+          "source-bounded-study-honors-authority"
+        ]
+      },
+      {
+        "id": "wrong-expertise",
+        "minimumSignals": 2,
+        "scenarioIds": [
+          "artifact-revision-stays-in-deliverable-domain",
+          "cross-project-pivot-keeps-context-separate"
+        ]
+      },
+      {
+        "id": "too-generic",
+        "minimumSignals": 2,
+        "scenarioIds": [
+          "direct-preference-avoids-generic-detour",
+          "personable-expert-guidance"
+        ]
+      }
+    ]
+  }
+}

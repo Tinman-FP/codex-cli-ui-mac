@@ -1,0 +1,39 @@
+{
+  "suite": "clarification-quality-p21",
+  "provenance": {
+    "source": "Uses redacted synthetic prompts to verify concise, single-question clarification behavior and preserve known-context direct-answer exceptions."
+  },
+  "cases": [
+    {
+      "id": "same-action-needs-visible-target",
+      "messages": [{"role": "user", "text": "Do the same for the other printer."}],
+      "requiredTerms": ["previous action", "exact target"],
+      "maxWords": 16,
+      "expectedResponseKind": "clarify-before-answer"
+    },
+    {
+      "id": "strength-needs-part-and-failure-mode",
+      "messages": [{"role": "user", "text": "Can you make it stronger?"}],
+      "requiredTerms": ["part", "failure mode", "tensile load"],
+      "maxWords": 24,
+      "expectedResponseKind": "clarify-before-answer"
+    },
+    {
+      "id": "referent-needs-objective",
+      "messages": [{"role": "user", "text": "Fix it."}],
+      "requiredTerms": ["refer to", "result"],
+      "maxWords": 18,
+      "expectedResponseKind": "clarify-before-answer"
+    },
+    {
+      "id": "materials-comparison-is-not-blocked",
+      "messages": [{"role": "user", "text": "What is stronger PET-CF or PCTG-CF?"}],
+      "expectEmpty": true
+    },
+    {
+      "id": "known-local-fix-is-not-blocked",
+      "messages": [{"role": "user", "text": "The Bambu H2D is online and printing but in Model Health it shows offline. Please fix this."}],
+      "expectEmpty": true
+    }
+  ]
+}

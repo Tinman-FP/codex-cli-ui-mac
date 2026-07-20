@@ -1,0 +1,85 @@
+{
+  "suite": "feedback-learning-outcomes-p19",
+  "provenance": {
+    "source": "Uses synthetic in-memory interaction-ledger entries to verify that outcome telemetry distinguishes a post-repair positive signal from an unresolved recurring correction."
+  },
+  "records": [
+    {
+      "id": "p19-repair-evidence",
+      "timestamp": 10,
+      "rating": "fix",
+      "provenance": "human",
+      "feedbackCategory": "missing-evidence",
+      "projectId": "feedback-outcomes-p19",
+      "project": "Feedback Outcomes P19",
+      "objectivePlan": {
+        "objectiveType": "cad-repair",
+        "responseKind": "answer-or-act",
+        "evidenceNeed": "source-backed"
+      }
+    },
+    {
+      "id": "p19-validated-evidence",
+      "timestamp": 20,
+      "rating": "good",
+      "provenance": "human",
+      "projectId": "feedback-outcomes-p19",
+      "project": "Feedback Outcomes P19",
+      "objectivePlan": {
+        "objectiveType": "cad-repair",
+        "responseKind": "answer-or-act",
+        "evidenceNeed": "source-backed"
+      },
+      "feedbackGuidance": {
+        "items": [
+          {
+            "category": "missing-evidence",
+            "label": "Untrusted label",
+            "kind": "untrusted-kind",
+            "scope": "objective",
+            "raw": "Raw value that must not affect outcome telemetry"
+          }
+        ]
+      }
+    },
+    {
+      "id": "p19-repair-expertise-one",
+      "timestamp": 30,
+      "rating": "fix",
+      "provenance": "human",
+      "feedbackCategory": "wrong-expertise",
+      "projectId": "feedback-outcomes-p19",
+      "project": "Feedback Outcomes P19",
+      "objectivePlan": {
+        "objectiveType": "cad-repair",
+        "responseKind": "answer-or-act",
+        "evidenceNeed": "source-backed"
+      }
+    },
+    {
+      "id": "p19-repair-expertise-two",
+      "timestamp": 40,
+      "rating": "fix",
+      "provenance": "human",
+      "feedbackCategory": "wrong-expertise",
+      "projectId": "feedback-outcomes-p19",
+      "project": "Feedback Outcomes P19",
+      "objectivePlan": {
+        "objectiveType": "cad-repair",
+        "responseKind": "answer-or-act",
+        "evidenceNeed": "source-backed"
+      }
+    }
+  ],
+  "expected": {
+    "repairSignalCount": 3,
+    "postRepairValidationSignalCount": 1,
+    "validatedPatternCount": 1,
+    "awaitingValidationPatternCount": 1,
+    "recurringPatternCount": 1,
+    "patternStatus": {
+      "missing-evidence": "validated",
+      "wrong-expertise": "awaiting-validation"
+    }
+  }
+}

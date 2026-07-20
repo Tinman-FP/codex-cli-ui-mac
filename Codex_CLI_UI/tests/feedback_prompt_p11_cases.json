@@ -1,0 +1,52 @@
+{
+  "suite": "feedback-prompt-p11",
+  "provenance": {
+    "source": "Exercises feedback guidance propagation with temporary synthetic feedback records; no raw user feedback or durable feedback state is used."
+  },
+  "policy": {
+    "minimumCaseCount": 4,
+    "minimumSurfaceCount": 5
+  },
+  "cases": [
+    {
+      "id": "explicit-too-generic-uses-category-lesson",
+      "feedbackCategory": "too-generic",
+      "messages": [{"role": "user", "text": "What should I call you?"}],
+      "route": {},
+      "note": "The answer took too long to reach the direct answer.",
+      "expectedCategory": "too-generic",
+      "expectedLabel": "Too generic",
+      "expectedLessonTerm": "Make a concrete recommendation"
+    },
+    {
+      "id": "derived-misunderstood-reaches-all-answer-prompts",
+      "failureKind": "wrong-objective",
+      "messages": [{"role": "user", "text": "Keep this repair focused on the requested CAD artifact."}],
+      "route": {"specialist": "CAD engineer"},
+      "note": "The prior answer drifted into a different objective.",
+      "expectedCategory": "misunderstood",
+      "expectedLabel": "Misunderstood me",
+      "expectedLessonTerm": "Reconstruct the user's actual goal"
+    },
+    {
+      "id": "derived-missing-evidence-reaches-all-answer-prompts",
+      "failureKind": "missing-source-evidence",
+      "messages": [{"role": "user", "text": "Which material does the current datasheet support for this use?"}],
+      "route": {"objectivePlan": {"evidenceNeed": "scientific-or-datasheet-evidence"}},
+      "note": "The material recommendation lacked a source boundary.",
+      "expectedCategory": "missing-evidence",
+      "expectedLabel": "Missing evidence",
+      "expectedLessonTerm": "Ground consequential claims"
+    },
+    {
+      "id": "derived-wrong-expertise-reaches-all-answer-prompts",
+      "failureKind": "wrong-artifact-route",
+      "messages": [{"role": "user", "text": "Repair the Fusion assembly constraints in the deliverable."}],
+      "route": {"specialist": "CAD engineer"},
+      "note": "The response used the wrong technical domain.",
+      "expectedCategory": "wrong-expertise",
+      "expectedLabel": "Wrong expertise",
+      "expectedLessonTerm": "right subject-matter posture"
+    }
+  ]
+}
