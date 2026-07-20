@@ -1,0 +1,28 @@
+{
+  "suite": "opening-variety-p23",
+  "provenance": {
+    "source": "Uses redacted synthetic conversation turns to verify the pre-send reviewer removes only repeated conversational acknowledgements, not direct technical decisions."
+  },
+  "cases": [
+    {
+      "id": "repeated-acknowledgement-is-trimmed",
+      "messages": [
+        {"role": "assistant", "text": "That makes sense. Start by checking the current configuration."},
+        {"role": "user", "text": "What should I change next?"}
+      ],
+      "answer": "That makes sense. Start with the source-of-truth configuration, then make the smallest reversible change.",
+      "expectedPrefix": "Start with the source-of-truth configuration",
+      "expectsRevision": true
+    },
+    {
+      "id": "technical-decision-is-preserved",
+      "messages": [
+        {"role": "assistant", "text": "Use ASA for exposed outdoor parts."},
+        {"role": "user", "text": "What material should I use for the next outdoor bracket?"}
+      ],
+      "answer": "Use ASA for the next outdoor bracket because UV and heat resistance matter more than ease of printing.",
+      "expectedPrefix": "Use ASA for the next outdoor bracket",
+      "expectsRevision": false
+    }
+  ]
+}

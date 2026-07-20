@@ -1,0 +1,30 @@
+{
+  "suite": "feedback-provenance-p7",
+  "provenance": {
+    "source": "Separates human learning from synthetic audit feedback so conversation preferences remain evidence-based."
+  },
+  "cases": [
+    {
+      "id": "human-good-feedback-learns",
+      "kind": "record",
+      "feedbackProvenance": "human",
+      "expectedProvenance": "human",
+      "expectsInteractionLearning": true,
+      "expectsResponseExample": true
+    },
+    {
+      "id": "synthetic-good-feedback-does-not-learn",
+      "kind": "record",
+      "feedbackProvenance": "test",
+      "expectedProvenance": "test",
+      "expectsInteractionLearning": false,
+      "expectsResponseExample": false
+    },
+    {
+      "id": "legacy-runtime-privacy-audit-is-excluded",
+      "kind": "legacy",
+      "projectId": "runtime-privacy",
+      "expectedProvenance": "test"
+    }
+  ]
+}

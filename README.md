@@ -4,18 +4,15 @@ A local Mac UI for the bundled Codex CLI and the local Ollama profiles.
 
 ## Run
 
-```bash
-cd /Users/williamtinney/Documents/Codex/2026-06-30/ca/outputs/codex-cli-ui
-python3 server.py
-```
-
-Open:
+If you downloaded the public ZIP, unzip it and double-click `install.command`. It installs the app source into:
 
 ```text
-http://127.0.0.1:8765
+$HOME/Applications/Codex_CLI_UI
 ```
 
-Or launch the standalone Mac app:
+The installer is intentionally conservative. It checks for `python3`, `ollama`, and Codex CLI, creates local `data/` and `logs/` folders, starts the UI when prerequisites are present, and does not install large tools, models, API keys, or private machine inventory.
+
+Preferred launch:
 
 ```bash
 open -a "Codex CLI UI"
@@ -23,10 +20,25 @@ open -a "Codex CLI UI"
 
 The standalone app is a native AppKit/WebKit wrapper. It opens Codex CLI UI in its own window, starts `server.py` if the local service is not already running, and only uses the system browser when you click an external source link.
 
+Manual server run:
+
+```bash
+cd "$HOME/Applications/Codex_CLI_UI"
+python3 server.py
+```
+
+Manual browser fallback:
+
+```text
+http://127.0.0.1:8765
+```
+
+The installer and restart script prefer the native app. They only open the raw local URL in your default browser when `CODEX_CLI_UI_OPEN_BROWSER=1` is set.
+
 ## Native App Build
 
 ```bash
-cd /Users/williamtinney/Documents/Codex/2026-06-30/ca/outputs/codex-cli-ui
+cd "$HOME/Applications/Codex_CLI_UI"
 mkdir -p build
 clang -fobjc-arc -framework Cocoa -framework WebKit native/CodexCLIUI.m -o build/CodexCLIUI
 ```
@@ -40,7 +52,7 @@ codesign --force --deep --sign - "/Applications/Codex CLI UI.app"
 ## Environment Overrides
 
 ```bash
-CODEX_PROFILE=local-oss CODEX_CWD=/Users/williamtinney/Documents/Codex python3 server.py
+CODEX_PROFILE=local-oss CODEX_CWD="$HOME/Documents/Codex" python3 server.py
 ```
 
 The server binds to `127.0.0.1` by default and streams `codex exec --json` output to the browser.
@@ -112,6 +124,14 @@ Run Tinman's curated engineering-domain sample set:
 ```bash
 python3 run_golden_batch.py --group "Domain Samples" --source domain-sample --limit 56
 ```
+
+Run the focused cross-domain conversation-quality suite:
+
+```bash
+python3 tools/live_feedback_smoke.py --expert-conversation --json
+```
+
+This runs six representative conversations covering correction recovery, technical context carryover, evidence-backed follow-up, product/UI judgment, focused clarification, and natural conversational guidance.
 
 The Domain Samples group covers 3D printing, CNC machining, solar/wind power, aerodynamics, CFD, engineering, and aviation. These are public-safe built-in guardrails, not private chat-history exports.
 
@@ -186,6 +206,15 @@ Pre-package check:
 python3 checks/verify_package_health.py
 ```
 
+Public-safe export dry run:
+
+```bash
+python3 tools/build_public_export.py --zip
+python3 tools/release_privacy_scan.py --root build/public-export/codex-cli-ui-public
+```
+
+Create public ZIPs from `build/public-export/codex-cli-ui-public.zip`, not from the live local working tree. The live tree intentionally contains Tinman's private machine inventory, local test history, generated work, and source-vault data under ignored runtime folders.
+
 Local tool API examples:
 
 ```bash
@@ -200,5 +229,5 @@ curl -X POST http://127.0.0.1:8765/api/tools/recover \
 ```
 
 ```bash
-/Users/williamtinney/Applications/Codex_CLI_UI/.venv/bin/python
+$HOME/Applications/Codex_CLI_UI/.venv/bin/python
 ```

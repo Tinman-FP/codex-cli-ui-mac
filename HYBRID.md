@@ -35,9 +35,9 @@ Use `Cloud Research` when you deliberately want OpenAI's hosted web-search/reaso
 ## Installed Pieces
 
 - Official OpenAI CLI: `/opt/homebrew/bin/openai`
-- Local Python agent environment: `/Users/williamtinney/Applications/Codex_CLI_UI/.venv`
+- Local Python agent environment: `$HOME/Applications/Codex_CLI_UI/.venv`
 - Python packages staged there: `openai`, `openai-agents`, `openai-codex`, `python-dotenv`
-- Local Research cache: `/Users/williamtinney/Applications/Codex_CLI_UI/data/local_research_cache.sqlite3`
+- Local Research cache: `$HOME/Applications/Codex_CLI_UI/data/local_research_cache.sqlite3`
 - Local Research model: `gpt-oss-20b` through Ollama on `127.0.0.1:11434`
 - Local Coder model: `qwen2.5-coder-7b` through Ollama
 - Local Review model: `deepseek-r1-8b` through Ollama

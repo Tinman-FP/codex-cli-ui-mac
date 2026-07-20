@@ -1,0 +1,95 @@
+{
+  "suite": "interaction-director-p1",
+  "cases": [
+    {
+      "id": "natural-expert-conversation",
+      "messages": [{"role": "user", "text": "Let's talk through how this should feel in normal conversation."}],
+      "route": {"objectivePlan": {"responseKind": "answer-with-guidance"}},
+      "contract": {"kind": "General help", "hardGate": false},
+      "composition": {"name": "conversational"},
+      "expectedInteractionMode": "conversation",
+      "expectedComposerMode": "conversation",
+      "expectedAnswerShape": "natural-answer-then-reason"
+    },
+    {
+      "id": "roadmap-recommends-next-move",
+      "messages": [{"role": "user", "text": "What is the next step in the product roadmap?"}],
+      "route": {"objectivePlan": {"objectiveType": "product-plan", "responseKind": "answer-with-tradeoffs"}},
+      "contract": {"kind": "General help", "hardGate": false},
+      "composition": {"name": "proof-structured"},
+      "expectedInteractionMode": "planning",
+      "expectedComposerMode": "conversation",
+      "expectedAnswerShape": "decision-options-recommendation"
+    },
+    {
+      "id": "timeboxed-plan-uses-verified-milestones",
+      "messages": [{"role": "user", "text": "What would the plan for the next 12 hours look like to finish the interaction work?"}],
+      "route": {"objectivePlan": {"objectiveType": "product-plan", "responseKind": "answer-with-tradeoffs"}},
+      "contract": {"kind": "General help", "hardGate": false},
+      "composition": {"name": "proof-structured"},
+      "expectedInteractionMode": "planning",
+      "expectedComposerMode": "conversation",
+      "expectedAnswerShape": "timeboxed-plan-with-verification"
+    },
+    {
+      "id": "research-separates-evidence-and-inference",
+      "messages": [{"role": "user", "text": "What does the current datasheet say about this material?"}],
+      "route": {"engine": "local-research", "objectivePlan": {"evidenceNeed": "scientific-or-datasheet-evidence"}},
+      "contract": {"kind": "Research", "hardGate": false},
+      "composition": {"name": "proof-structured"},
+      "expectedInteractionMode": "research",
+      "expectedComposerMode": "evidence",
+      "expectedAnswerShape": "recommendation-evidence-boundary"
+    },
+    {
+      "id": "approved-next-step-executes-with-proof",
+      "messages": [{"role": "user", "text": "Let's do it."}],
+      "route": {"objectivePlan": {"responseKind": "execute-session-next-step"}},
+      "contract": {"kind": "Code/config", "hardGate": true},
+      "composition": {"name": "proof-structured"},
+      "expectedInteractionMode": "execution",
+      "expectedComposerMode": "action-result",
+      "expectedAnswerShape": "outcome-proof-next-step"
+    },
+    {
+      "id": "verification-leads-with-receipt",
+      "messages": [{"role": "user", "text": "Verify the package health result."}],
+      "route": {"objectivePlan": {"responseKind": "answer-or-act"}},
+      "contract": {"kind": "Code/config", "hardGate": false},
+      "composition": {"name": "proof-structured"},
+      "expectedInteractionMode": "verification",
+      "expectedComposerMode": "action-result",
+      "expectedAnswerShape": "result-proof-next-check"
+    },
+    {
+      "id": "repair-requires-verification",
+      "messages": [{"role": "user", "text": "Fix the browser crash and prove the repair."}],
+      "route": {"objectivePlan": {"responseKind": "answer-or-act"}},
+      "contract": {"kind": "Code/config", "hardGate": false},
+      "composition": {"name": "proof-structured"},
+      "expectedInteractionMode": "repair",
+      "expectedComposerMode": "action-result",
+      "expectedAnswerShape": "diagnosis-change-verification"
+    },
+    {
+      "id": "printer-restart-stays-safety-gated",
+      "messages": [{"role": "user", "text": "Restart Klipper on the Qidi."}],
+      "route": {"objectivePlan": {"responseKind": "answer-or-act"}},
+      "contract": {"kind": "Klipper restart safety", "hardGate": true, "mustDo": ["require target printer", "require idle/standby state"]},
+      "composition": {"name": "proof-structured"},
+      "expectedInteractionMode": "safety",
+      "expectedComposerMode": "action-result",
+      "expectedAnswerShape": "conditional-decision-safety-gate"
+    },
+    {
+      "id": "ambiguous-repair-asks-one-question",
+      "messages": [{"role": "user", "text": "Can you fix it?"}],
+      "route": {"objectivePlan": {"responseKind": "clarify-before-answer"}},
+      "contract": {"kind": "General help", "hardGate": false},
+      "composition": {"name": "proof-structured"},
+      "expectedInteractionMode": "clarification",
+      "expectedComposerMode": "clarification",
+      "expectedAnswerShape": "one-focused-clarification"
+    }
+  ]
+}

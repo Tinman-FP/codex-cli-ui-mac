@@ -1,0 +1,33 @@
+{
+  "suite": "conversation-quality-coverage-p6",
+  "provenance": {
+    "source": "Coverage policy derived from the July 17, 2026 local Codex usage analysis without copying raw chat transcripts.",
+    "humanConversationSessions": 67,
+    "humanUserTurns": 7980
+  },
+  "policy": {
+    "minimumCaseCount": 20,
+    "minimumMultiTurnCases": 2,
+    "minimumSourceBoundaryCases": 3,
+    "requiredScenarioIds": [
+      "timeboxed-autonomy-keeps-moving",
+      "timeboxed-plan-has-verified-milestones",
+      "newest-project-pivot-replaces-earlier-focus",
+      "current-source-judgment-stays-traceable",
+      "review-leads-with-findings-and-test-risk"
+    ],
+    "coverageMinimums": {
+      "direct-question": 2,
+      "build-or-change": 3,
+      "research-or-recommend": 3,
+      "verification": 4,
+      "evidence": 3,
+      "repair": 3,
+      "execution-authorization": 3,
+      "safety": 1,
+      "next-step": 3,
+      "cross-project-pivot": 2,
+      "clarify-or-correct": 2
+    }
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "suite": "expertise-confidence-p5",
+  "provenance": {
+    "source": "P5 calibrated-confidence cases derived from the response evidence policy without copying raw user chat content.",
+    "purpose": "Make expert confidence legible without inventing numeric certainty."
+  },
+  "cases": [
+    {
+      "id": "preference-is-contextual-judgment",
+      "messages": [{"role": "user", "text": "Keep this conversation warm and concise."}],
+      "route": {"objectivePlan": {"evidenceNeed": "none"}},
+      "answer": "Yes. I will keep the response warm, direct, and concise.",
+      "expectedLevel": "contextual"
+    },
+    {
+      "id": "current-source-is-grounded",
+      "messages": [{"role": "user", "text": "Is this product currently available?"}],
+      "route": {"objectivePlan": {"evidenceNeed": "current-web-evidence"}},
+      "answer": "It is available today. Source: https://store.example/product.",
+      "expectedLevel": "grounded"
+    },
+    {
+      "id": "local-receipt-is-grounded",
+      "messages": [{"role": "user", "text": "Verify the local package health result."}],
+      "route": {"objectivePlan": {"evidenceNeed": "live-local-app-evidence"}},
+      "evidence": [{"claim": "Package health", "status": "verified", "sourceType": "local", "proof": "Local package receipt."}],
+      "answer": "Package health passed.",
+      "expectedLevel": "grounded"
+    },
+    {
+      "id": "explicit-inference-is-bounded",
+      "messages": [{"role": "user", "text": "Does the datasheet support this material choice?"}],
+      "route": {"objectivePlan": {"evidenceNeed": "scientific-or-datasheet-evidence"}},
+      "answer": "This is an inference until a material-specific datasheet is attached.",
+      "expectedLevel": "bounded"
+    },
+    {
+      "id": "unsupported-current-claim-needs-evidence",
+      "messages": [{"role": "user", "text": "Is this product currently available?"}],
+      "route": {"objectivePlan": {"evidenceNeed": "current-web-evidence"}},
+      "answer": "It is available today.",
+      "expectedLevel": "needs-evidence"
+    },
+    {
+      "id": "live-readback-is-grounded",
+      "messages": [{"role": "user", "text": "Restart Klipper on the Qidi."}],
+      "route": {"objectivePlan": {"evidenceNeed": "live-local-app-evidence"}},
+      "evidence": [{"claim": "Named printer service readback", "status": "verified", "sourceType": "live-state", "proof": "Targeted status readback."}],
+      "answer": "The named printer service is running.",
+      "expectedLevel": "grounded"
+    }
+  ]
+}

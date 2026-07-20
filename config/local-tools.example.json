@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "tools": [
+    {
+      "id": "ollama",
+      "name": "Ollama",
+      "required": true,
+      "install": "brew install ollama",
+      "verify": "ollama list"
+    },
+    {
+      "id": "freecad",
+      "name": "FreeCAD",
+      "required": false,
+      "install": "brew install --cask freecad",
+      "verify": "FreeCADCmd --version"
+    },
+    {
+      "id": "openfoam",
+      "name": "OpenFOAM Docker Image",
+      "required": false,
+      "install": "manual docker pull per selected OpenFOAM distribution",
+      "verify": "docker images | grep -i openfoam"
+    },
+    {
+      "id": "graphviz",
+      "name": "Graphviz",
+      "required": false,
+      "install": "brew install graphviz",
+      "verify": "dot -V"
+    }
+  ],
+  "rule": "Install optional heavy tools only when the user's work requires them and storage is sufficient."
+}

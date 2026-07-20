@@ -1,0 +1,64 @@
+{
+  "suite": "feedback-review-scope-p16",
+  "provenance": {
+    "source": "Uses temporary synthetic feedback records to confirm the pre-send reviewer shares the prompt guidance scope boundary; no user feedback or durable state is read."
+  },
+  "policy": {
+    "minimumPressureCount": 4
+  },
+  "case": {
+    "messages": [
+      {
+        "role": "user",
+        "text": "Prepare the current CAD repair decision and cite evidence for the material choice."
+      }
+    ],
+    "route": {
+      "projectId": "cad-current-project",
+      "project": "CAD Current Project",
+      "objectivePlan": {
+        "objectiveType": "cad-repair",
+        "responseKind": "answer-or-act",
+        "evidenceNeed": "source-backed"
+      }
+    },
+    "feedback": [
+      {
+        "id": "objective-evidence",
+        "failureKind": "missing-source-evidence",
+        "note": "Cite the material evidence before recommending the CAD repair choice.",
+        "route": {
+          "projectId": "cad-previous-project",
+          "project": "CAD Previous Project",
+          "objectivePlan": {"objectiveType": "cad-repair", "responseKind": "answer-or-act", "evidenceNeed": "source-backed"}
+        }
+      },
+      {
+        "id": "unrelated-01",
+        "feedbackCategory": "wrong-expertise",
+        "note": "Use printer repair expertise for this unrelated task.",
+        "route": {"projectId": "printer-01", "project": "Printer 01", "objectivePlan": {"objectiveType": "printer-repair"}}
+      },
+      {
+        "id": "unrelated-02",
+        "feedbackCategory": "wrong-expertise",
+        "note": "Use printer repair expertise for this unrelated task.",
+        "route": {"projectId": "printer-02", "project": "Printer 02", "objectivePlan": {"objectiveType": "printer-repair"}}
+      },
+      {
+        "id": "unrelated-03",
+        "feedbackCategory": "wrong-expertise",
+        "note": "Use printer repair expertise for this unrelated task.",
+        "route": {"projectId": "printer-03", "project": "Printer 03", "objectivePlan": {"objectiveType": "printer-repair"}}
+      },
+      {
+        "id": "unrelated-04",
+        "feedbackCategory": "wrong-expertise",
+        "note": "Use printer repair expertise for this unrelated task.",
+        "route": {"projectId": "printer-04", "project": "Printer 04", "objectivePlan": {"objectiveType": "printer-repair"}}
+      }
+    ],
+    "expectedActiveCategories": ["missing-evidence"],
+    "expectedExcludedCategories": ["wrong-expertise"]
+  }
+}

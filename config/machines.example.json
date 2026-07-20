@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "machines": [
+    {
+      "id": "example-klipper-printer",
+      "name": "Example Klipper Printer",
+      "type": "3d-printer",
+      "firmware": "klipper",
+      "host": "printer-host.local",
+      "moonrakerUrl": "http://printer-host.local:7125",
+      "ssh": {
+        "enabled": false,
+        "host": "printer-host.local",
+        "user": "pi",
+        "credentialStorage": "keychain-or-ssh-key"
+      },
+      "safety": {
+        "requiresIdleBeforeWrite": true,
+        "allowLiveRestart": false
+      },
+      "notes": "Copy this file into private data storage and replace placeholders with your own local machine details."
+    },
+    {
+      "id": "example-marlin-printer",
+      "name": "Example Marlin Printer",
+      "type": "3d-printer",
+      "firmware": "marlin",
+      "host": "marlin-printer.local",
+      "notes": "Use firmware/platform tags so Codex does not apply Klipper tools to a Marlin machine."
+    }
+  ]
+}
