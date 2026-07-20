@@ -1,0 +1,13 @@
+{
+  "suite": "feedback-themes-p8",
+  "provenance": {
+    "source": "Derived from the human quality-feedback diagnosis distribution without rewriting original feedback records."
+  },
+  "cases": [
+    {"id": "wrong-objective-becomes-misunderstood", "failureKind": "wrong-objective", "expectedCategory": "misunderstood"},
+    {"id": "missing-source-evidence-remains-evidence", "failureKind": "missing-source-evidence", "expectedCategory": "missing-evidence"},
+    {"id": "missing-proof-remains-evidence", "failureKind": "missing-proof", "expectedCategory": "missing-evidence"},
+    {"id": "wrong-artifact-route-becomes-expertise", "failureKind": "wrong-artifact-route", "expectedCategory": "wrong-expertise"},
+    {"id": "direct-answer-shape-becomes-specificity", "failureKind": "direct-answer-shape", "expectedCategory": "too-generic"}
+  ]
+}

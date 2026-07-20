@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
 import random
 import re
 import signal
@@ -19,6 +20,11 @@ RESULT_DIR = DATA_DIR / "golden_batch_results"
 DEFAULT_SERVER = "http://127.0.0.1:8765"
 SERVER_STDOUT_LOG = APP_DIR / "logs" / "golden-batch-server.out.log"
 SERVER_STDERR_LOG = APP_DIR / "logs" / "golden-batch-server.err.log"
+GOLDEN_BATCH_RESULT_RETENTION = int(os.environ.get("CODEX_GOLDEN_BATCH_RESULT_RETENTION", "100"))
+GOLDEN_BATCH_RESULT_PRESERVE_NAMES = {
+    "20260714T125315Z-golden-batch.json",
+    "20260714T125800Z-golden-batch.json",
+}
 
 WEB_TEST_TERMS = (
     "amazon.com",
@@ -46,6 +52,43 @@ WEB_TEST_TERMS = (
 
 def raise_timeout(signum, frame):
     raise TimeoutError("golden test exceeded wall-clock timeout")
+
+
+def cleanup_golden_batch_result_retention(result_dir=RESULT_DIR, keep=GOLDEN_BATCH_RESULT_RETENTION):
+    root = Path(result_dir)
+    keep_count = max(1, int(keep))
+    if not root.exists():
+        return {"root": str(root), "kept": 0, "removed": 0, "preserved": 0}
+    candidates = []
+    for path in root.glob("*-golden-batch.json"):
+        if not path.is_file():
+            continue
+        try:
+            candidates.append((path.stat().st_mtime, path.name, path))
+        except OSError:
+            continue
+    candidates.sort(reverse=True)
+    keep_paths = {path for _mtime, _name, path in candidates[:keep_count]}
+    preserved_paths = {
+        path for _mtime, name, path in candidates if name in GOLDEN_BATCH_RESULT_PRESERVE_NAMES
+    }
+    keep_paths.update(preserved_paths)
+    removed = 0
+    for _mtime, _name, path in candidates:
+        if path in keep_paths:
+            continue
+        try:
+            path.unlink()
+            removed += 1
+        except OSError:
+            continue
+    return {
+        "root": str(root),
+        "kept": len(keep_paths),
+        "removed": removed,
+        "preserved": len(preserved_paths),
+    }
+
 
 SAFE_SKIP_TERMS = (
     "api key",
@@ -307,6 +350,8 @@ def select_tests(tests, args):
             continue
         if args.source and test.get("source") != args.source:
             continue
+        if args.project and test.get("expectedProjectId") != args.project:
+            continue
         ok, reason = is_safe_test(test, include_live=args.include_live)
         if not ok:
             skipped.append({"id": test.get("id"), "reason": reason})
@@ -552,7 +597,8 @@ def main():
     parser.add_argument("--limit", type=int, default=12)
     parser.add_argument("--offset", type=int, default=0, help="Skip this many matching safe tests before applying --limit.")
     parser.add_argument("--group", default="Slow")
-    parser.add_argument("--source", default="history-harvest")
+    parser.add_argument("--project", default="", help="Filter by expectedProjectId, such as cad-modeling-projects or printer-klipper-ops.")
+    parser.add_argument("--source", default=None, help="Filter by test source. Defaults to history-harvest only for the default Slow group.")
     parser.add_argument("--ids", default="")
     parser.add_argument("--shuffle", action="store_true", help="Shuffle matching safe tests before applying --offset/--limit.")
     parser.add_argument("--seed", type=int, default=0, help="Deterministic shuffle seed.")
@@ -563,6 +609,8 @@ def main():
     parser.add_argument("--timeout", type=int, default=240)
     parser.add_argument("--no-fail-exit", action="store_true")
     args = parser.parse_args()
+    if args.source is None:
+        args.source = "history-harvest" if args.group == "Slow" else ""
 
     bench = ensure_local_server(args.server)
     tests = bench.get("tests") or []
@@ -608,6 +656,7 @@ def main():
         "durationMs": int((time.time() - started) * 1000),
         "filters": {
             "group": args.group,
+            "project": args.project,
             "source": args.source,
             "ids": args.ids,
             "includeLive": args.include_live,
@@ -621,8 +670,14 @@ def main():
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
     output_path = RESULT_DIR / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-golden-batch.json")
     output_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    retention = cleanup_golden_batch_result_retention(RESULT_DIR)
     print(f"SUMMARY {summary['passCount']} pass {summary['failCount']} fail", flush=True)
     print(f"RESULT {output_path}", flush=True)
+    print(
+        f"RETENTION kept {retention['kept']} full golden-batch receipts, "
+        f"removed {retention['removed']}, preserved {retention['preserved']} milestone receipts",
+        flush=True,
+    )
     if failed and not args.no_fail_exit:
         raise SystemExit(1)
 

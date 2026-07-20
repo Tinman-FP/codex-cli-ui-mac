@@ -1,0 +1,21 @@
+{
+  "suite": "feedback-guidance-p12",
+  "provenance": {
+    "source": "Exercises compact distinct feedback guidance with temporary synthetic records; no durable feedback or raw user feedback is used."
+  },
+  "policy": {
+    "maximumGuidanceCount": 4,
+    "maximumRepeatedCategoryLines": 1
+  },
+  "case": {
+    "messages": [{"role": "user", "text": "Which material does the current datasheet support for this outdoor part?"}],
+    "route": {"objectivePlan": {"evidenceNeed": "scientific-or-datasheet-evidence"}},
+    "feedback": [
+      {"rating": "fix", "feedbackCategory": "too-generic", "note": "The answer was generic instead of choosing a material."},
+      {"rating": "fix", "failureKind": "direct-answer-shape", "note": "The direct recommendation was buried in general advice."},
+      {"rating": "fix", "failureKind": "missing-source-evidence", "note": "The material claim needed a datasheet source boundary."},
+      {"rating": "good", "note": "The answer separated the source from the final inference."}
+    ],
+    "expectedFixCategories": ["too-generic", "missing-evidence"]
+  }
+}

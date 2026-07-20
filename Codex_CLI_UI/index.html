@@ -4,10 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Codex CLI</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/styles.css?v=20260718-session-compass" />
   </head>
   <body>
-    <div class="app-shell">
+    <a class="skip-link" href="#conversation">Skip to chat</a>
+    <a class="skip-link" href="#promptInput">Skip to composer</a>
+    <a class="skip-link" href="#logOutput">Skip to run log</a>
+    <div class="app-shell" id="appShell">
       <aside class="sidebar">
         <div class="brand-row">
           <div class="brand-mark" aria-hidden="true">C</div>
@@ -84,46 +88,77 @@
             <div class="thread-meta" id="threadMeta">Ready</div>
           </div>
           <div class="topbar-actions">
+            <button class="icon-button mobile-new-thread-button" id="mobileNewThreadButton" title="New chat" aria-label="New chat">
+              <span>+</span>
+            </button>
+            <label class="sr-only" for="mobileViewSelect">View</label>
+            <select class="mobile-view-select" id="mobileViewSelect" aria-label="View">
+              <option value="chats">Chats</option>
+              <option value="projects">Projects</option>
+              <option value="admin">Admin</option>
+              <option value="tests">Tests</option>
+            </select>
             <button class="icon-button" id="copyButton" title="Copy transcript" aria-label="Copy transcript">
               <span>□</span>
             </button>
             <button class="icon-button" id="toggleLogButton" title="Toggle log" aria-label="Toggle log">
               <span>≡</span>
             </button>
+            <button class="icon-button" id="toggleSessionCompassButton" title="Open session compass" aria-label="Open session compass" aria-expanded="false" aria-controls="sessionCompassPanel">
+              <span>⌖</span>
+            </button>
           </div>
         </header>
 
-        <section class="monitor-strip" aria-label="Model health quick view">
-          <div class="monitor-strip-copy">
-            <div class="monitor-strip-title">Model Health</div>
-            <div class="monitor-strip-subtitle" id="stripStatusText">Collecting telemetry</div>
+        <section class="session-compass" id="sessionCompassPanel" hidden aria-label="Session compass">
+          <div class="session-compass-header">
+            <h2>Session Compass</h2>
+            <button class="icon-button compact-icon-button" id="clearSessionCompassButton" type="button" title="Clear session compass" aria-label="Clear session compass">
+              <span>×</span>
+            </button>
           </div>
-          <canvas id="stripMonitorCanvas" width="520" height="104" aria-label="Live health sparkline"></canvas>
-          <div class="monitor-strip-metrics" aria-label="Quick telemetry summary">
-            <div class="strip-metric">
-              <span>OLL</span>
-              <strong id="stripOllamaText">Checking</strong>
+          <form class="session-compass-form" id="sessionCompassForm">
+            <label class="session-compass-field phase" for="sessionCompassPhase">
+              <span>Task Phase</span>
+              <select id="sessionCompassPhase">
+                <option value="active">Active</option>
+                <option value="verifying">Verifying</option>
+                <option value="awaiting-decision">Awaiting decision</option>
+                <option value="blocked">Blocked</option>
+                <option value="complete">Complete</option>
+              </select>
+            </label>
+            <label class="session-compass-field objective" for="sessionCompassObjective">
+              <span>Current Objective</span>
+              <textarea id="sessionCompassObjective" rows="2" maxlength="360"></textarea>
+            </label>
+            <label class="session-compass-field" for="sessionCompassDecisions">
+              <span>Decisions Made</span>
+              <textarea id="sessionCompassDecisions" rows="2" maxlength="720"></textarea>
+            </label>
+            <label class="session-compass-field" for="sessionCompassEvidence">
+              <span>Latest Evidence</span>
+              <textarea id="sessionCompassEvidence" rows="2" maxlength="720"></textarea>
+            </label>
+            <label class="session-compass-field" for="sessionCompassOpenQuestions">
+              <span>Open Questions</span>
+              <textarea id="sessionCompassOpenQuestions" rows="2" maxlength="720"></textarea>
+            </label>
+            <label class="session-compass-field next-step" for="sessionCompassNextStep">
+              <span>Next Step</span>
+              <textarea id="sessionCompassNextStep" rows="2" maxlength="420"></textarea>
+            </label>
+            <div class="session-compass-actions">
+              <button class="icon-text-button primary" id="saveSessionCompassButton" type="submit">
+                <span>✓</span>
+                <span>Save Context</span>
+              </button>
+              <span class="session-compass-status" id="sessionCompassStatus" role="status" aria-live="polite"></span>
             </div>
-            <div class="strip-metric">
-              <span>RTE</span>
-              <strong id="stripRouteText">Idle</strong>
-            </div>
-            <div class="strip-metric">
-              <span>PASS</span>
-              <strong id="stripPassText">0.0s</strong>
-            </div>
-            <div class="strip-metric">
-              <span>PRN</span>
-              <strong id="stripPrinterText">--</strong>
-            </div>
-            <div class="strip-metric">
-              <span>MGR</span>
-              <strong id="stripManagerText">Balanced</strong>
-            </div>
-          </div>
+          </form>
         </section>
 
-        <section class="conversation" id="conversation" aria-live="polite"></section>
+        <section class="conversation" id="conversation" role="log" aria-label="Chat messages" aria-live="polite" aria-relevant="additions text" aria-atomic="false" tabindex="0"></section>
 
         <section class="test-bench" id="testBench" hidden aria-label="Codex CLI UI test bench">
           <div class="test-bench-header">
@@ -187,8 +222,18 @@
               <div class="benchmark-list" id="benchmarkList" aria-label="Benchmark results"></div>
             </section>
             <section class="admin-card">
-              <h3>Package Health</h3>
+              <div class="admin-card-heading-row">
+                <h3>Package Health</h3>
+                <button class="icon-text-button compact" id="packageHealthFilterButton" type="button">
+                  <span>!</span>
+                  <span>Show Blockers</span>
+                </button>
+              </div>
               <div class="package-health-list" id="packageHealthList" aria-label="Package health checks"></div>
+            </section>
+            <section class="admin-card">
+              <h3>Verification Receipts</h3>
+              <div class="verification-summary-list" id="verificationSummaryList" aria-label="Verification receipt summary"></div>
             </section>
           </div>
           <section class="admin-card engineering-admin-card">
@@ -225,6 +270,47 @@
               </div>
             </div>
           </section>
+          <section class="admin-card working-profile-card" aria-label="Project working profile">
+            <div class="admin-card-heading-row">
+              <h3>Working Profile</h3>
+              <button class="icon-button compact-icon-button" id="clearWorkingProfileButton" type="button" title="Clear this project working profile" aria-label="Clear this project working profile">
+                <span>×</span>
+              </button>
+            </div>
+            <form class="working-profile-form" id="workingProfileForm">
+              <label class="working-profile-field" for="workingProfileProjectSelect">
+                <span>Project</span>
+                <select id="workingProfileProjectSelect" aria-label="Working profile project"></select>
+              </label>
+              <label class="working-profile-field" for="workingProfileObjective">
+                <span>Active Goal</span>
+                <textarea id="workingProfileObjective" rows="2" maxlength="320"></textarea>
+              </label>
+              <label class="working-profile-field" for="workingProfileAnswerStyle">
+                <span>Answer Style</span>
+                <textarea id="workingProfileAnswerStyle" rows="2" maxlength="320"></textarea>
+              </label>
+              <label class="working-profile-field" for="workingProfileTerminology">
+                <span>Terms &amp; Terminology</span>
+                <textarea id="workingProfileTerminology" rows="2" maxlength="420"></textarea>
+              </label>
+              <label class="working-profile-field" for="workingProfileConstraints">
+                <span>Constraints</span>
+                <textarea id="workingProfileConstraints" rows="2" maxlength="420"></textarea>
+              </label>
+              <label class="working-profile-confirm" for="workingProfileConfirm">
+                <input id="workingProfileConfirm" type="checkbox" />
+                <span>I confirm this should guide this project.</span>
+              </label>
+              <div class="working-profile-actions">
+                <button class="icon-text-button primary" id="saveWorkingProfileButton" type="submit">
+                  <span>✓</span>
+                  <span>Save Profile</span>
+                </button>
+                <span class="working-profile-status" id="workingProfileStatus" role="status" aria-live="polite"></span>
+              </div>
+            </form>
+          </section>
           <div class="admin-layout">
             <section class="admin-card">
               <h3>Project Folders</h3>
@@ -241,20 +327,26 @@
           </section>
         </section>
 
-        <section class="composer-wrap">
-          <div class="composer">
+        <section class="composer-wrap" aria-label="Message composer">
+          <div class="composer" role="form" aria-label="Send a message to Codex">
             <div class="attach-picker">
               <button class="attach-button" id="attachButton" type="button" title="Attach files" aria-label="Attach files">
                 <span>+</span>
               </button>
               <input id="fileInput" class="file-input-overlay" type="file" multiple tabindex="-1" aria-hidden="true" />
             </div>
-            <textarea id="promptInput" rows="1" placeholder="Ask Codex"></textarea>
-            <button class="send-button" id="sendButton" title="Send" aria-label="Send">
+            <label class="sr-only" for="promptInput">Message Codex</label>
+            <div class="sr-only" id="keyboardHelp">Press Command Enter or Control Enter to send. Press Command Period or Control Period to stop an active run. Press Escape to return to the composer. Press Option C outside the composer to focus chat messages, Option L to focus the run log, and Option N to start a new chat when no run is active.</div>
+            <div class="sr-only" id="promptGuidanceSummary">For better answers, include the goal, local files or devices, constraints, risk level, desired tone, length, and format. Codex may ask clarifying questions before expensive or risky work and should avoid unsafe prompts.</div>
+            <textarea id="promptInput" rows="1" placeholder="Ask Codex" aria-describedby="runState keyboardHelp promptGuidanceSummary privacyNotice privacyStorageSummary privacyControlsSummary"></textarea>
+            <button class="send-button" id="sendButton" title="Send" aria-label="Send" aria-keyshortcuts="Meta+Enter Control+Enter">
               <span>↑</span>
             </button>
+            <button class="cancel-run-button" id="cancelRunButton" type="button" title="Stop current run" aria-label="Stop current run" aria-keyshortcuts="Meta+. Control+." hidden>
+              <span>■</span>
+            </button>
           </div>
-          <div class="attachment-tray" id="attachmentTray" aria-label="Attached files" hidden></div>
+          <div class="attachment-tray" id="attachmentTray" role="list" aria-label="Attached files" hidden></div>
           <div class="engineering-strip" id="engineeringStrip" aria-label="Engineering analysis tools">
             <div class="engineering-pack-status">
               <div class="engineering-pack" id="aeroPackStatus">
@@ -271,7 +363,7 @@
               </div>
             </div>
             <div class="engineering-actions">
-              <button class="analysis-button primary" id="runDeeperButton" type="button" title="Run the best deeper engineering analysis for this prompt">
+              <button class="analysis-button primary" id="runDeeperButton" type="button" title="Run the best deeper engineering analysis for this prompt" aria-label="Run deeper engineering analysis">
                 <span>↯</span>
                 <span>Run Deeper</span>
               </button>
@@ -279,7 +371,7 @@
                 <span>⇥</span>
                 <span>Aero</span>
               </button>
-              <button class="analysis-button" id="runStructuralButton" type="button" title="Run Structural FEA on the current prompt or attachment">
+              <button class="analysis-button" id="runStructuralButton" type="button" title="Run Structural FEA on the current prompt or attachment" aria-label="Run structural FEA analysis">
                 <span>⌁</span>
                 <span>FEA</span>
               </button>
@@ -301,7 +393,7 @@
               </select>
             </label>
             <label class="control-chip" for="managerDepthSelect">
-              <span>Mgr</span>
+              <span>Speed</span>
               <select id="managerDepthSelect" aria-label="Manager speed">
                 <option value="fast">Fast</option>
                 <option value="balanced">Balanced</option>
@@ -317,7 +409,7 @@
               </select>
             </label>
             <label class="control-chip" for="reasoningSelect">
-              <span>Reason</span>
+              <span>Think</span>
               <select id="reasoningSelect" aria-label="Reasoning level">
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
@@ -325,7 +417,7 @@
               </select>
             </label>
             <label class="control-chip" for="friendlinessSelect">
-              <span>Friendly</span>
+              <span>Tone</span>
               <select id="friendlinessSelect" aria-label="Friendliness level">
                 <option value="focused">Focused</option>
                 <option value="warm">Warm</option>
@@ -340,9 +432,16 @@
                 <option value="playful">Playful</option>
               </select>
             </label>
+            <label class="control-chip" for="textScaleSelect">
+              <span>Text</span>
+              <select id="textScaleSelect" aria-label="Text size">
+                <option value="normal">Normal</option>
+                <option value="large">Large</option>
+              </select>
+            </label>
             <div class="control-chip web-chip">
               <span>Web</span>
-              <button class="switch-button" id="webAccessToggle" type="button" role="switch" aria-checked="true">
+              <button class="switch-button" id="webAccessToggle" type="button" role="switch" aria-checked="true" aria-label="Web access">
                 <span class="switch-track" aria-hidden="true">
                   <span class="switch-thumb"></span>
                 </span>
@@ -350,61 +449,86 @@
               </button>
             </div>
           </div>
-          <div class="run-state" id="runState">Idle</div>
+          <div class="run-state" id="runState" role="status" aria-live="polite" aria-atomic="true" aria-label="Codex status: Idle" data-stage="idle">Idle</div>
+          <div class="privacy-notice" id="privacyNotice" role="note">Local privacy: do not paste passwords, API keys, tokens, or private customer data. Attach only files you want Codex to read for the active task; native local-path attachments are referenced from this Mac instead of copied when possible.</div>
+          <div class="privacy-storage-summary" id="privacyStorageSummary" role="note" aria-label="Privacy and storage summary">
+            <span>Storage: local conversations and receipts stay on this Mac.</span>
+            <span>Review: local review can read the active task; cloud review only happens when cloud/research or share/export is chosen.</span>
+            <span>Shared use: keep private files, source vaults, and machine inventory out of shared profiles unless explicitly shared.</span>
+          </div>
+          <div class="privacy-controls-summary" id="privacyControlsSummary" role="note" aria-label="Privacy controls summary">
+            <span>Export/delete: ask Codex to locate local task data first, then keep, export, or remove only the confirmed files.</span>
+            <span>Training: local answers are not model-training data here; cloud modes follow the selected provider's terms.</span>
+            <span>Settings: mode, access, web, and style choices persist locally with the saved task; verify them before shared use or confidential work.</span>
+          </div>
         </section>
       </main>
 
       <aside class="log-panel" id="logPanel" aria-label="Execution log">
-        <section class="monitor-panel" aria-label="Model health monitor">
+        <section class="monitor-panel dashboard-rail-panel" id="monitorPanel" aria-label="Model health monitor">
           <div class="monitor-header">
-            <div>
+            <div class="panel-title-copy">
               <div class="monitor-title">Model Health</div>
               <div class="monitor-subtitle" id="monitorStatusText">Collecting telemetry</div>
             </div>
-            <span class="monitor-pill" id="monitorManagerPill">Balanced</span>
-          </div>
-          <canvas id="monitorCanvas" width="640" height="420" aria-label="Live model health graph"></canvas>
-          <div class="monitor-metrics" aria-label="Telemetry summary">
-            <div class="monitor-metric">
-              <span>Ollama</span>
-              <strong id="monitorOllamaText">Checking</strong>
-            </div>
-            <div class="monitor-metric">
-              <span>Route</span>
-              <strong id="monitorRouteText">Idle</strong>
-            </div>
-            <div class="monitor-metric">
-              <span>Passes</span>
-              <strong id="monitorPassText">0.0s</strong>
-            </div>
-            <div class="monitor-metric">
-              <span>Memory</span>
-              <strong id="monitorMemoryText">--</strong>
-            </div>
-            <div class="monitor-metric">
-              <span>Disk Free</span>
-              <strong id="monitorDiskText">--</strong>
-            </div>
-            <div class="monitor-metric">
-              <span>Printers</span>
-              <strong id="monitorPrinterText">--</strong>
+            <div class="panel-header-actions">
+              <span class="monitor-pill" id="monitorManagerPill">Balanced</span>
+              <button class="panel-minimize-button monitor-minimize-button" id="toggleMonitorPanelButton" type="button" title="Minimize Model Health" aria-label="Minimize Model Health" aria-expanded="true" aria-controls="monitorPanelBody">
+                <span>-</span>
+              </button>
             </div>
           </div>
-          <div class="printer-list" id="printerList" aria-label="Printer link status"></div>
+          <div class="monitor-panel-body" id="monitorPanelBody">
+            <canvas id="monitorCanvas" width="640" height="420" aria-label="Live model health graph"></canvas>
+            <div class="monitor-metrics" aria-label="Telemetry summary">
+              <div class="monitor-metric">
+                <span>Ollama</span>
+                <strong id="monitorOllamaText">Checking</strong>
+              </div>
+              <div class="monitor-metric">
+                <span>Route</span>
+                <strong id="monitorRouteText">Idle</strong>
+              </div>
+              <div class="monitor-metric">
+                <span>Passes</span>
+                <strong id="monitorPassText">0.0s</strong>
+              </div>
+              <div class="monitor-metric">
+                <span>Memory</span>
+                <strong id="monitorMemoryText">--</strong>
+              </div>
+              <div class="monitor-metric">
+                <span>Disk Free</span>
+                <strong id="monitorDiskText">--</strong>
+              </div>
+              <div class="monitor-metric">
+                <span>Printers</span>
+                <strong id="monitorPrinterText">--</strong>
+              </div>
+            </div>
+            <div class="printer-list" id="printerList" aria-label="Printer link status"></div>
+          </div>
         </section>
-        <div class="log-header">
-          <div>
-            <div class="log-title">Run Log</div>
-            <div class="log-subtitle" id="logSubtitle">No active run</div>
+        <section class="run-log-panel dashboard-rail-panel" id="runLogPanel" aria-label="Run log">
+          <div class="log-header">
+            <div class="log-title-copy">
+              <div class="log-title">Run Log</div>
+              <div class="log-subtitle" id="logSubtitle">No active run</div>
+            </div>
+            <div class="panel-header-actions">
+              <button class="panel-minimize-button" id="toggleRunLogPanelButton" type="button" title="Minimize Run Log" aria-label="Minimize Run Log" aria-expanded="true" aria-controls="logOutput">
+                <span>-</span>
+              </button>
+              <button class="icon-button" id="clearLogButton" title="Clear log" aria-label="Clear log">
+                <span>×</span>
+              </button>
+            </div>
           </div>
-          <button class="icon-button" id="clearLogButton" title="Clear log" aria-label="Clear log">
-            <span>×</span>
-          </button>
-        </div>
-        <pre class="log-output" id="logOutput"></pre>
+          <pre class="log-output" id="logOutput" role="log" aria-label="Run log output" aria-live="polite" tabindex="0"></pre>
+        </section>
       </aside>
     </div>
 
-    <script src="/app.js?v=20260704-self-repair-work-orders"></script>
+    <script src="/app.js?v=20260717-dashboard-panels"></script>
   </body>
 </html>

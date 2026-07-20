@@ -12,26 +12,28 @@ $HOME/Applications/Codex_CLI_UI
 
 The installer is intentionally conservative. It checks for `python3`, `ollama`, and Codex CLI, creates local `data/` and `logs/` folders, starts the UI when prerequisites are present, and does not install large tools, models, API keys, or private machine inventory.
 
-Manual run:
-
-```bash
-cd "$HOME/Applications/Codex_CLI_UI"
-python3 server.py
-```
-
-Open:
-
-```text
-http://127.0.0.1:8765
-```
-
-Or launch the standalone Mac app:
+Preferred launch:
 
 ```bash
 open -a "Codex CLI UI"
 ```
 
 The standalone app is a native AppKit/WebKit wrapper. It opens Codex CLI UI in its own window, starts `server.py` if the local service is not already running, and only uses the system browser when you click an external source link.
+
+Manual server run:
+
+```bash
+cd "$HOME/Applications/Codex_CLI_UI"
+python3 server.py
+```
+
+Manual browser fallback:
+
+```text
+http://127.0.0.1:8765
+```
+
+The installer and restart script prefer the native app. They only open the raw local URL in your default browser when `CODEX_CLI_UI_OPEN_BROWSER=1` is set.
 
 ## Native App Build
 
@@ -122,6 +124,14 @@ Run Tinman's curated engineering-domain sample set:
 ```bash
 python3 run_golden_batch.py --group "Domain Samples" --source domain-sample --limit 56
 ```
+
+Run the focused cross-domain conversation-quality suite:
+
+```bash
+python3 tools/live_feedback_smoke.py --expert-conversation --json
+```
+
+This runs six representative conversations covering correction recovery, technical context carryover, evidence-backed follow-up, product/UI judgment, focused clarification, and natural conversational guidance.
 
 The Domain Samples group covers 3D printing, CNC machining, solar/wind power, aerodynamics, CFD, engineering, and aviation. These are public-safe built-in guardrails, not private chat-history exports.
 

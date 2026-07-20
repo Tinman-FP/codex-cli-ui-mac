@@ -1,0 +1,56 @@
+{
+  "suite": "feedback-review-p10",
+  "provenance": {
+    "source": "Exercises the pre-send reviewer with synthetic, temporary copies of derived human-feedback themes; no raw feedback text or durable feedback records are used."
+  },
+  "cases": [
+    {
+      "id": "misunderstood-flags-forbidden-objective",
+      "failureKind": "wrong-objective",
+      "messages": [{"role": "user", "text": "Keep this repair focused on the requested CAD artifact."}],
+      "route": {"objectivePlan": {"forbiddenAnswerFamilies": ["generic-printer-profile"]}},
+      "contract": {"kind": "CAD/design deliverable", "hardGate": true},
+      "composition": {"name": "proof-structured"},
+      "answer": "Use a generic printer profile and adjust the default profile before returning to the CAD work.",
+      "expectedCategory": "misunderstood",
+      "expectedCheckStatus": "review",
+      "expectedReviewStatus": "review"
+    },
+    {
+      "id": "too-generic-revises-canned-opening",
+      "failureKind": "direct-answer-shape",
+      "messages": [{"role": "user", "text": "What should I call you?"}],
+      "route": {},
+      "contract": {"kind": "General help", "hardGate": false},
+      "composition": {"name": "conversational"},
+      "answer": "Great question! Call me Codex.",
+      "expectedCategory": "too-generic",
+      "expectedCheckStatus": "revised",
+      "expectedReviewStatus": "revised"
+    },
+    {
+      "id": "wrong-expertise-flags-generic-assistant-posture",
+      "failureKind": "wrong-artifact-route",
+      "messages": [{"role": "user", "text": "Repair the Fusion assembly constraints in the deliverable."}],
+      "route": {"specialist": "CAD engineer"},
+      "contract": {"kind": "CAD/design deliverable", "hardGate": true},
+      "composition": {"name": "proof-structured"},
+      "answer": "As a general assistant, I can help with that repair.",
+      "expectedCategory": "wrong-expertise",
+      "expectedCheckStatus": "review",
+      "expectedReviewStatus": "review"
+    },
+    {
+      "id": "missing-evidence-flags-unsupported-research-answer",
+      "failureKind": "missing-source-evidence",
+      "messages": [{"role": "user", "text": "Which material does the current datasheet support for this use?"}],
+      "route": {"objectivePlan": {"evidenceNeed": "scientific-or-datasheet-evidence"}},
+      "contract": {"kind": "Research", "hardGate": false},
+      "composition": {"name": "proof-structured"},
+      "answer": "Use this material because it is the best fit.",
+      "expectedCategory": "missing-evidence",
+      "expectedCheckStatus": "review",
+      "expectedReviewStatus": "review"
+    }
+  ]
+}
