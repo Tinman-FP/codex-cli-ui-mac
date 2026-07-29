@@ -27432,6 +27432,8 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
     generated_artifact_revision_project = generated_artifact_revision_route_project(messages)
     embedded_image = is_embedded_linux_image_request(messages)
     local_klipper_config_file = is_local_klipper_config_file_question(messages)
+    local_file_comparison = is_local_file_comparison_question(messages)
+    local_gcode_file_comparison = is_local_gcode_file_comparison_question(messages)
     mac_hardware_context = wants_mac_hardware_context(messages)
     apple_m2_workstation_disadvantages = is_apple_m2_workstation_disadvantage_question(messages)
     mac_bluetooth_context = wants_mac_bluetooth_context(messages)
@@ -28039,6 +28041,7 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
     metered_research_now = is_metered_research_now_question(messages)
     no_extruder_motion_motors_setup = is_no_extruder_motion_motors_setup_question(messages)
     filament_load_unload_macro_status = is_filament_load_unload_macro_status_question(messages)
+    printer_ai_command_center_architecture = is_printer_ai_command_center_architecture_question(messages)
     ai_print_failure_monitoring = is_ai_print_failure_monitoring_question(messages)
     set_two_on_x_missing_context = is_set_two_on_x_missing_context_question(messages)
     turbine_airflow_bucket_endplate = is_turbine_airflow_bucket_endplate_question(messages)
@@ -29271,6 +29274,10 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
         project_id = "printer-klipper-ops"
         score = max(score, 38)
         matched = ["filament-load-unload-macro-status"] + [item for item in matched if item != "filament-load-unload-macro-status"]
+    elif printer_ai_command_center_architecture:
+        project_id = "printer-klipper-ops"
+        score = max(score, 42)
+        matched = ["printer-ai-command-center-architecture"] + [item for item in matched if item != "printer-ai-command-center-architecture"]
     elif ai_print_failure_monitoring:
         project_id = "printer-klipper-ops"
         score = max(score, 36)
@@ -32678,6 +32685,11 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
         matched = ["tinmanx-process-profile-edit-box"] + [
             item for item in matched if item != "tinmanx-process-profile-edit-box"
         ]
+    elif local_file_comparison:
+        project_id = "tinmanx-slicer-research" if local_gcode_file_comparison else "codex-cli-ui-local-agent"
+        score = max(score, 44)
+        marker = "local-gcode-file-comparison" if local_gcode_file_comparison else "local-file-comparison"
+        matched = [marker] + [item for item in matched if item not in {"local-gcode-file-comparison", "local-file-comparison"}]
     elif printing_calibration_or_profile:
         project_id = "tinmanx-slicer-research"
         score = max(score, 32)
@@ -32737,6 +32749,8 @@ def route_manager(messages, cwd="", requested_profile=DEFAULT_PROFILE, web_searc
         engine = "local-research" if web_search == "live" else "local"
     if engine == "cloud" and FREE_ONLY:
         engine = "local-research" if web_search == "live" else "local"
+    if local_file_comparison:
+        engine = "local"
 
     if offset1499_direct:
         if is_flightops_multi_inspection_ui_request(messages):
@@ -62347,6 +62361,96 @@ def is_ai_print_failure_monitoring_question(messages):
     return "ai" in text and "print" in text and "failure" in text and text_has_any(text, ("monitor", "detection", "detect"))
 
 
+def is_printer_ai_command_center_architecture_question(messages):
+    query = latest_user_text(messages).strip()
+    text = query.lower()
+    if not query:
+        return False
+    printer_terms = (
+        "3d printer",
+        "3d printers",
+        "printer",
+        "printers",
+        "moonraker",
+        "klipper",
+        "bambu",
+        "qidi",
+        "rat rig",
+        "ratrig",
+        "tinmanx",
+        "tinney printer command",
+    )
+    ai_terms = (
+        "ai server",
+        "ai detection",
+        "ai monitoring",
+        "failure detection",
+        "camera ai",
+        "vision",
+        "spaghetti",
+        "anomaly",
+    )
+    command_terms = (
+        "command center",
+        "dashboard",
+        "hdmi",
+        "monitor",
+        "display",
+        "kiosk",
+        "wall screen",
+        "control center",
+    )
+    architecture_terms = (
+        "best solution",
+        "best option",
+        "setup",
+        "server",
+        "architecture",
+        "build",
+        "recommend",
+        "solution",
+    )
+    fleet_terms = ("10", "ten", "fleet", "all")
+    return (
+        text_has_any(text, printer_terms)
+        and text_has_any(text, ai_terms)
+        and (text_has_any(text, command_terms) or ("server" in text and text_has_any(text, fleet_terms)))
+        and text_has_any(text, architecture_terms)
+    )
+
+
+def printer_ai_command_center_architecture_direct_answer(messages):
+    if not is_printer_ai_command_center_architecture_question(messages):
+        return ""
+    return "\n\n".join(
+        [
+            (
+                "For a 10-printer AI command center, I would use a Linux/NVIDIA workstation as the main AI/video/dashboard server, keep each printer on its own controller, "
+                "and drive the HDMI command-center display from that workstation in fullscreen kiosk mode."
+            ),
+            (
+                "This is why: the hard part is not just showing a dashboard. It is ingesting 10 camera feeds, polling printer APIs such as Moonraker/Bambu/Qidi endpoints, running local vision inference, "
+                "recording enough history to debug failures, and keeping the display alive when one printer or camera drops. A Jetson-class box is useful for a small proof of concept, but I would not make it the main 10-printer brain unless the AI load is very light."
+            ),
+            (
+                "The architecture I would build: printer controllers stay at the machines; the AI server runs Docker/Compose with a camera/NVR layer, detector workers, a printer-state collector, a small database, "
+                "and a polished web dashboard; the HDMI monitor runs Chromium or an Electron shell pointed at that local dashboard. Prometheus/Grafana can support metrics, but they should not be the whole command-center user experience."
+            ),
+            (
+                "For your Printer Ops-style setup, I would keep the MakersVPN/Pi role as a boring but critical network watchdog/rescue path and let the GPU workstation handle the heavy AI, video, storage, and HDMI dashboard work. "
+                "The Mac Studio can be useful for development and orchestration, but for multi-camera local AI detection I would prefer NVIDIA/Linux unless we deliberately choose Apple-native models and accept that ecosystem."
+            ),
+            (
+                "Before I size the exact hardware, I need four numbers: camera count/resolution/FPS, whether detection is simple spaghetti/failure detection or heavier object/defect detection, recording retention, and whether the dashboard is read-only or allowed to send printer commands. "
+                "A sane proof step is one printer plus one camera first, then three, then all 10 after latency, false positives, and offline retry behavior are measured."
+            ),
+            (
+                "You should also consider: put the server and network gear on a UPS, use wired Ethernet for the cameras/printers where possible, separate alerting from stop-control authority, and design the UI around what you need at a glance: printing/idle/error, percent complete, ETA, camera tile, active alert, and last-known-good state."
+            ),
+        ]
+    )
+
+
 def ai_print_failure_monitoring_direct_answer(messages):
     if not is_ai_print_failure_monitoring_question(messages):
         return ""
@@ -73843,6 +73947,7 @@ def general_direct_knowledge_answer(messages, route=None, web_search="disabled",
         or diagram_tool_recommendation_direct_answer(messages)
         or contextless_cfd_this_model_direct_answer(messages)
         or vague_failure_diagnostic_direct_answer(messages)
+        or printer_ai_command_center_architecture_direct_answer(messages)
         or ai_print_failure_monitoring_direct_answer(messages)
         or flightops_v2_offline_sync_build_direct_answer(messages)
         or flightops_n296sa_functionality_direct_answer(messages)
@@ -75079,6 +75184,9 @@ def general_direct_knowledge_answer(messages, route=None, web_search="disabled",
     elif is_filament_load_unload_macro_status_question(messages):
         mode = "filament-macro-status-direct-answer"
         thought = "Recognized this as a filament load/unload macro availability check, not structural load analysis."
+    elif is_printer_ai_command_center_architecture_question(messages):
+        mode = "printer-ai-command-center-architecture-direct-answer"
+        thought = "Recognized this as a printer-fleet AI command-center architecture decision, not a generic Docker/Grafana stack."
     else:
         mode = "direct-knowledge-answer"
         thought = "Recognized this as a direct technical question, so I am answering first and keeping the reasoning compact."
@@ -80753,6 +80861,7 @@ def iter_named_file_matches(root, basename, max_depth=4, limit=12):
     if not root.exists() or not root.is_dir():
         return []
     matches = []
+    basename_lower = str(basename or "").lower()
     base_depth = len(root.parts)
     try:
         for current_root, dirnames, filenames in os.walk(root):
@@ -80764,6 +80873,14 @@ def iter_named_file_matches(root, basename, max_depth=4, limit=12):
                 matches.append(current / basename)
                 if len(matches) >= limit:
                     break
+                continue
+            for filename in filenames:
+                if filename.lower() == basename_lower:
+                    matches.append(current / filename)
+                    if len(matches) >= limit:
+                        break
+            if len(matches) >= limit:
+                break
     except OSError:
         return matches
     return matches
@@ -80784,6 +80901,27 @@ LOCAL_TEXT_FILE_EXTENSIONS = (
     ".yml",
     ".toml",
     ".csv",
+    ".gcode",
+    ".gco",
+    ".nc",
+)
+LOCAL_FILE_COMPARISON_EXTENSIONS = LOCAL_TEXT_FILE_EXTENSIONS
+LOCAL_GCODE_FILE_EXTENSIONS = (".gcode", ".gco", ".nc")
+LOCAL_GCODE_COMPARE_MAX_BYTES = int(os.environ.get("CODEX_GCODE_COMPARE_MAX_BYTES", str(900 * 1024 * 1024)))
+GCODE_FIBER_SIGNAL_TERMS = (
+    "ccf",
+    "continuous carbon",
+    "continuous fiber",
+    "continuous fibre",
+    "carbon fiber",
+    "carbon fibre",
+    "fiberseek",
+    "fibreseek",
+    "fiber seek",
+    "fibre seek",
+    "seeker",
+    "fiber",
+    "fibre",
 )
 
 
@@ -80794,6 +80932,22 @@ def local_text_file_names_from_text(text, extensions=LOCAL_TEXT_FILE_EXTENSIONS)
     quoted_pattern = re.compile(rf"[`'\"]([^`'\"]{{1,240}}\.(?:{ext_pattern}))[`'\"]", re.IGNORECASE)
     path_pattern = re.compile(rf"((?:~|/|\.?/)[A-Za-z0-9_./~()#&+ -]{{1,240}}\.(?:{ext_pattern}))", re.IGNORECASE)
     name_pattern = re.compile(rf"\b([A-Za-z0-9_~()#&+-][A-Za-z0-9_.~()#&+-]{{0,180}}\.(?:{ext_pattern}))\b", re.IGNORECASE)
+    line_name_pattern = re.compile(
+        rf"^\s*(?:[-*]\s*|\d+[\).]\s*)?([A-Za-z0-9_~()#&+][A-Za-z0-9_.~()#&+, -]{{0,240}}\.(?:{ext_pattern}))"
+        rf"(?:\s+\d+(?:\.\d+)?\s*(?:b|kb|mb|gb))?\s*$",
+        re.IGNORECASE,
+    )
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip().strip("`'\"")
+        if not line or text_has_any(line.lower(), ("edit question", "good", "fix this", "steer")):
+            continue
+        if re.match(r"(?i)^\s*(?:compare|diff|open|inspect|read|will you|can you|please)\b", line):
+            continue
+        match = line_name_pattern.match(line)
+        if match:
+            value = match.group(1).strip().strip("`'\"")
+            if value and value.lower().endswith(extensions) and value not in refs:
+                refs.append(value)
     for pattern in (quoted_pattern, path_pattern, name_pattern):
         for match in pattern.finditer(str(text or "")):
             value = match.group(1).strip().strip("`'\"")
@@ -80813,6 +80967,9 @@ def local_text_file_search_roots(cwd=""):
             Path.home() / "Desktop",
             Path.home() / "Documents" / "Codex",
             Path.home() / "Documents",
+            Path.home() / "Library" / "CloudStorage",
+            Path.home() / "Library" / "CloudStorage" / "Dropbox",
+            Path.home() / "Dropbox",
         ]
     )
 
@@ -80874,6 +81031,534 @@ def resolve_local_text_file(messages, cwd="", extensions=LOCAL_TEXT_FILE_EXTENSI
                         "searched": searched,
                     }
     return {"path": None, "source": "", "name": refs[0] if refs else "", "searched": searched}
+
+
+def local_file_comparison_ref_count(messages, extensions=LOCAL_FILE_COMPARISON_EXTENSIONS):
+    extensions = tuple(ext.lower() for ext in extensions)
+    refs = []
+    for ref in local_text_file_names_from_text(latest_user_text(messages), extensions):
+        key = Path(ref).name.lower()
+        if key and key not in refs:
+            refs.append(key)
+    for attachment in message_attachments(messages):
+        name = str(attachment.get("name") or "")
+        path = str(attachment.get("path") or "")
+        if name.lower().endswith(extensions) or path.lower().endswith(extensions):
+            key = Path(name or path).name.lower()
+            if key and key not in refs:
+                refs.append(key)
+    return len(refs)
+
+
+def is_local_file_comparison_question(messages):
+    query = latest_user_text(messages).lower()
+    if not query:
+        return False
+    if local_file_comparison_ref_count(messages) < 2:
+        return False
+    if text_has_any(query, ("find for sale", "buy ", "shopping", "price compare", "compare prices")):
+        return False
+    return text_has_any(
+        query,
+        (
+            "compare",
+            "comparison",
+            "diff",
+            "difference",
+            "different",
+            "similar",
+            "same",
+            "match",
+            "equivalent",
+            "logic",
+        ),
+    )
+
+
+def is_local_gcode_file_comparison_question(messages):
+    if not is_local_file_comparison_question(messages):
+        return False
+    latest = latest_user_text(messages)
+    refs = local_text_file_names_from_text(latest, LOCAL_GCODE_FILE_EXTENSIONS)
+    attachment_count = 0
+    for attachment in message_attachments(messages):
+        name = str(attachment.get("name") or "")
+        path = str(attachment.get("path") or "")
+        if name.lower().endswith(LOCAL_GCODE_FILE_EXTENSIONS) or path.lower().endswith(LOCAL_GCODE_FILE_EXTENSIONS):
+            attachment_count += 1
+    return len(refs) + attachment_count >= 2
+
+
+def resolve_local_named_files(messages, cwd="", extensions=LOCAL_FILE_COMPARISON_EXTENSIONS, limit=4):
+    extensions = tuple(ext.lower() for ext in extensions)
+    files = []
+    missing = []
+    searched = []
+    seen_paths = set()
+
+    def add_candidate(candidate, source, name=""):
+        try:
+            path = Path(candidate).expanduser()
+        except (TypeError, ValueError):
+            return False
+        if not path.exists() or not path.is_file() or not str(path).lower().endswith(extensions):
+            return False
+        try:
+            key = str(path.resolve())
+        except OSError:
+            key = str(path)
+        if key in seen_paths:
+            return True
+        seen_paths.add(key)
+        files.append({"path": path, "source": source, "name": name or path.name})
+        return True
+
+    for attachment in message_attachments(messages):
+        if len(files) >= limit:
+            break
+        name = str(attachment.get("name") or "")
+        path = str(attachment.get("path") or "")
+        if name.lower().endswith(extensions) or path.lower().endswith(extensions):
+            add_candidate(path, "attached upload", name)
+
+    refs = local_text_file_names_from_text(latest_user_text(messages), extensions)
+    roots = local_text_file_search_roots(cwd)
+    for ref in refs:
+        if len(files) >= limit:
+            break
+        ref_path = Path(ref).expanduser()
+        found = False
+        direct_candidates = [ref_path] if ref_path.is_absolute() else [Path(root) / ref_path for root in roots]
+        for candidate in direct_candidates:
+            searched.append(str(candidate))
+            if add_candidate(candidate, "filename reference", ref_path.name):
+                found = True
+                break
+        if found:
+            continue
+        indexed = recent_attachment_match([ref], extensions, searched=searched)
+        if indexed and add_candidate(indexed.get("path"), "recent attachment index", indexed.get("name") or ref_path.name):
+            continue
+        basename = ref_path.name
+        for root in roots:
+            for candidate in iter_named_file_matches(root, basename, max_depth=4, limit=4):
+                searched.append(str(candidate))
+                if add_candidate(candidate, "filename search", basename):
+                    found = True
+                    break
+            if found:
+                break
+        if not found and ref not in missing:
+            missing.append(ref)
+    return {"files": files[:limit], "missing": missing, "searched": searched}
+
+
+def normalize_gcode_command(command_token):
+    command_token = str(command_token or "").strip().upper()
+    match = re.match(r"^([GMT])0*(\d+)$", command_token)
+    if match:
+        return f"{match.group(1)}{int(match.group(2))}"
+    match = re.match(r"^T(\d+)$", command_token)
+    if match:
+        return f"T{int(match.group(1))}"
+    return command_token
+
+
+def parse_gcode_params(command_part):
+    params = {}
+    for match in re.finditer(r"(?i)([XYZEFSP])\s*([-+]?\d+(?:\.\d+)?)", str(command_part or "")):
+        key = match.group(1).upper()
+        try:
+            params[key] = float(match.group(2))
+        except ValueError:
+            continue
+    return params
+
+
+def gcode_filename_duration(name):
+    match = re.search(r"(?i)(?<![A-Za-z0-9])(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)(?![A-Za-z0-9])", str(name or ""))
+    if not match:
+        return "", None
+    days = int(match.group(1) or 0)
+    hours = int(match.group(2) or 0)
+    minutes = int(match.group(3) or 0)
+    total = days * 24 * 60 + hours * 60 + minutes
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours or days:
+        parts.append(f"{hours}h")
+    parts.append(f"{minutes}m")
+    return " ".join(parts), total
+
+
+def bump_count(counts, key, amount=1):
+    counts[key] = counts.get(key, 0) + amount
+
+
+def analyze_gcode_file(path, max_bytes=LOCAL_GCODE_COMPARE_MAX_BYTES):
+    path = Path(path).expanduser()
+    try:
+        stat = path.stat()
+        size = stat.st_size
+        stat_error = ""
+    except OSError as exc:
+        size = 0
+        stat_error = str(exc)
+    duration_text, duration_minutes = gcode_filename_duration(path.name)
+    stats = {
+        "path": str(path),
+        "name": path.name,
+        "size": size,
+        "lineCount": 0,
+        "parsedBytes": 0,
+        "truncated": False,
+        "tooLarge": size > max_bytes,
+        "readError": stat_error,
+        "readBlocked": bool(stat_error),
+        "commandCounts": {},
+        "commandCount": 0,
+        "commentCount": 0,
+        "motionMoves": 0,
+        "extrusionMoves": 0,
+        "travelMoves": 0,
+        "layerMarkers": 0,
+        "fiberSignalCount": 0,
+        "fiberSignals": [],
+        "metadata": [],
+        "hotendTemps": [],
+        "bedTemps": [],
+        "fanCommands": 0,
+        "toolChanges": 0,
+        "extruderMode": "",
+        "positionMode": "",
+        "axisMin": {},
+        "axisMax": {},
+        "filenameDurationText": duration_text,
+        "filenameDurationMinutes": duration_minutes,
+    }
+    if stats["tooLarge"] or stat_error:
+        return stats
+
+    try:
+        with path.open("rb") as handle:
+            for raw_line in handle:
+                stats["parsedBytes"] += len(raw_line)
+                if stats["parsedBytes"] > max_bytes:
+                    stats["truncated"] = True
+                    break
+                stats["lineCount"] += 1
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+                lower = line.lower()
+                if ";" in line:
+                    comment = line.split(";", 1)[1].strip()
+                    if comment:
+                        stats["commentCount"] += 1
+                        comment_lower = comment.lower()
+                        if comment_lower.startswith("layer:") or comment_lower.startswith("layer "):
+                            stats["layerMarkers"] += 1
+                        if (
+                            len(stats["metadata"]) < 16
+                            and text_has_any(comment_lower, ("filament", "material", "layer", "nozzle", "estimated", "time", "printer", "profile"))
+                        ):
+                            stats["metadata"].append(compact(comment, 180))
+                if any(term in lower for term in GCODE_FIBER_SIGNAL_TERMS):
+                    stats["fiberSignalCount"] += 1
+                    if len(stats["fiberSignals"]) < 8:
+                        stats["fiberSignals"].append(f"line {stats['lineCount']}: {compact(line, 180)}")
+
+                command_part = line.split(";", 1)[0].strip()
+                if not command_part:
+                    continue
+                tokens = command_part.split()
+                if not tokens:
+                    continue
+                token_index = 1 if len(tokens) > 1 and re.match(r"(?i)^N\d+$", tokens[0]) else 0
+                command = normalize_gcode_command(tokens[token_index])
+                if not re.match(r"^(?:[GMT]\d+|T\d+)$", command):
+                    continue
+                bump_count(stats["commandCounts"], command)
+                stats["commandCount"] += 1
+                params = parse_gcode_params(command_part)
+                if command in {"G0", "G1", "G2", "G3"}:
+                    stats["motionMoves"] += 1
+                    if "E" in params:
+                        stats["extrusionMoves"] += 1
+                    else:
+                        stats["travelMoves"] += 1
+                    for axis in ("X", "Y", "Z"):
+                        if axis in params:
+                            value = params[axis]
+                            current_min = stats["axisMin"].get(axis)
+                            current_max = stats["axisMax"].get(axis)
+                            stats["axisMin"][axis] = value if current_min is None else min(current_min, value)
+                            stats["axisMax"][axis] = value if current_max is None else max(current_max, value)
+                elif command in {"M104", "M109"} and "S" in params:
+                    temp = int(round(params["S"]))
+                    if temp not in stats["hotendTemps"]:
+                        stats["hotendTemps"].append(temp)
+                elif command in {"M140", "M190"} and "S" in params:
+                    temp = int(round(params["S"]))
+                    if temp not in stats["bedTemps"]:
+                        stats["bedTemps"].append(temp)
+                elif command == "M106" or command == "M107":
+                    stats["fanCommands"] += 1
+                elif command.startswith("T"):
+                    stats["toolChanges"] += 1
+                elif command == "M82":
+                    stats["extruderMode"] = "absolute extrusion (M82)"
+                elif command == "M83":
+                    stats["extruderMode"] = "relative extrusion (M83)"
+                elif command == "G90":
+                    stats["positionMode"] = "absolute positioning (G90)"
+                elif command == "G91":
+                    stats["positionMode"] = "relative positioning (G91)"
+    except OSError as exc:
+        stats["readError"] = str(exc)
+        stats["readBlocked"] = getattr(exc, "errno", None) in {1, 13}
+        return stats
+    stats["hotendTemps"] = stats["hotendTemps"][:10]
+    stats["bedTemps"] = stats["bedTemps"][:10]
+    return stats
+
+
+def ratio_similarity(left, right):
+    try:
+        left = float(left)
+        right = float(right)
+    except (TypeError, ValueError):
+        return None
+    if left <= 0 or right <= 0:
+        return None
+    return min(left, right) / max(left, right)
+
+
+def dict_profile_similarity(left, right):
+    left = left or {}
+    right = right or {}
+    keys = set(left) | set(right)
+    if not keys:
+        return None
+    overlap = sum(min(int(left.get(key, 0)), int(right.get(key, 0))) for key in keys)
+    total = sum(max(int(left.get(key, 0)), int(right.get(key, 0))) for key in keys)
+    return (overlap / total) if total else None
+
+
+def format_percent(value):
+    if value is None:
+        return "unknown"
+    return f"{value * 100:.1f}%"
+
+
+def gcode_bbox_text(stats):
+    axis_min = stats.get("axisMin") or {}
+    axis_max = stats.get("axisMax") or {}
+    parts = []
+    for axis in ("X", "Y", "Z"):
+        if axis in axis_min and axis in axis_max:
+            span = axis_max[axis] - axis_min[axis]
+            parts.append(f"{axis} {axis_min[axis]:.2f}..{axis_max[axis]:.2f} mm ({span:.2f} mm span)")
+    return "; ".join(parts) if parts else "not enough coordinate data"
+
+
+def gcode_top_commands(stats, limit=6):
+    counts = stats.get("commandCounts") or {}
+    ranked = sorted(counts.items(), key=lambda item: item[1], reverse=True)
+    return ", ".join(f"{cmd}:{count}" for cmd, count in ranked[:limit]) if ranked else "none"
+
+
+def gcode_material_tokens(stats):
+    text = " ".join([stats.get("name") or "", *stats.get("metadata", [])]).lower()
+    tokens = []
+    for label, terms in (
+        ("PETG", ("petg", "pet-g")),
+        ("PET-CF", ("pet-cf", "pet cf", "pet_cf")),
+        ("PETG-CF", ("petg-cf", "petg cf", "petg_cf")),
+        ("CCF/fiber", ("ccf", "continuous fiber", "continuous fibre", "fiberseek", "fibreseek", "seeker")),
+    ):
+        if text_has_any(text, terms):
+            tokens.append(label)
+    return tokens
+
+
+def format_gcode_file_brief(stats):
+    if stats.get("tooLarge"):
+        return f"- `{stats['name']}`: {human_bytes(stats.get('size'))}; too large for bounded parser limit."
+    if stats.get("readError"):
+        duration = f"; filename print time `{stats['filenameDurationText']}`" if stats.get("filenameDurationText") else ""
+        material = ", ".join(gcode_material_tokens(stats)) or "filename-only material hints unavailable"
+        blocked = "read blocked" if stats.get("readBlocked") else "read failed"
+        return f"- `{stats['name']}`: {human_bytes(stats.get('size'))}; {blocked} (`{compact(stats.get('readError'), 120)}`); material hints `{material}`{duration}."
+    duration = f"; filename print time `{stats['filenameDurationText']}`" if stats.get("filenameDurationText") else ""
+    material = ", ".join(gcode_material_tokens(stats)) or "no material token found"
+    extrusion_ratio = ratio_similarity(stats.get("extrusionMoves"), stats.get("motionMoves"))
+    extrusion_text = f"{stats.get('extrusionMoves', 0):,} extrusion moves / {stats.get('motionMoves', 0):,} motion moves"
+    if extrusion_ratio is not None:
+        extrusion_text += f" ({stats.get('extrusionMoves', 0) / max(1, stats.get('motionMoves', 0)) * 100:.1f}% extrusion-bearing)"
+    return (
+        f"- `{stats['name']}`: {human_bytes(stats.get('size'))}; {stats.get('lineCount', 0):,} lines; "
+        f"{extrusion_text}; fiber/CCF signals `{stats.get('fiberSignalCount', 0)}`; material hints `{material}`{duration}."
+    )
+
+
+def local_gcode_comparison_verdict(left, right, metrics):
+    size_ratio = metrics.get("sizeRatio")
+    line_ratio = metrics.get("lineRatio")
+    command_profile = metrics.get("commandProfile")
+    time_ratio = metrics.get("filenameTimeRatio")
+    strong_difference = any(value is not None and value < 0.55 for value in (size_ratio, line_ratio, time_ratio))
+    command_difference = command_profile is not None and command_profile < 0.78
+    left_material = set(gcode_material_tokens(left))
+    right_material = set(gcode_material_tokens(right))
+    material_overlap = bool(left_material & right_material)
+    if strong_difference or command_difference:
+        if material_overlap:
+            return "They look related by naming/material family, but they are not equivalent G-code jobs."
+        return "They do not look equivalent as G-code jobs."
+    return "They look broadly similar as G-code jobs, pending visual slicer-preview verification."
+
+
+def format_local_gcode_comparison_answer(resolved):
+    files = resolved.get("files") or []
+    if len(files) < 2:
+        missing = ", ".join(f"`{name}`" for name in resolved.get("missing") or []) or "the second local file"
+        searched_count = len(resolved.get("searched") or [])
+        return "\n\n".join(
+            [
+                "I recognized this as a local file comparison request, not web research, but I could not resolve two readable files yet.",
+                f"This is why: the prompt names local files, and I checked bounded local filename candidates first ({searched_count} path checks). Missing or unresolved: {missing}.",
+                "You should also consider: attach both files or paste the full absolute paths. Once both resolve, I should compare the files locally and only use web research if you explicitly ask for outside reference data.",
+            ]
+        )
+    left_info, right_info = files[0], files[1]
+    try:
+        left = analyze_gcode_file(left_info["path"])
+        right = analyze_gcode_file(right_info["path"])
+    except Exception as exc:
+        return "\n\n".join(
+            [
+                "I found the two local G-code files, but the bounded comparison parser failed before it could finish.",
+                f"This is why: the files resolved locally, but G-code analysis raised `{exc}`.",
+                "You should also consider: if either file is locked, compressed, or not plain G-code, export a plain `.gcode` copy or attach the slicer project so I can compare the job setup instead.",
+            ]
+        )
+    metrics = {
+        "sizeRatio": ratio_similarity(left.get("size"), right.get("size")),
+        "lineRatio": ratio_similarity(left.get("lineCount"), right.get("lineCount")),
+        "motionRatio": ratio_similarity(left.get("motionMoves"), right.get("motionMoves")),
+        "extrusionRatio": ratio_similarity(left.get("extrusionMoves"), right.get("extrusionMoves")),
+        "commandProfile": dict_profile_similarity(left.get("commandCounts"), right.get("commandCounts")),
+        "filenameTimeRatio": ratio_similarity(left.get("filenameDurationMinutes"), right.get("filenameDurationMinutes")),
+    }
+    verdict = local_gcode_comparison_verdict(left, right, metrics)
+    fiber_line = (
+        f"CCF/fiber signals: `{left['name']}` has {left.get('fiberSignalCount', 0):,}; "
+        f"`{right['name']}` has {right.get('fiberSignalCount', 0):,}. "
+    )
+    read_errors = [item for item in (left, right) if item.get("readError")]
+    if read_errors:
+        blocked_names = ", ".join(f"`{item['name']}`" for item in read_errors)
+        fiber_line += f"Content-level CCF/fiber proof is unavailable because local reads failed for {blocked_names}; filename/profile hints are not enough to prove continuous-fiber logic."
+    elif left.get("fiberSignals") or right.get("fiberSignals"):
+        fiber_line += "I found explicit fiber-related text in at least one file."
+    else:
+        fiber_line += "I did not find explicit CCF/fiber control text in the parsed G-code, so filename/profile hints alone should not be treated as proof of continuous-fiber logic."
+    if read_errors:
+        plastic_line = (
+            "Plastic extrusion logic: content-level extrusion/motion comparison is unavailable until the app can read both files; "
+            f"coarse size similarity is {format_percent(metrics['sizeRatio'])} and filename print-time similarity is {format_percent(metrics['filenameTimeRatio'])}."
+        )
+    else:
+        plastic_line = (
+            "Plastic extrusion logic: extrusion-move similarity "
+            f"{format_percent(metrics['extrusionRatio'])}; motion-move similarity {format_percent(metrics['motionRatio'])}; "
+            f"command-profile similarity {format_percent(metrics['commandProfile'])}."
+        )
+    file_stats = "\n".join([format_gcode_file_brief(left), format_gcode_file_brief(right)])
+    geometry_stats = "\n".join(
+        [
+            f"- `{left['name']}` bounds: {gcode_bbox_text(left)}.",
+            f"- `{right['name']}` bounds: {gcode_bbox_text(right)}.",
+        ]
+    )
+    command_stats = "\n".join(
+        [
+            f"- `{left['name']}` top commands: {gcode_top_commands(left)}.",
+            f"- `{right['name']}` top commands: {gcode_top_commands(right)}.",
+        ]
+    )
+    size_detail = (
+        f"Size similarity {format_percent(metrics['sizeRatio'])}; line-count similarity {format_percent(metrics['lineRatio'])}; "
+        f"filename print-time similarity {format_percent(metrics['filenameTimeRatio'])}."
+    )
+    return "\n\n".join(
+        [
+            f"I found both local G-code files and compared them locally, not web research. {verdict}",
+            f"File stats:\n{file_stats}",
+            f"Similarity:\n- {size_detail}\n- {plastic_line}\n- {fiber_line}",
+            f"Geometry/toolpath shape:\n{geometry_stats}\n{command_stats}",
+            (
+                "This is why: the request named two local `.gcode` files, so I resolved those filenames on this Mac and compared the local evidence available to me "
+                "instead of trying Local Research. When file content is readable, I compare line counts, command distributions, motion/extrusion moves, coordinate bounds, and CCF/fiber text signals; when macOS blocks reads, I fall back to filename/stat evidence and say that the command-level proof is blocked."
+            ),
+            (
+                "You should also consider: for a final yes/no on print equivalence, open both in the slicer preview and compare layer-by-layer feature paths. "
+                "If this answer says reads were blocked, attach the files with the native plus button, move/copy them into an app-readable folder, or grant the app/Python process local file access before asking for CCF and plastic command proof."
+            ),
+        ]
+    )
+
+
+def basic_local_file_stats(path):
+    path = Path(path).expanduser()
+    stat = path.stat()
+    digest = ""
+    if stat.st_size <= 50 * 1024 * 1024:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+    return {"path": path, "name": path.name, "size": stat.st_size, "suffix": path.suffix.lower(), "sha256Prefix": digest}
+
+
+def format_basic_local_file_comparison_answer(resolved):
+    files = resolved.get("files") or []
+    if len(files) < 2:
+        missing = ", ".join(f"`{name}`" for name in resolved.get("missing") or []) or "the second local file"
+        return "\n\n".join(
+            [
+                "I recognized this as a local file comparison request, not web research, but I could not resolve two readable files yet.",
+                f"This is why: the prompt names local files, but the bounded local filename search did not resolve both. Missing or unresolved: {missing}.",
+                "You should also consider: attach both files or paste full absolute paths so I can compare the actual files instead of guessing from filenames.",
+            ]
+        )
+    left = basic_local_file_stats(files[0]["path"])
+    right = basic_local_file_stats(files[1]["path"])
+    same_suffix = left["suffix"] == right["suffix"]
+    same_digest = left["sha256Prefix"] and left["sha256Prefix"] == right["sha256Prefix"]
+    size_ratio = ratio_similarity(left["size"], right["size"])
+    verdict = "They are byte-identical in the bounded hash check." if same_digest else "They are not byte-identical in the bounded metadata check."
+    return "\n\n".join(
+        [
+            f"I found both local files and compared them locally, not web research. {verdict}",
+            (
+                f"- `{left['name']}`: {human_bytes(left['size'])}, suffix `{left['suffix'] or 'none'}`, hash prefix `{left['sha256Prefix'] or 'not computed for large file'}`.\n"
+                f"- `{right['name']}`: {human_bytes(right['size'])}, suffix `{right['suffix'] or 'none'}`, hash prefix `{right['sha256Prefix'] or 'not computed for large file'}`."
+            ),
+            f"This is why: suffix match is `{same_suffix}`, size similarity is {format_percent(size_ratio)}, and I compared local file metadata/hash evidence instead of sending the prompt to Local Research.",
+            "You should also consider: if you want semantic comparison, tell me what kind of files they are or attach/export a text form so I can compare structure, settings, and meaning rather than just metadata.",
+        ]
+    )
+
+
+def local_file_comparison_direct_answer(messages, cwd=""):
+    if not is_local_file_comparison_question(messages):
+        return ""
+    extensions = LOCAL_GCODE_FILE_EXTENSIONS if is_local_gcode_file_comparison_question(messages) else LOCAL_FILE_COMPARISON_EXTENSIONS
+    resolved = resolve_local_named_files(messages, cwd=cwd, extensions=extensions, limit=2)
+    files = resolved.get("files") or []
+    if len(files) >= 2 and all(str(item.get("path", "")).lower().endswith(LOCAL_GCODE_FILE_EXTENSIONS) for item in files[:2]):
+        return format_local_gcode_comparison_answer(resolved)
+    return format_basic_local_file_comparison_answer(resolved)
 
 
 def is_local_text_file_inspection_question(messages):
@@ -92168,6 +92853,122 @@ def package_health_report():
         add("api:local-text-config-answer-synthesis", "fail", str(exc))
 
     try:
+        with tempfile.TemporaryDirectory(prefix="local-gcode-compare-health-") as tmp_dir:
+            first_path = Path(tmp_dir) / "6 TinmanX1 6-blades boat prop(Ready) v1_0.4n_0.2mm_PETG_SEEKER 3_3d0h47m.gcode"
+            second_path = Path(tmp_dir) / "Heavy Comparison 6-blades boat prop(Ready) v1_0.4n_0.2mm_PETG_SEEKER 3_16h21m.gcode"
+            first_path.write_text(
+                "\n".join(
+                    [
+                        "; generated by OrcaSlicer",
+                        "; filament_type = PETG_SEEKER",
+                        "; CCF continuous fiber path enabled",
+                        "M82",
+                        "G90",
+                        "M104 S245",
+                        "M140 S80",
+                        "G1 X0 Y0 Z0.2 F6000",
+                        "G1 X10 Y0 E0.4 F1200",
+                        "G1 X10 Y10 E0.8",
+                        "; fiber pass start",
+                        "T1",
+                        "G1 X5 Y5 E1.0",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            second_path.write_text(
+                "\n".join(
+                    [
+                        "; generated by OrcaSlicer",
+                        "; filament_type = PETG_SEEKER",
+                        "M82",
+                        "G90",
+                        "M104 S245",
+                        "M140 S80",
+                        "G1 X0 Y0 Z0.2 F6000",
+                        "G1 X10 Y0 E0.4 F1200",
+                        "G1 X10 Y10 F6000",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            prompt = "\n".join(
+                [
+                    first_path.name,
+                    "393 MB",
+                    second_path.name,
+                    "95 MB",
+                    "Will you compare these 2 files and see if they are similar if CCF and plastic logic",
+                ]
+            )
+            messages = [{"role": "user", "text": prompt}]
+            route = route_manager(messages, cwd=tmp_dir, requested_profile="manager", web_search="disabled")
+            answer = local_file_comparison_direct_answer(messages, cwd=tmp_dir)
+            answer_lower = answer.lower()
+            ok = (
+                is_local_file_comparison_question(messages)
+                and is_local_gcode_file_comparison_question(messages)
+                and route.get("projectId") == "tinmanx-slicer-research"
+                and route.get("engine") == "local"
+                and "local-gcode-file-comparison" in (route.get("matched") or [])
+                and "found both local g-code files" in answer_lower
+                and first_path.name.lower() in answer_lower
+                and second_path.name.lower() in answer_lower
+                and "not web research" in answer_lower
+                and "ccf/fiber signals" in answer_lower
+                and "plastic extrusion logic" in answer_lower
+                and "this is why:" in answer_lower
+                and "you should also consider:" in answer_lower
+                and "local research could not find" not in answer_lower
+            )
+        add(
+            "api:local-gcode-file-comparison-direct",
+            "pass" if ok else "fail",
+            "multi-word named G-code comparison resolves local files and compares toolpath/fiber/plastic logic without Local Research",
+        )
+    except Exception as exc:
+        add("api:local-gcode-file-comparison-direct", "fail", str(exc))
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="local-gcode-compare-blocked-health-") as tmp_dir:
+            first_path = Path(tmp_dir) / "Blocked Alpha PETG_SEEKER 2h10m.gcode"
+            second_path = Path(tmp_dir) / "Blocked Beta PETG_SEEKER 4h20m.gcode"
+            first_path.write_text("; filament_type = PETG_SEEKER\nG1 X0 Y0 E0.1\n", encoding="utf-8")
+            second_path.write_text("; filament_type = PETG_SEEKER\nG1 X0 Y0 E0.1\nG1 X5 Y5 E0.2\n", encoding="utf-8")
+            try:
+                first_path.chmod(0)
+                second_path.chmod(0)
+                prompt = "\n".join(
+                    [
+                        first_path.name,
+                        second_path.name,
+                        "Compare these two files for CCF and plastic logic.",
+                    ]
+                )
+                answer = local_file_comparison_direct_answer([{"role": "user", "text": prompt}], cwd=tmp_dir)
+                answer_lower = answer.lower()
+                ok = (
+                    "found both local g-code files" in answer_lower
+                    and "not web research" in answer_lower
+                    and ("read blocked" in answer_lower or "read failed" in answer_lower)
+                    and "content-level ccf/fiber proof is unavailable" in answer_lower
+                    and "plastic extrusion logic: content-level" in answer_lower
+                    and "local research could not find" not in answer_lower
+                )
+            finally:
+                first_path.chmod(0o600)
+                second_path.chmod(0o600)
+        add(
+            "api:local-gcode-file-comparison-read-blocked",
+            "pass" if ok else "fail",
+            "local G-code comparison explains read-permission blockers and avoids Local Research fallback",
+        )
+    except Exception as exc:
+        add("api:local-gcode-file-comparison-read-blocked", "fail", str(exc))
+
+    try:
         with tempfile.TemporaryDirectory(prefix="local-manual-evidence-health-") as tmp_dir:
             fixture_path = Path(tmp_dir) / "NameOnlyManualHealth.txt"
             fixture_path.write_text(
@@ -96742,6 +97543,12 @@ def package_health_report():
                 [{"role": "user", "text": "What would be the best option for AI print failure monitoring?"}],
                 "printer-klipper-ops",
                 ("Best free/local", "This is why:", "You should also consider:"),
+            ),
+            (
+                "printer-ai-command-center-architecture",
+                [{"role": "user", "text": "What would be the best solution for an AI server that would be able to run AI detection for 10 3d printers and display a command center on an HDMI monitor?"}],
+                "printer-klipper-ops",
+                ("10-printer", "Linux/NVIDIA", "HDMI", "kiosk", "MakersVPN", "camera", "Moonraker", "This is why:", "You should also consider:"),
             ),
             (
                 "outdoor-filament-material-choice",
@@ -107775,6 +108582,23 @@ def task_contract(messages, route=None):
         must_do = ["name the target URL", "state HTTP status or timeout/error", "mention same-subnet or LAN binding caveat"]
         required_proof = ["target URL", "HTTP status or timeout", "same subnet caveat"]
         reject_if.extend(["treats local HTTP as public web research", "requires source URLs", "gives only a generic checklist"])
+    elif is_printer_ai_command_center_architecture_question(messages):
+        kind = "Printer AI command-center architecture"
+        done = "Recommend a context-aware local printer-fleet AI server architecture with HDMI dashboard, GPU sizing assumptions, printer-controller separation, and proof gates."
+        must_do = [
+            "recommend a local Linux/NVIDIA workstation or equivalent GPU host",
+            "name HDMI/kiosk dashboard operation",
+            "keep printer controllers separate from the AI/video server",
+            "name camera/API assumptions",
+            "ask for sizing details before final hardware selection",
+        ]
+        required_proof = ["10-printer", "Linux/NVIDIA", "HDMI", "kiosk", "printer controllers", "camera", "Moonraker", "watchdog"]
+        reject_if.extend([
+            "only recommends Docker/Grafana/Prometheus",
+            "recommends Jetson as the main 10-printer server without caveat",
+            "omits clarifying assumptions",
+            "omits staged proof step",
+        ])
     elif is_ai_print_failure_monitoring_question(messages):
         kind = "Local AI print-failure monitoring"
         done = "Recommend a free/local print-failure monitoring path and name the camera/lighting/reliability limits without requiring a paid cloud service."
@@ -115434,6 +116258,53 @@ class CodexUIHandler(BaseHTTPRequestHandler):
                 route,
                 admin_topic,
                 ai_ui_intent_answer,
+                normalize=False,
+            )
+            json_line(self, {"type": "done", "returnCode": 0})
+            return
+
+        local_file_compare_answer = local_file_comparison_direct_answer(messages, cwd=cwd)
+        if local_file_compare_answer:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            json_line(
+                self,
+                {
+                    "type": "status",
+                    "message": "starting",
+                    "cwd": cwd,
+                    "profile": profile,
+                    "effectiveProfile": effective_profile,
+                    "accessLevel": "local-files",
+                    "reasoningLevel": reasoning_level,
+                    "webSearch": web_search,
+                    "managerDepth": manager_depth,
+                    "friendlinessLevel": friendliness_level,
+                    "humorLevel": humor_level,
+                    "mode": "local-file-comparison",
+                    "engine": "local-files",
+                    "model": "",
+                    "freeOnlyRedirect": free_only_redirect,
+                    "route": route,
+                    "adminTopic": admin_topic,
+                },
+            )
+            json_line(
+                self,
+                {
+                    "type": "thought",
+                    "text": "Resolving the named local files and comparing them directly before considering model or web research.",
+                },
+            )
+            emit_assistant_answer(
+                self,
+                messages,
+                route,
+                admin_topic,
+                local_file_compare_answer,
                 normalize=False,
             )
             json_line(self, {"type": "done", "returnCode": 0})
