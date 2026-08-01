@@ -57,6 +57,14 @@ CODEX_PROFILE=local-oss CODEX_CWD="$HOME/Documents/Codex" python3 server.py
 
 The server binds to `127.0.0.1` by default and streams `codex exec --json` output to the browser.
 
+## Interaction Architecture
+
+Every turn is interpreted from the full recent conversation before an executor is selected. The intelligence kernel identifies the user's objective, requested action, relevant objects, constraints, evidence needs, and decision-changing gaps. A typed capability registry then gives one execution path authority over the turn, which prevents an unrelated keyword or older one-off answer helper from taking over.
+
+The active answer travels in a structured envelope that records evidence, provenance, artifacts, gaps, and revisions. Capability-specific checks validate the result before it is shown. A focused clarification is a valid finished response when missing information would materially change the answer; otherwise the system should answer or perform the requested work and clearly report what it proved.
+
+The compatibility server still contains legacy routes while this migration continues. New behavior should be added through `intelligence_kernel.py`, `capability_registry.py`, and `answer_envelope.py`, with a regression test that uses novel wording. Do not add product-specific canned answers to fix isolated prompts.
+
 ## Modes
 
 - `Manager` is the default. It routes each request to a project specialist, runs the worker answer through local `Review`, then uses local `gpt-oss-20b` to polish the final answer.

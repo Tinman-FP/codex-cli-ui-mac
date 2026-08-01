@@ -11,15 +11,15 @@
         {"role": "user", "text": "What about the outdoor bracket?"}
       ],
       "answer": "Answer: Use ASA for the bracket.\n\nThis is why: it handles UV and heat better outdoors.\n\nYou should also consider: use enough walls and dry the filament.",
-      "required": ["Use ASA for the bracket.", "The reason is:", "One practical caveat:"],
-      "forbidden": ["What matters:", "Keep this boundary in view:", "This is why:", "You should also consider:"]
+      "required": ["Use ASA for the bracket.", "It handles UV and heat better outdoors.", "Use enough walls and dry the filament."],
+      "forbidden": ["What matters:", "Keep this boundary in view:", "The reason is:", "One practical caveat:", "This is why:", "You should also consider:"]
     },
     {
       "id": "fresh-conversation-keeps-clear-defaults",
       "messages": [{"role": "user", "text": "What material should I use outdoors?"}],
       "answer": "Answer: Use ASA outdoors.\n\nThis is why: it handles UV and heat better.\n\nYou should also consider: use enough walls.",
-      "required": ["Use ASA outdoors.", "What matters:", "Keep this boundary in view:"],
-      "forbidden": ["The reason is:", "One practical caveat:", "This is why:", "You should also consider:"]
+      "required": ["Use ASA outdoors.", "It handles UV and heat better.", "Use enough walls."],
+      "forbidden": ["What matters:", "Keep this boundary in view:", "The reason is:", "One practical caveat:", "This is why:", "You should also consider:"]
     }
   ]
 }

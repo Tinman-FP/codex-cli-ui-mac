@@ -143,6 +143,31 @@ def current_access_restart_case():
     }
 
 
+def local_installation_status_case():
+    return {
+        "id": "registered-capability-installation-status",
+        "messages": [{"role": "user", "text": "Do you have Hunyuan3D-2.1 installed?"}],
+        "required": [
+            "Yes.",
+            "Hunyuan3D-2.1",
+            "installed locally",
+            "runtime is ready",
+            "model weights present",
+            "runtime load smoke test passed",
+            "texture/PBR runtime is intentionally deferred",
+        ],
+        "forbidden": [
+            "not installed on this machine",
+            "ollama pull",
+            "quick search of common install locations",
+            "Local Research could not find",
+            "Load failed",
+            "Recovery plan:",
+        ],
+        "expectedProjectId": "codex-cli-ui-local-agent",
+    }
+
+
 def source_vault_btt_cache_location_case():
     return {
         "id": "source-vault-btt-cache-location",
@@ -607,6 +632,7 @@ def case_messages(case):
 
 def live_cases(include_artifact_cases=False, include_source_vault_cases=False, include_local_evidence_cases=False):
     cases = [
+        local_installation_status_case(),
         {
             "id": "agent-preference-direct",
             "messages": [{"role": "user", "text": "What would you like to be called brother?"}],

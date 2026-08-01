@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Codex CLI</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/styles.css?v=20260718-session-compass" />
+    <link rel="stylesheet" href="/styles.css?v=20260729-polished-chat-shell" />
   </head>
   <body>
     <a class="skip-link" href="#conversation">Skip to chat</a>
@@ -347,120 +347,128 @@
             </button>
           </div>
           <div class="attachment-tray" id="attachmentTray" role="list" aria-label="Attached files" hidden></div>
-          <div class="engineering-strip" id="engineeringStrip" aria-label="Engineering analysis tools">
-            <div class="engineering-pack-status">
-              <div class="engineering-pack" id="aeroPackStatus">
-                <span>Aero</span>
-                <strong id="aeroPackText">Checking</strong>
+          <details class="composer-tools" id="composerToolsDrawer">
+            <summary>
+              <span>Tools and settings</span>
+              <span class="composer-tools-summary" id="composerToolsSummary">Local · Warm · Web on</span>
+            </summary>
+            <div class="composer-tools-body">
+              <div class="engineering-strip" id="engineeringStrip" aria-label="Engineering analysis tools">
+                <div class="engineering-pack-status">
+                  <div class="engineering-pack" id="aeroPackStatus">
+                    <span>Aero</span>
+                    <strong id="aeroPackText">Checking</strong>
+                  </div>
+                  <div class="engineering-pack" id="structuralPackStatus">
+                    <span>Structural</span>
+                    <strong id="structuralPackText">Checking</strong>
+                  </div>
+                  <div class="engineering-pack" id="toolPackStatus">
+                    <span>Tools</span>
+                    <strong id="toolPackText">Checking</strong>
+                  </div>
+                </div>
+                <div class="engineering-actions">
+                  <button class="analysis-button primary" id="runDeeperButton" type="button" title="Run the best deeper engineering analysis for this prompt" aria-label="Run deeper engineering analysis">
+                    <span>↯</span>
+                    <span>Run Deeper</span>
+                  </button>
+                  <button class="analysis-button" id="runAeroButton" type="button" title="Run Aero/CFD preflight on the current prompt or attachment">
+                    <span>⇥</span>
+                    <span>Aero</span>
+                  </button>
+                  <button class="analysis-button" id="runStructuralButton" type="button" title="Run Structural FEA on the current prompt or attachment" aria-label="Run structural FEA analysis">
+                    <span>⌁</span>
+                    <span>FEA</span>
+                  </button>
+                </div>
               </div>
-              <div class="engineering-pack" id="structuralPackStatus">
-                <span>Structural</span>
-                <strong id="structuralPackText">Checking</strong>
+              <div class="run-controls" aria-label="Codex run settings">
+                <label class="control-chip" for="modeSelect">
+                  <span>Mode</span>
+                  <select id="modeSelect" aria-label="Codex mode">
+                    <option value="manager" data-reasoning="medium">Manager</option>
+                    <option value="local-fast" data-reasoning="low">Fast</option>
+                    <option value="local-oss" data-reasoning="medium">Careful</option>
+                    <option value="local-coder" data-reasoning="medium">Coder</option>
+                    <option value="local-review" data-reasoning="high">Review</option>
+                    <option value="local-deep-review" data-reasoning="high">Deep Review</option>
+                    <option value="local-research" data-reasoning="high">Local Research</option>
+                    <option value="research-apply" data-reasoning="high">Research + Apply</option>
+                    <option value="cloud-research" data-reasoning="high">Cloud Research</option>
+                  </select>
+                </label>
+                <label class="control-chip" for="managerDepthSelect">
+                  <span>Speed</span>
+                  <select id="managerDepthSelect" aria-label="Manager speed">
+                    <option value="fast">Fast</option>
+                    <option value="balanced">Balanced</option>
+                    <option value="full">Full</option>
+                  </select>
+                </label>
+                <label class="control-chip" for="accessSelect">
+                  <span>Access</span>
+                  <select id="accessSelect" aria-label="Codex access level">
+                    <option value="read-only">Read</option>
+                    <option value="workspace-write">Workspace</option>
+                    <option value="danger-full-access">Full</option>
+                  </select>
+                </label>
+                <label class="control-chip" for="reasoningSelect">
+                  <span>Think</span>
+                  <select id="reasoningSelect" aria-label="Reasoning level">
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </label>
+                <label class="control-chip" for="friendlinessSelect">
+                  <span>Tone</span>
+                  <select id="friendlinessSelect" aria-label="Friendliness level">
+                    <option value="focused">Focused</option>
+                    <option value="warm">Warm</option>
+                    <option value="high">High</option>
+                  </select>
+                </label>
+                <label class="control-chip" for="humorSelect">
+                  <span>Humor</span>
+                  <select id="humorSelect" aria-label="Humor level">
+                    <option value="off">Off</option>
+                    <option value="light">Light</option>
+                    <option value="playful">Playful</option>
+                  </select>
+                </label>
+                <label class="control-chip" for="textScaleSelect">
+                  <span>Text</span>
+                  <select id="textScaleSelect" aria-label="Text size">
+                    <option value="normal">Normal</option>
+                    <option value="large">Large</option>
+                  </select>
+                </label>
+                <div class="control-chip web-chip">
+                  <span>Web</span>
+                  <button class="switch-button" id="webAccessToggle" type="button" role="switch" aria-checked="true" aria-label="Web access">
+                    <span class="switch-track" aria-hidden="true">
+                      <span class="switch-thumb"></span>
+                    </span>
+                    <span class="switch-text" id="webAccessLabel">On</span>
+                  </button>
+                </div>
               </div>
-              <div class="engineering-pack" id="toolPackStatus">
-                <span>Tools</span>
-                <strong id="toolPackText">Checking</strong>
+              <div class="privacy-notice" id="privacyNotice" role="note">Local privacy: do not paste passwords, API keys, tokens, or private customer data. Attach only files you want Codex to read for the active task; native local-path attachments are referenced from this Mac instead of copied when possible.</div>
+              <div class="privacy-storage-summary" id="privacyStorageSummary" role="note" aria-label="Privacy and storage summary">
+                <span>Storage: local conversations and receipts stay on this Mac.</span>
+                <span>Review: local review can read the active task; cloud review only happens when cloud/research or share/export is chosen.</span>
+                <span>Shared use: keep private files, source vaults, and machine inventory out of shared profiles unless explicitly shared.</span>
+              </div>
+              <div class="privacy-controls-summary" id="privacyControlsSummary" role="note" aria-label="Privacy controls summary">
+                <span>Export/delete: ask Codex to locate local task data first, then keep, export, or remove only the confirmed files.</span>
+                <span>Training: local answers are not model-training data here; cloud modes follow the selected provider's terms.</span>
+                <span>Settings: mode, access, web, and style choices persist locally with the saved task; verify them before shared use or confidential work.</span>
               </div>
             </div>
-            <div class="engineering-actions">
-              <button class="analysis-button primary" id="runDeeperButton" type="button" title="Run the best deeper engineering analysis for this prompt" aria-label="Run deeper engineering analysis">
-                <span>↯</span>
-                <span>Run Deeper</span>
-              </button>
-              <button class="analysis-button" id="runAeroButton" type="button" title="Run Aero/CFD preflight on the current prompt or attachment">
-                <span>⇥</span>
-                <span>Aero</span>
-              </button>
-              <button class="analysis-button" id="runStructuralButton" type="button" title="Run Structural FEA on the current prompt or attachment" aria-label="Run structural FEA analysis">
-                <span>⌁</span>
-                <span>FEA</span>
-              </button>
-            </div>
-          </div>
-          <div class="run-controls" aria-label="Codex run settings">
-            <label class="control-chip" for="modeSelect">
-              <span>Mode</span>
-              <select id="modeSelect" aria-label="Codex mode">
-                <option value="manager" data-reasoning="medium">Manager</option>
-                <option value="local-fast" data-reasoning="low">Fast</option>
-                <option value="local-oss" data-reasoning="medium">Careful</option>
-                <option value="local-coder" data-reasoning="medium">Coder</option>
-                <option value="local-review" data-reasoning="high">Review</option>
-                <option value="local-deep-review" data-reasoning="high">Deep Review</option>
-                <option value="local-research" data-reasoning="high">Local Research</option>
-                <option value="research-apply" data-reasoning="high">Research + Apply</option>
-                <option value="cloud-research" data-reasoning="high">Cloud Research</option>
-              </select>
-            </label>
-            <label class="control-chip" for="managerDepthSelect">
-              <span>Speed</span>
-              <select id="managerDepthSelect" aria-label="Manager speed">
-                <option value="fast">Fast</option>
-                <option value="balanced">Balanced</option>
-                <option value="full">Full</option>
-              </select>
-            </label>
-            <label class="control-chip" for="accessSelect">
-              <span>Access</span>
-              <select id="accessSelect" aria-label="Codex access level">
-                <option value="read-only">Read</option>
-                <option value="workspace-write">Workspace</option>
-                <option value="danger-full-access">Full</option>
-              </select>
-            </label>
-            <label class="control-chip" for="reasoningSelect">
-              <span>Think</span>
-              <select id="reasoningSelect" aria-label="Reasoning level">
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-              </select>
-            </label>
-            <label class="control-chip" for="friendlinessSelect">
-              <span>Tone</span>
-              <select id="friendlinessSelect" aria-label="Friendliness level">
-                <option value="focused">Focused</option>
-                <option value="warm">Warm</option>
-                <option value="high">High</option>
-              </select>
-            </label>
-            <label class="control-chip" for="humorSelect">
-              <span>Humor</span>
-              <select id="humorSelect" aria-label="Humor level">
-                <option value="off">Off</option>
-                <option value="light">Light</option>
-                <option value="playful">Playful</option>
-              </select>
-            </label>
-            <label class="control-chip" for="textScaleSelect">
-              <span>Text</span>
-              <select id="textScaleSelect" aria-label="Text size">
-                <option value="normal">Normal</option>
-                <option value="large">Large</option>
-              </select>
-            </label>
-            <div class="control-chip web-chip">
-              <span>Web</span>
-              <button class="switch-button" id="webAccessToggle" type="button" role="switch" aria-checked="true" aria-label="Web access">
-                <span class="switch-track" aria-hidden="true">
-                  <span class="switch-thumb"></span>
-                </span>
-                <span class="switch-text" id="webAccessLabel">On</span>
-              </button>
-            </div>
-          </div>
+          </details>
           <div class="run-state" id="runState" role="status" aria-live="polite" aria-atomic="true" aria-label="Codex status: Idle" data-stage="idle">Idle</div>
-          <div class="privacy-notice" id="privacyNotice" role="note">Local privacy: do not paste passwords, API keys, tokens, or private customer data. Attach only files you want Codex to read for the active task; native local-path attachments are referenced from this Mac instead of copied when possible.</div>
-          <div class="privacy-storage-summary" id="privacyStorageSummary" role="note" aria-label="Privacy and storage summary">
-            <span>Storage: local conversations and receipts stay on this Mac.</span>
-            <span>Review: local review can read the active task; cloud review only happens when cloud/research or share/export is chosen.</span>
-            <span>Shared use: keep private files, source vaults, and machine inventory out of shared profiles unless explicitly shared.</span>
-          </div>
-          <div class="privacy-controls-summary" id="privacyControlsSummary" role="note" aria-label="Privacy controls summary">
-            <span>Export/delete: ask Codex to locate local task data first, then keep, export, or remove only the confirmed files.</span>
-            <span>Training: local answers are not model-training data here; cloud modes follow the selected provider's terms.</span>
-            <span>Settings: mode, access, web, and style choices persist locally with the saved task; verify them before shared use or confidential work.</span>
-          </div>
         </section>
       </main>
 
@@ -529,6 +537,6 @@
       </aside>
     </div>
 
-    <script src="/app.js?v=20260717-dashboard-panels"></script>
+    <script src="/app.js?v=20260729-polished-chat-shell"></script>
   </body>
 </html>

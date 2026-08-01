@@ -116,10 +116,69 @@ def run_smoke(server, chrome_path, timeout_ms):
             page.wait_for_selector("#promptInput", state="visible", timeout=timeout_ms)
 
             add_check(checks, "app-title", page.title() == "Codex CLI", f"title={page.title()!r}")
-            for selector in ("#conversation", "#promptInput", "#attachButton", "#sendButton", "#runState"):
+            for selector in ("#conversation", "#promptInput", "#attachButton", "#sendButton"):
                 add_check(checks, f"visible:{selector}", visible(page, selector), f"{selector} visible")
             for selector in ("#promptInput", "#attachButton", "#sendButton"):
                 add_check(checks, f"enabled:{selector}", enabled(page, selector), f"{selector} enabled")
+            idle_status = page.evaluate(
+                """() => {
+                    const status = document.querySelector("#runState");
+                    const style = status ? getComputedStyle(status) : null;
+                    return {
+                        present: !!status,
+                        text: status?.textContent?.trim() || "",
+                        stage: status?.dataset?.stage || "",
+                        aria: status?.getAttribute("aria-label") || "",
+                        hidden: !!style && style.display === "none"
+                    };
+                }"""
+            )
+            add_check(
+                checks,
+                "idle-status-live-region-compact",
+                idle_status.get("present")
+                and idle_status.get("text") == "Idle"
+                and idle_status.get("stage") == "idle"
+                and "Codex status: Idle" in (idle_status.get("aria") or "")
+                and idle_status.get("hidden"),
+                "Idle status stays available to the app while hidden visually so the composer area remains calm",
+            )
+            drawer_state = page.evaluate(
+                """() => {
+                    const drawer = document.querySelector("#composerToolsDrawer");
+                    const summary = document.querySelector("#composerToolsDrawer > summary");
+                    const runControls = document.querySelector(".run-controls");
+                    const summaryRect = summary?.getBoundingClientRect();
+                    const runControlsRect = runControls?.getBoundingClientRect();
+                    return {
+                        present: !!drawer,
+                        open: !!drawer?.open,
+                        summaryVisible: !!summaryRect && summaryRect.width > 1 && summaryRect.height > 1,
+                        summaryText: summary?.textContent?.replace(/\\s+/g, " ").trim() || "",
+                        runControlsVisible: !!runControls
+                            && !runControls.closest("details:not([open])")
+                            && !!runControlsRect
+                            && runControlsRect.width > 1
+                            && runControlsRect.height > 1,
+                    };
+                }"""
+            )
+            add_check(
+                checks,
+                "composer-tools-drawer-default-compact",
+                drawer_state.get("present")
+                and not drawer_state.get("open")
+                and drawer_state.get("summaryVisible")
+                and "Tools and settings" in (drawer_state.get("summaryText") or "")
+                and "Web" in (drawer_state.get("summaryText") or "")
+                and not drawer_state.get("runControlsVisible"),
+                "Tool packs, run settings, and privacy copy start behind a discoverable composer drawer",
+            )
+            page.locator("#composerToolsDrawer > summary").click(timeout=timeout_ms)
+            page.wait_for_function(
+                "document.querySelector('#composerToolsDrawer')?.open === true",
+                timeout=timeout_ms,
+            )
             advanced_controls = page.evaluate(
                 """() => {
                     const wrap = document.querySelector(".run-controls");
@@ -142,7 +201,7 @@ def run_smoke(server, chrome_path, timeout_ms):
                 and {"Mode", "Speed", "Access", "Think", "Tone", "Humor", "Text"}.issubset(set(advanced_controls.get("labels", [])))
                 and advanced_controls.get("count", 99) <= 8
                 and not advanced_controls.get("overflow"),
-                "Advanced run options are visible as labeled compact controls without overflowing the desktop control row",
+                "Advanced run options are visible after opening the compact composer drawer without overflowing the desktop control row",
             )
             control_names = page.evaluate(
                 """() => {
@@ -342,7 +401,7 @@ def run_smoke(server, chrome_path, timeout_ms):
                 run_state_cues.get("text") == "Idle"
                 and run_state_cues.get("stage") == "idle"
                 and "Codex status: Idle" in (run_state_cues.get("aria") or ""),
-                "Run state exposes visible text, data-stage, and aria label instead of relying on color alone",
+                "Run state exposes text, data-stage, and aria label instead of relying on color alone",
             )
             initial_web_text = page.locator("#webAccessLabel").inner_text(timeout=timeout_ms).strip()
             initial_web_aria = page.locator("#webAccessToggle").get_attribute("aria-checked")
@@ -1582,7 +1641,10 @@ def run_smoke(server, chrome_path, timeout_ms):
                     "error-recovery-message-accessible",
                     error_recovery.get("found")
                     and "Codex message" in error_recovery.get("messageAria", "")
-                    and "This is why:" in error_recovery.get("recoveryText", "")
+                    and (
+                        "This is why:" in error_recovery.get("recoveryText", "")
+                        or "Why I'm saying that:" in error_recovery.get("recoveryText", "")
+                    )
                     and error_recovery.get("statusText") == "Recovered"
                     and error_recovery.get("statusAria") == "Codex status: Recovered"
                     and error_recovery.get("statusStage") == "recovered"
@@ -1750,6 +1812,7 @@ def run_smoke(server, chrome_path, timeout_ms):
             finally:
                 stream_context.close()
 
+            page.evaluate("document.querySelector('#composerToolsDrawer')?.removeAttribute('open')")
             page.set_viewport_size({"width": 390, "height": 844})
             page.wait_for_timeout(200)
             add_check(checks, "mobile:no-horizontal-overflow", no_horizontal_overflow(page), "390px viewport has no body-level horizontal overflow")
@@ -1810,6 +1873,36 @@ def run_smoke(server, chrome_path, timeout_ms):
                 not mobile_unnamed_controls,
                 "All visible phone-width buttons, fields, selects, and switches expose non-empty names",
             )
+            mobile_drawer_default = page.evaluate(
+                """() => {
+                    const drawer = document.querySelector("#composerToolsDrawer");
+                    const summary = document.querySelector("#composerToolsDrawer > summary");
+                    const controls = document.querySelector(".run-controls");
+                    return {
+                        present: !!drawer,
+                        open: !!drawer?.open,
+                        summaryVisible: !!summary && !!(summary.offsetWidth || summary.offsetHeight || summary.getClientRects().length),
+                        controlsVisible: !!controls
+                            && !controls.closest("details:not([open])")
+                            && !!(controls.offsetWidth || controls.offsetHeight || controls.getClientRects().length)
+                    };
+                }"""
+            )
+            add_check(
+                checks,
+                "mobile:composer-tools-drawer-default-compact",
+                mobile_drawer_default.get("present")
+                and not mobile_drawer_default.get("open")
+                and mobile_drawer_default.get("summaryVisible")
+                and not mobile_drawer_default.get("controlsVisible"),
+                "Phone-width tool/settings controls start behind the compact composer drawer",
+            )
+            page.locator("#composerToolsDrawer > summary").click(timeout=timeout_ms)
+            page.wait_for_function(
+                "document.querySelector('#composerToolsDrawer')?.open === true",
+                timeout=timeout_ms,
+            )
+            add_check(checks, "mobile:composer-tools-drawer-opens", visible(page, "#textScaleSelect"), "Phone-width drawer exposes text-size settings")
             page.locator("#textScaleSelect").select_option("large")
             page.wait_for_function("document.documentElement.dataset.textScale === 'large'", timeout=timeout_ms)
             add_check(
@@ -1827,6 +1920,7 @@ def run_smoke(server, chrome_path, timeout_ms):
                 )
             page.locator("#textScaleSelect").select_option("normal")
             page.wait_for_function("document.documentElement.dataset.textScale === 'normal'", timeout=timeout_ms)
+            page.evaluate("document.querySelector('#composerToolsDrawer')?.removeAttribute('open')")
             add_check(checks, "mobile:desktop-sidebar-hidden", not visible(page, ".sidebar"), "Desktop sidebar is hidden at phone width")
 
             page.select_option("#mobileViewSelect", "tests")

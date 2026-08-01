@@ -69,7 +69,7 @@ def run_case(server_url, name, cwd_value):
             and "server-crash-recovery" not in raw
             and "Traceback" not in raw
             and f"{partial_count} PARTIAL" in text
-            and "This is why:" in text
+            and "ai-ui-intent-checklist" in modes
         )
         return {
             "name": name,

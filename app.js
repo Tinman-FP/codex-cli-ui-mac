@@ -108,6 +108,7 @@ const els = {
   runAllTestsButton: document.getElementById("runAllTestsButton"),
   resetTestsButton: document.getElementById("resetTestsButton"),
   composerWrap: document.querySelector(".composer-wrap"),
+  composerToolsSummary: document.getElementById("composerToolsSummary"),
   attachButton: document.getElementById("attachButton"),
   fileInput: document.getElementById("fileInput"),
   attachmentTray: document.getElementById("attachmentTray"),
@@ -344,8 +345,14 @@ function loadState() {
   try {
     const parsed = JSON.parse(localStorage.getItem(storageKey));
     if (parsed && Array.isArray(parsed.threads)) {
-      parsed.monitorPanelMinimized = Boolean(parsed.monitorPanelMinimized);
-      parsed.runLogPanelMinimized = Boolean(parsed.runLogPanelMinimized);
+      if (!parsed.uiPolishCompactRailApplied) {
+        parsed.monitorPanelMinimized = true;
+        parsed.runLogPanelMinimized = true;
+        parsed.uiPolishCompactRailApplied = true;
+      } else {
+        parsed.monitorPanelMinimized = Boolean(parsed.monitorPanelMinimized);
+        parsed.runLogPanelMinimized = Boolean(parsed.runLogPanelMinimized);
+      }
       const { state: sanitized, changed } = sanitizeInterruptedRuns(parsed);
       if (changed) localStorage.setItem(storageKey, JSON.stringify(sanitized));
       return sanitized;
@@ -354,8 +361,9 @@ function loadState() {
   return {
     activeThreadId: "",
     sidebarView: "chats",
-    monitorPanelMinimized: false,
-    runLogPanelMinimized: false,
+    monitorPanelMinimized: true,
+    runLogPanelMinimized: true,
+    uiPolishCompactRailApplied: true,
     threads: [],
   };
 }
@@ -679,6 +687,9 @@ function setRunning(isRunning) {
   if (els.cancelRunButton) {
     els.cancelRunButton.hidden = !isRunning;
     els.cancelRunButton.disabled = !isRunning;
+  }
+  if (els.composerWrap) {
+    els.composerWrap.classList.toggle("running", isRunning);
   }
   els.attachButton.disabled = isRunning;
   els.fileInput.disabled = isRunning;
@@ -2505,10 +2516,26 @@ function renderMessageText(container, message) {
   const text = message.text || (message.thoughts?.length ? "" : "Working...");
   if (!text) return;
   if (message.role === "assistant") {
-    renderMarkdown(container, text);
+    renderMarkdown(container, conversationalAssistantText(text));
     return;
   }
   container.textContent = text;
+}
+
+function conversationalAssistantText(text) {
+  const source = String(text || "");
+  return source.split(/(```[\s\S]*?```)/g).map((part) => {
+    if (part.startsWith("```")) return part;
+    return part
+      .replace(/(^|\n)This is why:/g, "$1Why I'm saying that:")
+      .replace(/(^|\n)Why this works:/g, "$1Why I like this path:")
+      .replace(/(^|\n)You should also consider:/g, "$1A few things I'd keep in mind:")
+      .replace(/(^|\n)Caveats:/g, "$1What could trip this up:")
+      .replace(/(^|\n)Next step:/g, "$1Next move:")
+      .replace(/(^|\n)Required evidence:/g, "$1Evidence I want:")
+      .replace(/(^|\n)Local Research found results but could not extract useful evidence\./g, "$1I found local research hits, but nothing I trust enough to cite yet.")
+      .replace(/(^|\n)Local Research could not find free web results for that query\./g, "$1I couldn't find useful free local or web evidence for that query yet.");
+  }).join("");
 }
 
 const LOCAL_PATH_INLINE_PATTERN = /(\/(?:Users|Applications|Volumes|private\/tmp|tmp|var\/folders)\/[^`"'<>]*?\.(?:py|scad|stl|step|stp|f3d|f3z|json|md|cfg|ini|txt|gcode|3mf|pdf|png|jpg|jpeg|csv|log|sh|command|cpp|cxx|cc|c|h|hpp|js|html|css|yaml|yml|toml|plist|inp|msh|dat|frd|geo))(?=[$\s\]\),.;:]|$)|(\/(?:Users|Applications|Volumes|private\/tmp|tmp|var\/folders)\/[^\s`"'<>),;]+)/g;
@@ -3639,11 +3666,34 @@ function renderRunControls() {
   els.webAccessToggle.setAttribute("aria-checked", String(webEnabled));
   els.webAccessToggle.classList.toggle("active", webEnabled);
   els.webAccessLabel.textContent = webEnabled ? "On" : "Off";
+  if (els.composerToolsSummary) {
+    els.composerToolsSummary.textContent = [
+      profileLabel(thread.profile || config.profile),
+      accessSummaryLabel(thread.accessLevel || config.accessLevel),
+      toneSummaryLabel(thread.friendlinessLevel || config.friendlinessLevel),
+      `Web ${webEnabled ? "on" : "off"}`,
+    ].filter(Boolean).join(" · ");
+  }
 }
 
 function profileLabel(profile) {
   const match = findProfile(profile);
   return match ? match.label : profile || "Fast";
+}
+
+function accessSummaryLabel(accessLevel) {
+  const value = String(accessLevel || "");
+  if (value === "danger-full-access") return "Full access";
+  if (value === "workspace-write") return "Workspace";
+  if (value === "read-only") return "Read only";
+  return value || "Access";
+}
+
+function toneSummaryLabel(friendlinessLevel) {
+  const value = normalizeFriendliness(friendlinessLevel);
+  if (value === "high") return "Personable";
+  if (value === "focused") return "Focused";
+  return "Warm";
 }
 
 function profileEngine(profile) {
@@ -4105,24 +4155,6 @@ async function autoRecoverStaleAeroFailures() {
   }
 }
 
-function workingIntroForPrompt(text, attachments = []) {
-  const lower = String(text || "").toLowerCase();
-  const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
-  if (hasAttachments) {
-    return `I’m on it, Tinman. I’ll inspect the attachment${attachments.length === 1 ? "" : "s"}, use the right tools, and bring back the useful result in plain language.`;
-  }
-  if (lower.includes("search") || lower.includes("find") || lower.includes("compare")) {
-    return "I’m on it, Tinman. I’ll check the evidence first, make a clear pick if there is one, and keep the answer practical.";
-  }
-  if (lower.includes("create") || lower.includes("make") || lower.includes("design") || lower.includes("write")) {
-    return "I’m on it, Tinman. I’ll build the useful thing, verify it where I can, and make the output easy to open.";
-  }
-  if (lower.includes("fix") || lower.includes("debug") || lower.includes("diagnose")) {
-    return "I’m on it, Tinman. I’ll trace the real blocker, try the safe recovery path, and explain the fix plainly.";
-  }
-  return "I’m on it, Tinman. I’ll check the right path and bring back the answer in plain English.";
-}
-
 async function sendLiveSteer() {
   const thread = currentThread();
   const text = els.promptInput.value.trim();
@@ -4231,7 +4263,7 @@ async function sendPrompt() {
   const pending = {
     id: crypto.randomUUID(),
     role: "assistant",
-    text: workingIntroForPrompt(text, attachments),
+    text: "",
     running: true,
     thoughts: [],
   };
@@ -4359,7 +4391,7 @@ async function runDeeperAnalysis(kind = "auto") {
   const pending = {
     id: crypto.randomUUID(),
     role: "assistant",
-    text: `I’m on it, Tinman. I’ll run the ${label} path and bring back the report files, result summary, and caveats.`,
+    text: "",
     running: true,
     thoughts: [`Starting ${label} analysis from the current thread context.`],
   };

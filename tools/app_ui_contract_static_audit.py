@@ -184,6 +184,16 @@ def audit(root):
     )
     add_check(
         checks,
+        "genuine-run-progress-contract",
+        "workingIntroForPrompt" not in app_text
+        and "I’m on it, Tinman." not in app_text
+        and "I'm on it, Tinman." not in app_text
+        and app_text.count('role: "assistant",\n    text: "",\n    running: true') >= 2
+        and 'message.text || (message.thoughts?.length ? "" : "Working...")' in app_text,
+        "pending assistant messages use a neutral working state until genuine server progress or answer text arrives",
+    )
+    add_check(
+        checks,
         "mission-control-task-state-contract",
         contains_all(
             index_text,
@@ -513,8 +523,10 @@ def audit(root):
                 "def feedback_prompt_p11_report(",
                 "def feedback_prompt_p11_synthetic_check():",
                 '"response:feedback-prompt-p11"',
-                "Prior concern:",
-                "Feedback detail:",
+                "Reusable answer-quality invariants learned from Tinman's feedback:",
+                "feedback_learning_invariant(",
+                "raw_note not in quality_context",
+                "raw_answer not in quality_context",
                 "liveSteering",
             ),
         )
@@ -528,7 +540,7 @@ def audit(root):
                 '"derived-wrong-expertise-reaches-all-answer-prompts"',
             ),
         ),
-        "explicit and derived feedback categories keep their canonical lesson across every shared final-answer prompt surface",
+        "explicit and derived feedback categories keep canonical lessons across every shared final-answer prompt surface without replaying raw notes or answers",
     )
     feedback_guidance_fixture = root / "tests" / "feedback_guidance_p12_cases.json"
     feedback_guidance_text = feedback_guidance_fixture.read_text(encoding="utf-8") if feedback_guidance_fixture.exists() else ""
@@ -815,6 +827,8 @@ def audit(root):
                 "def response_example_scope_p22_synthetic_check():",
                 '"response:response-example-scope-p22"',
                 'if scope == "unrelated":',
+                'raw_content_absent = all(',
+                '"answerShape"',
             ),
         )
         and contains_all(
@@ -826,7 +840,7 @@ def audit(root):
                 '"unrelatedScope": "unrelated"',
             ),
         ),
-        "positive response examples are selected only from the current project or a matching objective before lexical similarity can influence the answer shape",
+        "positive feedback contributes only scoped response structure and never replays prior prompt, note, answer, product, or conclusion content",
     )
     opening_variety_fixture = root / "tests" / "opening_variety_p23_cases.json"
     opening_variety_text = opening_variety_fixture.read_text(encoding="utf-8") if opening_variety_fixture.exists() else ""
@@ -945,8 +959,8 @@ def audit(root):
                 "def conversational_scaffold_variety_p27_report(",
                 "def conversational_scaffold_variety_p27_synthetic_check():",
                 '"response:conversational-scaffold-variety-p27"',
-                'why_label = "The reason is: "',
-                'caveat_label = "One practical caveat: "',
+                'This is why|Why|Reasoning|Evidence',
+                'You should also consider|Consider|Caveats?',
                 "apply_response_composer(coached, composer, messages=messages)",
             ),
         )
@@ -956,10 +970,10 @@ def audit(root):
                 '"suite": "conversational-scaffold-variety-p27"',
                 '"repeated-softened-scaffold-varies"',
                 '"fresh-conversation-keeps-clear-defaults"',
-                '"One practical caveat:"',
+                '"It handles UV and heat better outdoors."',
             ),
         ),
-        "a conversational answer varies repeated reason and caveat connective labels only after the immediately prior answer used the default softened scaffold, preserving a clear first-turn default",
+        "conversational answers remove repeated reason/caveat scaffolds while preserving the technical explanation and practical boundary",
     )
     interaction_director_fixture = root / "tests" / "interaction_director_p1_cases.json"
     interaction_director_text = interaction_director_fixture.read_text(encoding="utf-8") if interaction_director_fixture.exists() else ""
@@ -1022,7 +1036,7 @@ def audit(root):
             server_text,
             (
                 "def general_expert_quality_context(messages, route=None):",
-                "def general_expert_quality_gaps(messages, answer_text):",
+                "def general_expert_quality_gaps(messages, answer_text, route=None):",
                 "def general_expert_quality_p30_synthetic_check():",
                 '"response:general-expert-quality-p30"',
                 '"material-process-control-omitted"',
