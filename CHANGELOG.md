@@ -1,5 +1,16 @@
 # Changelog
 
+## v2026.08.01
+
+- Replaces keyword-first answer selection for migrated intents with a full-turn intelligence kernel and a typed capability registry.
+- Adds structured answer envelopes so evidence, revisions, artifacts, gaps, and final-answer integrity remain traceable through the response pipeline.
+- Adds capability-specific reasoning, calculation, evidence, source-fidelity, artifact, and clarification contracts instead of routing every answer through the same rewrite chain.
+- Improves conversational continuity, focused clarification, feedback learning boundaries, live steering, attachment handling, and abandoned-run cleanup.
+- Simplifies the main conversation workspace and makes Model Health and Run Log collapsible so the chat can reclaim the available space.
+- Adds reference-image geometry analysis and verification for local printable CAD work, including source checks when the visible geometry is ambiguous.
+- Adds adversarial first-turn/follow-up evaluations, typed route coverage, live capability conversations, UI contract audits, and a 392-check package-health gate.
+- Publishes a 121-file sanitized source package with private runtime data, machine inventory, generated artifacts, model data, and local history excluded.
+
 ## v2026.07.14
 
 - Adds the 3D Printing Expert Pack with printer profiles for Bambu H2D/X1C, Creality K2 Plus, Qidi Plus 4, Snapmaker U1, Rat Rig V-Core 4.1 IDEX Klipper, Sovol SV08 Max, and ELEGOO Centauri Carbon.

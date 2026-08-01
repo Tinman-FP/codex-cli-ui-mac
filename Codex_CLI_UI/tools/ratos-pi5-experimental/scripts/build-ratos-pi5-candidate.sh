@@ -248,4 +248,3 @@ DOCKER_SCRIPT
 
 echo "Candidate image: $candidate_img"
 echo "Verification: $out_dir/pi5-graft-verification.txt"
-

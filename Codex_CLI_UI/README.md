@@ -12,26 +12,28 @@ $HOME/Applications/Codex_CLI_UI
 
 The installer is intentionally conservative. It checks for `python3`, `ollama`, and Codex CLI, creates local `data/` and `logs/` folders, starts the UI when prerequisites are present, and does not install large tools, models, API keys, or private machine inventory.
 
-Manual run:
-
-```bash
-cd "$HOME/Applications/Codex_CLI_UI"
-python3 server.py
-```
-
-Open:
-
-```text
-http://127.0.0.1:8765
-```
-
-Or launch the standalone Mac app:
+Preferred launch:
 
 ```bash
 open -a "Codex CLI UI"
 ```
 
 The standalone app is a native AppKit/WebKit wrapper. It opens Codex CLI UI in its own window, starts `server.py` if the local service is not already running, and only uses the system browser when you click an external source link.
+
+Manual server run:
+
+```bash
+cd "$HOME/Applications/Codex_CLI_UI"
+python3 server.py
+```
+
+Manual browser fallback:
+
+```text
+http://127.0.0.1:8765
+```
+
+The installer and restart script prefer the native app. They only open the raw local URL in your default browser when `CODEX_CLI_UI_OPEN_BROWSER=1` is set.
 
 ## Native App Build
 
@@ -54,6 +56,14 @@ CODEX_PROFILE=local-oss CODEX_CWD="$HOME/Documents/Codex" python3 server.py
 ```
 
 The server binds to `127.0.0.1` by default and streams `codex exec --json` output to the browser.
+
+## Interaction Architecture
+
+Every turn is interpreted from the full recent conversation before an executor is selected. The intelligence kernel identifies the user's objective, requested action, relevant objects, constraints, evidence needs, and decision-changing gaps. A typed capability registry then gives one execution path authority over the turn, which prevents an unrelated keyword or older one-off answer helper from taking over.
+
+The active answer travels in a structured envelope that records evidence, provenance, artifacts, gaps, and revisions. Capability-specific checks validate the result before it is shown. A focused clarification is a valid finished response when missing information would materially change the answer; otherwise the system should answer or perform the requested work and clearly report what it proved.
+
+The compatibility server still contains legacy routes while this migration continues. New behavior should be added through `intelligence_kernel.py`, `capability_registry.py`, and `answer_envelope.py`, with a regression test that uses novel wording. Do not add product-specific canned answers to fix isolated prompts.
 
 ## Modes
 
@@ -122,6 +132,14 @@ Run Tinman's curated engineering-domain sample set:
 ```bash
 python3 run_golden_batch.py --group "Domain Samples" --source domain-sample --limit 56
 ```
+
+Run the focused cross-domain conversation-quality suite:
+
+```bash
+python3 tools/live_feedback_smoke.py --expert-conversation --json
+```
+
+This runs six representative conversations covering correction recovery, technical context carryover, evidence-backed follow-up, product/UI judgment, focused clarification, and natural conversational guidance.
 
 The Domain Samples group covers 3D printing, CNC machining, solar/wind power, aerodynamics, CFD, engineering, and aviation. These are public-safe built-in guardrails, not private chat-history exports.
 
