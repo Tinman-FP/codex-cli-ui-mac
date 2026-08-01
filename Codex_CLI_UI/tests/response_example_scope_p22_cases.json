@@ -1,0 +1,56 @@
+{
+  "suite": "response-example-scope-p22",
+  "provenance": {
+    "source": "Uses temporary synthetic positive-feedback records to verify answer examples stay within a matching project or objective before lexical scoring."
+  },
+  "case": {
+    "messages": [
+      {
+        "role": "user",
+        "text": "Choose a material for this CAD repair and explain the key tradeoff."
+      }
+    ],
+    "route": {
+      "projectId": "cad-current-project",
+      "project": "CAD Current Project",
+      "objectivePlan": {
+        "objectiveType": "cad-repair",
+        "responseKind": "answer-or-act",
+        "evidenceNeed": "source-backed"
+      }
+    },
+    "feedback": [
+      {
+        "route": {
+          "projectId": "cad-prior-project",
+          "project": "CAD Prior Project",
+          "objectivePlan": {
+            "objectiveType": "cad-repair",
+            "responseKind": "answer-or-act",
+            "evidenceNeed": "source-backed"
+          }
+        },
+        "note": "Target objective example",
+        "answer": "Target CAD objective answer: choose material from the load, temperature, and evidence constraints."
+      },
+      {
+        "route": {
+          "projectId": "printer-other-project",
+          "project": "Printer Other Project",
+          "objectivePlan": {
+            "objectiveType": "printer-repair",
+            "responseKind": "local-app-status-fix",
+            "evidenceNeed": "live-local-app-evidence"
+          }
+        },
+        "note": "Unrelated printer example",
+        "answer": "Unrelated printer answer: choose material only after checking the live printer state."
+      }
+    ],
+    "expected": {
+      "selectedAnswerPrefix": "Target CAD objective answer:",
+      "targetScope": "objective",
+      "unrelatedScope": "unrelated"
+    }
+  }
+}

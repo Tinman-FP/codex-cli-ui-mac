@@ -1,0 +1,79 @@
+{
+  "suite": "feedback-guidance-retention-p18",
+  "provenance": {
+    "source": "Uses a temporary synthetic feedback payload to verify client receipt data is canonicalized before it reaches feedback or interaction-learning storage."
+  },
+  "case": {
+    "payload": {
+      "rating": "fix",
+      "feedbackProvenance": "human",
+      "feedbackCategory": "missing-evidence",
+      "note": "The answer needs support for its key material claim.",
+      "prompt": "Which material should I use for this CAD repair?",
+      "answer": "Choose the material after checking the load, temperature, and source-backed properties.",
+      "messages": [
+        {
+          "role": "user",
+          "text": "Which material should I use for this CAD repair?"
+        }
+      ],
+      "route": {
+        "projectId": "feedback-retention-p18",
+        "project": "Feedback Retention P18",
+        "objectivePlan": {
+          "objectiveType": "cad-repair",
+          "responseKind": "answer-or-act",
+          "evidenceNeed": "source-backed"
+        }
+      },
+      "feedbackGuidance": {
+        "count": 99,
+        "items": [
+          {
+            "category": "missing-evidence",
+            "label": "Raw note that must not be retained",
+            "kind": "untrusted-kind",
+            "scope": "objective",
+            "note": "Raw note that must not be retained",
+            "prompt": "Raw prompt that must not be retained",
+            "projectId": "private-project",
+            "id": "private-record"
+          },
+          {
+            "category": "too-generic",
+            "label": "Untrusted label",
+            "kind": "untrusted-kind",
+            "scope": "global",
+            "extra": "Raw extra field that must not be retained"
+          },
+          {
+            "category": "unknown-category",
+            "scope": "project"
+          },
+          {
+            "category": "missing-evidence",
+            "scope": "objective"
+          },
+          {
+            "category": "tone",
+            "scope": "invalid-scope"
+          }
+        ]
+      }
+    },
+    "expectedItems": [
+      {
+        "category": "missing-evidence",
+        "label": "Missing evidence",
+        "kind": "correction",
+        "scope": "objective"
+      },
+      {
+        "category": "too-generic",
+        "label": "Too generic",
+        "kind": "correction",
+        "scope": "global"
+      }
+    ]
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "suite": "feedback-guidance-receipt-p17",
+  "provenance": {
+    "source": "Uses temporary synthetic feedback records to verify a response-package receipt exposes only category, kind, label, and relevance scope; no user feedback or durable state is read."
+  },
+  "case": {
+    "messages": [
+      {
+        "role": "user",
+        "text": "Prepare the current CAD repair decision and cite evidence for the material choice."
+      }
+    ],
+    "route": {
+      "projectId": "cad-current-project",
+      "project": "CAD Current Project",
+      "objectivePlan": {
+        "objectiveType": "cad-repair",
+        "responseKind": "answer-or-act",
+        "evidenceNeed": "source-backed"
+      }
+    },
+    "feedback": [
+      {
+        "feedbackCategory": "too-generic",
+        "note": "Private style note that must not enter the receipt.",
+        "route": {"projectId": "printer-other-project", "project": "Printer Other Project", "objectivePlan": {"objectiveType": "printer-repair"}}
+      },
+      {
+        "failureKind": "missing-source-evidence",
+        "note": "Private CAD evidence note that must not enter the receipt.",
+        "route": {"projectId": "cad-previous-project", "project": "CAD Previous Project", "objectivePlan": {"objectiveType": "cad-repair", "responseKind": "answer-or-act", "evidenceNeed": "source-backed"}}
+      },
+      {
+        "feedbackCategory": "wrong-expertise",
+        "note": "Private unrelated printer correction that must stay out of the receipt.",
+        "route": {"projectId": "printer-other-project", "project": "Printer Other Project", "objectivePlan": {"objectiveType": "printer-repair"}}
+      }
+    ],
+    "expectedItems": [
+      {"category": "missing-evidence", "scope": "objective"},
+      {"category": "too-generic", "scope": "global"}
+    ]
+  }
+}

@@ -119,7 +119,9 @@
 }
 
 - (void)startServer {
-    NSString *serverPath = @"$HOME/Applications/Codex_CLI_UI/server.py";
+    NSString *home = NSHomeDirectory();
+    NSString *appRoot = [home stringByAppendingPathComponent:@"Applications/Codex_CLI_UI"];
+    NSString *serverPath = [appRoot stringByAppendingPathComponent:@"server.py"];
     if (![[NSFileManager defaultManager] fileExistsAtPath:serverPath]) {
         return;
     }
@@ -127,7 +129,7 @@
     NSTask *task = [[NSTask alloc] init];
     task.launchPath = @"/usr/bin/python3";
     task.arguments = @[serverPath];
-    task.currentDirectoryPath = @"$HOME/Applications/Codex_CLI_UI";
+    task.currentDirectoryPath = appRoot;
     task.standardOutput = [NSFileHandle fileHandleWithNullDevice];
     task.standardError = [NSFileHandle fileHandleWithNullDevice];
 
@@ -135,8 +137,10 @@
     environment[@"CODEX_UI_HOST"] = @"127.0.0.1";
     environment[@"CODEX_UI_PORT"] = @"8765";
     environment[@"CODEX_PROFILE"] = @"manager";
-    environment[@"CODEX_CWD"] = @"$HOME/Documents/Codex";
-    environment[@"QIDI_MOONRAKER_URL"] = @"http://192.0.2.10:7125";
+    environment[@"CODEX_CWD"] = [home stringByAppendingPathComponent:@"Documents/Codex"];
+    if (!environment[@"QIDI_MOONRAKER_URL"]) {
+        environment[@"QIDI_MOONRAKER_URL"] = @"http://printer-host.local:7125";
+    }
     environment[@"PATH"] = @"/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
     task.environment = environment;
 
@@ -159,7 +163,7 @@
     "code{color:#ff8a80;}"
     "</style></head><body><main class=\"panel\">"
     "<h1>Codex CLI UI did not start</h1>"
-    "<p>The native app could not reach <code>127.0.0.1:8765</code>. Try restarting the app or running <code>$HOME/Applications/Codex_CLI_UI/start.command</code>.</p>"
+    "<p>The native app could not reach <code>127.0.0.1:8765</code>. Try restarting the app or running <code>~/Applications/Codex_CLI_UI/start.command</code>.</p>"
     "</main></body></html>";
     [self.webView loadHTMLString:html baseURL:nil];
 }

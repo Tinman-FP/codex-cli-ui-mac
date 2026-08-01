@@ -543,7 +543,7 @@ def is_max_ez_107_reachability_prompt(text):
     lower = re.sub(r"\s+", " ", str(text or "").lower()).strip()
     return (
         any(term in lower for term in ("max ez", "maxez", "max ex", "qidi max", "qidi plus 4 max"))
-        and any(term in lower for term in (".107", "192.0.2.10"))
+        and any(term in lower for term in (".107", "192.0.2.107"))
         and any(term in lower for term in ("catch", "try", "reach", "reachable", "check", "find", "once more", "again"))
     )
 
@@ -1053,6 +1053,36 @@ def is_codex_personality_settings_prompt(text):
     )
 
 
+def is_agent_preference_question_prompt(text):
+    lower = re.sub(r"\s+", " ", str(text or "").lower()).strip()
+    return bool(lower) and (
+        any(
+            term in lower
+            for term in (
+                "what would you like to be called",
+                "what do you want to be called",
+                "what would you prefer to be called",
+                "what do you prefer to be called",
+            )
+        )
+        or (
+            any(term in lower for term in ("question about your preference", "asking your preference", "asked your preference"))
+            and any(term in lower for term in ("called", "name", "preference"))
+        )
+    )
+
+
+def is_mac_memory_ai_performance_prompt(text):
+    lower = re.sub(r"\s+", " ", str(text or "").lower()).strip()
+    return (
+        bool(lower)
+        and any(term in lower for term in ("this mac", "my mac", "current mac", "local hardware"))
+        and any(term in lower for term in ("memory", "ram", "unified memory"))
+        and any(term in lower for term in ("ai performance", "ollama", "local ai", "model", "models"))
+        and any(term in lower for term in ("upgrade", "improve", "faster", "performance"))
+    )
+
+
 def is_dot147_beacon_offset_update_prompt(text):
     lower = str(text or "").lower()
     return (
@@ -1187,9 +1217,9 @@ def is_codex_ui_workflow_scenario_prompt(text):
     )
 
 
-def is_privatevpn_reboot_prompt(text):
+def is_makersvpn_reboot_prompt(text):
     lower = str(text or "").lower().strip()
-    return "privatevpn" in lower and any(term in lower for term in ("reboot", "restart", "power cycle", "power-cycle"))
+    return "makersvpn" in lower and any(term in lower for term in ("reboot", "restart", "power cycle", "power-cycle"))
 
 
 def is_bluetooth_rename_prompt(text):
@@ -1939,16 +1969,16 @@ def is_opencentauri_install_boot_slot_prompt(text):
     return bool(lower) and "opencentauri" in lower and any(term in lower for term in ("install", "boot slot", "online", "local"))
 
 
-def is_privatevpn_available_prompt(text):
+def is_makersvpn_available_prompt(text):
     lower = str(text or "").lower().strip()
-    return bool(lower) and "privatevpn" in lower and any(term in lower for term in ("available", "online", "reachable", "up"))
+    return bool(lower) and "makersvpn" in lower and any(term in lower for term in ("available", "online", "reachable", "up"))
 
 
-def is_privatevpn_sorted_prompt(text):
+def is_makersvpn_sorted_prompt(text):
     lower = str(text or "").lower().strip()
     return (
         bool(lower)
-        and any(term in lower for term in ("privatevpn", "makervpn", "private vpn"))
+        and any(term in lower for term in ("makersvpn", "makervpn", "maker vpn"))
         and any(term in lower for term in ("sorted", "sort out", "fix", "working", "set up", "setup"))
     )
 
@@ -2044,8 +2074,8 @@ def is_printer_printing_without_extruding_confirm_prompt(text):
 def is_offset1179_direct_prompt(text):
     return (
         is_opencentauri_install_boot_slot_prompt(text)
-        or is_privatevpn_available_prompt(text)
-        or is_privatevpn_sorted_prompt(text)
+        or is_makersvpn_available_prompt(text)
+        or is_makersvpn_sorted_prompt(text)
         or is_vaoc_mainline_klipper_camera_prompt(text)
         or is_current_load_filament_macro_prompt(text)
         or is_klipper_mcu_loss_ebb42_remote_prompt(text)
@@ -2296,7 +2326,7 @@ def is_ssh_credentials_history_lookup_prompt(text):
         bool(lower)
         and any(term in lower for term in ("ssh credintials", "ssh credentials", "ssh creds"))
         and any(term in lower for term in ("chat history", "look back"))
-        and any(term in lower for term in ("privatevpn", "pi"))
+        and any(term in lower for term in ("makersvpn", "pi"))
     )
 
 
@@ -3194,7 +3224,7 @@ def is_3d_chameleon_cleanup_prompt(text):
 
 def is_printer_ip_changed_password_note_prompt(text):
     lower = re.sub(r"\s+", " ", str(text or "").lower()).strip()
-    return bool(lower) and any(term in lower for term in ("ip has changed", "ip changed", "changed to")) and "192.0.2.10" in lower and "password" in lower
+    return bool(lower) and any(term in lower for term in ("ip has changed", "ip changed", "changed to")) and "192.0.2.145" in lower and "password" in lower
 
 
 def is_flightops_aircraft_documents_restore_upload_prompt(text):
@@ -3493,7 +3523,7 @@ def is_flightops_pi_vpn_mobile_access_prompt(text):
         and any(term in lower for term in ("customers", "customer"))
         and any(term in lower for term in ("mobile devices", "mobile", "phone", "phones", "anywhere"))
         and any(term in lower for term in ("rasberry pi", "raspberry pi", "pi"))
-        and any(term in lower for term in ("private vpn", "privatevpn", "private vpn", "vpn"))
+        and any(term in lower for term in ("makers vpn", "makersvpn", "maker vpn", "vpn"))
     )
 
 
@@ -4636,7 +4666,7 @@ def is_history_printer_operational_prompt(text):
         or (any(term in lower for term in ("engineering drawing", "engineering drawings")) and any(term in lower for term in ("rat rig", "ratrig", "3d printing")))
         or ("ebb" in lower and any(term in lower for term in ("comment out", "disable", "bypass")) and any(term in lower for term in ("motion system", "motion", "communication")))
         or ("he2" in lower and any(term in lower for term in ("fan", "start current", "run current", "0.9a", ".9a", "0.4a", ".4a")) and any(term in lower for term in ("safe", "run straight", "run strait", "direct", "output")))
-        or (any(term in lower for term in ("bambu", "x1", "h2d", "192.0.2.10", "192.0.2.10")) and "ams" in lower and any(term in lower for term in ("qidi", "box", "macros", "macro", "compare")))
+        or (any(term in lower for term in ("bambu", "x1", "h2d", "192.0.2.108", "192.0.2.125")) and "ams" in lower and any(term in lower for term in ("qidi", "box", "macros", "macro", "compare")))
     )
 
 
@@ -4652,6 +4682,10 @@ def is_report_cache_refresh_prompt(text):
 
 def project_for_prompt(text):
     lower = text.lower()
+    if is_agent_preference_question_prompt(text):
+        return "general"
+    if is_mac_memory_ai_performance_prompt(text):
+        return "mac-system-accounts"
     if is_aviation_life_limited_part_quiz_prompt(text):
         return "aviation-engineering"
     if is_k2_plus_profile_pack_setup_prompt(text):
@@ -4859,7 +4893,7 @@ def project_for_prompt(text):
         or is_max_ez_chat_state_scan_prompt(text)
     ):
         return "printer-klipper-ops"
-    if is_privatevpn_available_prompt(text) or is_privatevpn_sorted_prompt(text):
+    if is_makersvpn_available_prompt(text) or is_makersvpn_sorted_prompt(text):
         return "mac-system-accounts"
     if is_flightops_customer_report_pages_prompt(text):
         return "flightops-tracker"
@@ -4869,7 +4903,7 @@ def project_for_prompt(text):
         return "general"
     if is_github_update_with_filament_price_prompt(text):
         return "codex-cli-ui-local-agent"
-    if is_privatevpn_reboot_prompt(text) or is_bluetooth_rename_prompt(text):
+    if is_makersvpn_reboot_prompt(text) or is_bluetooth_rename_prompt(text):
         return "mac-system-accounts"
     if is_hotend_mount_visual_reference_prompt(text) or is_cad_duct_upward_image_reference_prompt(text):
         return "cad-modeling-projects"
@@ -5812,6 +5846,8 @@ def project_for_prompt(text):
 
 def web_needed(text):
     lower = text.lower()
+    if is_agent_preference_question_prompt(text) or is_mac_memory_ai_performance_prompt(text):
+        return False
     if is_wind_generator_alternator_shopping_prompt(text) or is_snapmaker_u1_nozzle_shopping_prompt(text):
         return True
     if "heartbeat" in lower and any(term in lower for term in ("12 hours", "15 min", "keep moving", "mac doesnt sleep", "mac doesn't sleep")):
@@ -5825,7 +5861,7 @@ def web_needed(text):
         or is_orcaslicer_codex_installed_changes_prompt(text)
         or is_core_one_l_filament_specific_profile_share_prompt(text)
         or is_shared_profile_repo_machine_organization_prompt(text)
-        or is_privatevpn_reboot_prompt(text)
+        or is_makersvpn_reboot_prompt(text)
         or is_bluetooth_rename_prompt(text)
     ):
         return False
@@ -5977,6 +6013,8 @@ def direct_answer_prompt(text):
         text,
     )
     known_patterns = (
+        is_agent_preference_question_prompt(text),
+        is_mac_memory_ai_performance_prompt(text),
         is_wix_email_login_recovery_prompt(text),
         is_wix_credential_recovery_prompt(text),
         is_orca_humidity_as_temperature_prompt(text),
@@ -6022,7 +6060,7 @@ def direct_answer_prompt(text):
         is_orcaslicer_codex_installed_changes_prompt(text),
         is_core_one_l_filament_specific_profile_share_prompt(text),
         is_shared_profile_repo_machine_organization_prompt(text),
-        is_privatevpn_reboot_prompt(text),
+        is_makersvpn_reboot_prompt(text),
         is_bluetooth_rename_prompt(text),
         is_hotend_mount_visual_reference_prompt(text),
         is_cad_duct_upward_image_reference_prompt(text),
@@ -6263,6 +6301,10 @@ def required_terms_for_prompt(text, project_id=""):
     lower = text.lower()
     required = []
     cpap_hose_spec = "cpap hose" in lower and any(term in lower for term in ("inner diameter", "id", "inside diameter"))
+    if is_agent_preference_question_prompt(text):
+        required.extend(["this is why", "you should also consider", "preference"])
+    if is_mac_memory_ai_performance_prompt(text):
+        required.extend(["This is why", "You should also consider", "unified memory", "AI"])
     if is_wix_email_login_recovery_prompt(text):
         required.extend(["this is why", "you should also consider", "Mail", "Keychain", "https://www.wix.com/forgot-password"])
     if is_wix_credential_recovery_prompt(text):
@@ -6311,8 +6353,8 @@ def required_terms_for_prompt(text, project_id=""):
         required.extend(["commands", "apps", "inventory", "refresh"])
     if is_lan_ip_restoration_context_prompt(text):
         required.extend(["IP", "device", "DHCP", "ARP"])
-    if is_privatevpn_reboot_prompt(text):
-        required.extend(["PrivateVPN", "reboot", "Tailscale"])
+    if is_makersvpn_reboot_prompt(text):
+        required.extend(["MakersVPN", "reboot", "Tailscale"])
     if is_bluetooth_rename_prompt(text):
         required.extend(["Bluetooth", "requested name"])
     if is_hotend_mount_visual_reference_prompt(text):
@@ -6320,7 +6362,7 @@ def required_terms_for_prompt(text, project_id=""):
     if is_cad_duct_upward_image_reference_prompt(text):
         required.extend(["upward", "flat", "CAD"])
     if is_rat_rig_ip_lookup_prompt(text):
-        required.extend(["192.0.2.10", "Rat Rig"])
+        required.extend(["192.0.2.27", "Rat Rig"])
     if is_lost_ip_sd_card_recovery_prompt(text):
         required.extend(["SD card", "backup", "Wi-Fi", "DHCP"])
     if is_printing_from_slot_three_prompt(text):
@@ -6819,6 +6861,34 @@ def golden_test_from_prompt(prompt, source):
         "createdAt": time.time(),
         "updatedAt": time.time(),
     }
+    if is_agent_preference_question_prompt(prompt):
+        test["expectedProjectId"] = "general"
+        test["expectedContractKind"] = "Direct answer"
+        test["expectedContractGate"] = "pass"
+        test["directAnswer"] = True
+        test["directTerms"] = ["Codex"]
+        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "preference"], limit=8)
+        test["requiredContractProof"] = ["direct answer", "why/caveat shape"]
+        test["anyTerms"] = normalize_terms(["Codex", "Red Codex", "Red"], limit=6)
+        test["requiresSource"] = False
+        test["webSearch"] = "disabled"
+        test["minAnalyticalScore"] = 84
+        test["maxDurationMs"] = 750
+        test["goal"] = "Real chat-history regression: answer agent naming/preference questions conversationally and directly instead of routing to Local Research."
+    if is_mac_memory_ai_performance_prompt(prompt):
+        test["expectedProjectId"] = "mac-system-accounts"
+        test["expectedContractKind"] = "Mac memory upgrade local facts"
+        test["expectedContractGate"] = "pass"
+        test["directAnswer"] = True
+        test["directTerms"] = ["No internal memory upgrade"]
+        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "unified memory", "AI"], limit=8)
+        test["requiredContractProof"] = ["local hardware profile", "unified memory", "no internal memory upgrade", "AI performance"]
+        test["anyTerms"] = []
+        test["requiresSource"] = False
+        test["webSearch"] = "disabled"
+        test["minAnalyticalScore"] = 84
+        test["maxDurationMs"] = 750
+        test["goal"] = "Real chat-history regression: answer Mac memory and AI-performance questions from this Mac's local hardware profile instead of generic research."
     if is_flightops_tinneyaviation_login_tabs_prompt(prompt):
         test["expectedProjectId"] = "flightops-tracker"
         test["expectedContractKind"] = "Flight Ops public-site login tabs"
@@ -7787,8 +7857,8 @@ def golden_test_from_prompt(prompt, source):
             break
     offset1179_contracts = [
         (is_opencentauri_install_boot_slot_prompt, "printer-klipper-ops", "OpenCentauri install and boot-slot boundary", ["OpenCentauri", "source/package", "boot slot", "rollback"]),
-        (is_privatevpn_available_prompt, "mac-system-accounts", "PrivateVPN availability check", ["PrivateVPN", "tailscale status", "reachability check"]),
-        (is_privatevpn_sorted_prompt, "mac-system-accounts", "PrivateVPN setup recovery", ["PrivateVPN", "Tailscale", "subnet routes", "reachability check"]),
+        (is_makersvpn_available_prompt, "mac-system-accounts", "MakersVPN availability check", ["MakersVPN", "tailscale status", "reachability check"]),
+        (is_makersvpn_sorted_prompt, "mac-system-accounts", "MakersVPN setup recovery", ["MakersVPN", "Tailscale", "subnet routes", "reachability check"]),
         (is_vaoc_mainline_klipper_camera_prompt, "printer-klipper-ops", "VAOC mainline Klipper camera boundary", ["VAOC", "mainline Klipper", "Moonraker", "camera service"]),
         (is_current_load_filament_macro_prompt, "printer-klipper-ops", "Current load-filament macro audit", ["LOAD_FILAMENT", "active config", "temperature gate", "safe macro"]),
         (is_klipper_mcu_loss_ebb42_remote_prompt, "printer-klipper-ops", "Klipper EBB42 MCU-loss recovery boundary", ["EBB42", "MCU loss", "CAN/USB/power", "logs"]),
@@ -7890,7 +7960,7 @@ def golden_test_from_prompt(prompt, source):
         (is_klipper_conversion_holdoff_prompt, "printer-klipper-ops", "Klipper conversion hold-off", ["hold off", "Klipper", "new hardware", "migration checklist"]),
         (is_marlin_prusa_klipper_compare_prompt, "printer-klipper-ops", "Marlin-to-Klipper comparison workflow", ["Marlin", "Prusa", "Klipper", "migration matrix"]),
         (is_rat_rig_lookup_followup_prompt, "printer-klipper-ops", "Rat Rig local discovery", ["Rat Rig", "local config", "Moonraker or Tailscale", "idle/standby"]),
-        (is_ssh_credentials_history_lookup_prompt, "printer-klipper-ops", "SSH credential lookup safety", ["SSH", "PrivateVPN", "Keychain", "do not print raw passwords"]),
+        (is_ssh_credentials_history_lookup_prompt, "printer-klipper-ops", "SSH credential lookup safety", ["SSH", "MakersVPN", "Keychain", "do not print raw passwords"]),
     ]
     for detector, expected_project, contract_kind, proof_terms in offset1339_contracts:
         if detector(prompt):
@@ -8081,7 +8151,7 @@ def golden_test_from_prompt(prompt, source):
         (is_beacon_ztilt_active_check_prompt, "printer-klipper-ops", "Beacon Z-tilt active-state check", ["Beacon", "T0", "Z_TILT", "active config", "read-only verification"]),
         (is_ratrig_macro_upload_confidence_prompt, "printer-klipper-ops", "Rat Rig macro upload confidence", ["Rat Rig", "macros", "confidence", "config check", "dry run"]),
         (is_post_restart_g28_bed_crash_prompt, "printer-klipper-ops", "Klipper restart safety", ["target printer", "idle/standby", "Klipper restart", "G28", "probe/Beacon"]),
-        (is_flightops_pilot_daily_rate_exclusion_prompt, "flightops-tracker", "Flight Ops pilot daily-rate exclusion", ["pilot daily-rate exclusion", "Colin", "N296SA", "N12345", "pay report verification"]),
+        (is_flightops_pilot_daily_rate_exclusion_prompt, "flightops-tracker", "Flight Ops pilot daily-rate exclusion", ["pilot daily-rate exclusion", "Colin", "N296SA", "N533SS", "pay report verification"]),
         (is_flightops_shutdown_error_history_prompt, "flightops-tracker", "Flight Ops shutdown-error context recovery", ["shutdown error", "recent context/log", "exact text or missing-text caveat"]),
         (is_flightops_storage_projection_prompt, "flightops-tracker", "Flight Ops storage projection", ["current storage", "growth rate", "two aircraft", "maintenance tracking", "80 percent threshold"]),
         (is_flightops_fixed_maintenance_cover_page_prompt, "flightops-tracker", "Flight Ops fixed/maintenance cover-page totals", ["fixed costs", "maintenance costs", "cover page", "monthly total", "layout verification"]),
@@ -8110,7 +8180,7 @@ def golden_test_from_prompt(prompt, source):
             break
     offset1659_contracts = [
         (is_3d_chameleon_cleanup_prompt, "codex-cli-ui-local-agent", "3D Chameleon safe cleanup", ["3D Chameleon", "manifest", "archive/backup", "delete only confirmed files"]),
-        (is_printer_ip_changed_password_note_prompt, "printer-klipper-ops", "Printer IP update credential boundary", ["192.0.2.10", "password/private credential", "Moonraker/SSH", "redact"]),
+        (is_printer_ip_changed_password_note_prompt, "printer-klipper-ops", "Printer IP update credential boundary", ["192.0.2.145", "password/private credential", "Moonraker/SSH", "redact"]),
         (is_flightops_aircraft_documents_restore_upload_prompt, "flightops-tracker", "Flight Ops aircraft document restore/upload", ["aircraft documents", "manifest", "local source path", "upload verification"]),
         (is_klipper_load_unload_macro_buttons_prompt, "printer-klipper-ops", "Klipper load/unload macro UI binding", ["Klipper", "LOAD_FILAMENT", "UNLOAD_FILAMENT", "KlipperScreen buttons"]),
         (is_all_printers_supported_continue_prompt, "printer-klipper-ops", "All-printer support continuation", ["all printers", "support matrix", "slice test", "print/send readiness"]),
@@ -8145,7 +8215,7 @@ def golden_test_from_prompt(prompt, source):
         (is_dry_room_sub_10_humidity_prompt, "printer-klipper-ops", "Sub-10% dry-room humidity control", ["10% RH", "desiccant", "sealed room", "dry boxes", "monitoring"]),
         (is_project_github_link_prompt, "codex-cli-ui-local-agent", "Current project GitHub remote", ["github.com", "origin remote", "local changes"]),
         (is_stock_firmware_password_prompt, "embedded-linux-images", "Firmware stock password boundary", ["pi", "raspberry", "firmware image caveat", "change the password"]),
-        (is_flightops_pi_vpn_mobile_access_prompt, "flightops-tracker", "Flight Ops mobile access architecture", ["Raspberry Pi", "pilots/customers", "mobile HTTPS login", "PrivateVPN admin", "role-based access"]),
+        (is_flightops_pi_vpn_mobile_access_prompt, "flightops-tracker", "Flight Ops mobile access architecture", ["Raspberry Pi", "pilots/customers", "mobile HTTPS login", "MakersVPN admin", "role-based access"]),
         (is_ratrig_vcore_extrusion_gantry_prompt, "printer-klipper-ops", "Rat Rig V-Core gantry extrusion spec", ["Rat Rig", "3030", "steel X-axis gantry", "BOM or measure"]),
         (is_humidity_control_box_minimal_heat_prompt, "cad-modeling-projects", "Low-heat humidity-control box design", ["sealed box", "desiccant", "fan", "humidity sensor", "minimal/no heat"]),
         (is_flightops_document_not_found_user_prompt, "flightops-tracker", "Flight Ops document-not-found diagnostic", ["Document not found", "database record", "file path", "user permission", "document ID"]),
@@ -8299,7 +8369,7 @@ def golden_test_from_prompt(prompt, source):
         test["anyTerms"] = []
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
-        test["goal"] = "Real chat-history regression: answer Qidi login-screen loopback IP prompts as no-LAN-address-yet connectivity work, not a fake 192.0.2.10 restoration target."
+        test["goal"] = "Real chat-history regression: answer Qidi login-screen loopback IP prompts as no-LAN-address-yet connectivity work, not a fake 192.0.2.127 restoration target."
     if is_network_moved_ip_scan_prompt(prompt):
         test["expectedProjectId"] = "printer-klipper-ops" if any(term in prompt.lower() for term in ("qidi", "max ez", "maxez", "max ex", "maz ez", "printer")) else "mac-system-accounts"
         test["expectedContractKind"] = "Network moved-IP scan"
@@ -8313,7 +8383,7 @@ def golden_test_from_prompt(prompt, source):
         test["webSearch"] = "disabled"
         test["goal"] = "Real chat-history regression: answer moved-IP printer discovery with a bounded local discovery path instead of timing out."
     if is_lan_ip_restoration_context_prompt(prompt):
-        requested_ip = requested_lan_ip_from_text(prompt) or "192.0.2.10"
+        requested_ip = requested_lan_ip_from_text(prompt) or "192.0.2.145"
         test["expectedProjectId"] = "mac-system-accounts"
         test["expectedContractKind"] = "LAN IP restoration context"
         test["expectedContractGate"] = "pass"
@@ -8737,18 +8807,18 @@ def golden_test_from_prompt(prompt, source):
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
         test["goal"] = "Real chat-history regression: profile update requests must be backup-first edit workflows, not full profile parameter dumps or live printer telemetry."
-    if is_privatevpn_reboot_prompt(prompt):
+    if is_makersvpn_reboot_prompt(prompt):
         test["expectedProjectId"] = "mac-system-accounts"
-        test["expectedContractKind"] = "PrivateVPN reboot safety"
+        test["expectedContractKind"] = "MakersVPN reboot safety"
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
-        test["directTerms"] = ["Yes", "PrivateVPN"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "PrivateVPN", "reboot", "Tailscale"], limit=8)
-        test["requiredContractProof"] = ["PrivateVPN", "reboot", "Tailscale", "route verification"]
+        test["directTerms"] = ["Yes", "MakersVPN"]
+        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "MakersVPN", "reboot", "Tailscale"], limit=8)
+        test["requiredContractProof"] = ["MakersVPN", "reboot", "Tailscale", "route verification"]
         test["forbiddenTerms"] = normalize_terms(BASE_FORBIDDEN_TERMS + ["I do not have access", "I don't have access", "you can check it yourself"], limit=16)
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
-        test["goal"] = "Real chat-history regression: PrivateVPN reboot requests must give a safe host/route reboot path, not cold no-access fallback text."
+        test["goal"] = "Real chat-history regression: MakersVPN reboot requests must give a safe host/route reboot path, not cold no-access fallback text."
     if is_bluetooth_rename_prompt(prompt):
         test["expectedProjectId"] = "mac-system-accounts"
         test["expectedContractKind"] = "Mac Bluetooth rename"
@@ -8827,9 +8897,9 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractKind"] = "Rat Rig IP lookup"
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
-        test["directTerms"] = ["192.0.2.10", "Rat Rig"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "192.0.2.10", "Rat Rig"], limit=8)
-        test["requiredContractProof"] = ["192.0.2.10", "Rat Rig", "Moonraker/SSH caveat"]
+        test["directTerms"] = ["192.0.2.27", "Rat Rig"]
+        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "192.0.2.27", "Rat Rig"], limit=8)
+        test["requiredContractProof"] = ["192.0.2.27", "Rat Rig", "Moonraker/SSH caveat"]
         test["forbiddenTerms"] = normalize_terms(BASE_FORBIDDEN_TERMS + ["source URL", "OctoPrint"], limit=16)
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -9694,10 +9764,10 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractKind"] = "Flight Ops startup reminder"
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
-        test["directTerms"] = ["Example_Project", "uvicorn", "127.0.0.1:8000"]
+        test["directTerms"] = ["Flightops_Tracker", "uvicorn", "127.0.0.1:8000"]
         test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "deploy_production_pi.sh", "health"], limit=8)
         test["anyTerms"] = []
-        test["requiredContractProof"] = ["Example_Project path", "uvicorn", "health/login check"]
+        test["requiredContractProof"] = ["Flightops_Tracker path", "uvicorn", "health/login check"]
         test["goal"] = "Real chat-history regression: answer Flight Ops Tracker startup reminders with the local app command and production Pi boundary, not UGS/CNC setup."
     if is_where_are_we_status_prompt(prompt):
         test["expectedContractKind"] = "Direct answer"
@@ -9775,9 +9845,9 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractKind"] = "Max EZ .107 reachability"
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
-        test["directTerms"] = ["Max EZ", "192.0.2.10"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Moonraker", "ping", "192.0.2.10"], limit=8)
-        test["requiredContractProof"] = ["192.0.2.10", "Moonraker", "ping"]
+        test["directTerms"] = ["Max EZ", "192.0.2.107"]
+        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Moonraker", "ping", "192.0.2.107"], limit=8)
+        test["requiredContractProof"] = ["192.0.2.107", "Moonraker", "ping"]
         test["anyTerms"] = []
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -11247,7 +11317,7 @@ def golden_test_from_prompt(prompt, source):
             (is_beacon_ztilt_active_check_prompt, "printer-klipper-ops", "Beacon Z-tilt active-state check", ["Beacon", "T0", "Z_TILT", "active config", "read-only verification"]),
             (is_ratrig_macro_upload_confidence_prompt, "printer-klipper-ops", "Rat Rig macro upload confidence", ["Rat Rig", "macros", "confidence", "config check", "dry run"]),
             (is_post_restart_g28_bed_crash_prompt, "printer-klipper-ops", "Klipper restart safety", ["target printer", "idle/standby", "Klipper restart", "G28", "probe/Beacon"]),
-            (is_flightops_pilot_daily_rate_exclusion_prompt, "flightops-tracker", "Flight Ops pilot daily-rate exclusion", ["pilot daily-rate exclusion", "Colin", "N296SA", "N12345", "pay report verification"]),
+            (is_flightops_pilot_daily_rate_exclusion_prompt, "flightops-tracker", "Flight Ops pilot daily-rate exclusion", ["pilot daily-rate exclusion", "Colin", "N296SA", "N533SS", "pay report verification"]),
             (is_flightops_shutdown_error_history_prompt, "flightops-tracker", "Flight Ops shutdown-error context recovery", ["shutdown error", "recent context/log", "exact text or missing-text caveat"]),
             (is_flightops_storage_projection_prompt, "flightops-tracker", "Flight Ops storage projection", ["current storage", "growth rate", "two aircraft", "maintenance tracking", "80 percent threshold"]),
             (is_flightops_fixed_maintenance_cover_page_prompt, "flightops-tracker", "Flight Ops fixed/maintenance cover-page totals", ["fixed costs", "maintenance costs", "cover page", "monthly total", "layout verification"]),
@@ -11276,7 +11346,7 @@ def golden_test_from_prompt(prompt, source):
     if is_offset1659_direct_prompt(prompt):
         for detector, expected_project, contract_kind, proof_terms in [
             (is_3d_chameleon_cleanup_prompt, "codex-cli-ui-local-agent", "3D Chameleon safe cleanup", ["3D Chameleon", "manifest", "archive/backup", "delete only confirmed files"]),
-            (is_printer_ip_changed_password_note_prompt, "printer-klipper-ops", "Printer IP update credential boundary", ["192.0.2.10", "password/private credential", "Moonraker/SSH", "redact"]),
+            (is_printer_ip_changed_password_note_prompt, "printer-klipper-ops", "Printer IP update credential boundary", ["192.0.2.145", "password/private credential", "Moonraker/SSH", "redact"]),
             (is_flightops_aircraft_documents_restore_upload_prompt, "flightops-tracker", "Flight Ops aircraft document restore/upload", ["aircraft documents", "manifest", "local source path", "upload verification"]),
             (is_klipper_load_unload_macro_buttons_prompt, "printer-klipper-ops", "Klipper load/unload macro UI binding", ["Klipper", "LOAD_FILAMENT", "UNLOAD_FILAMENT", "KlipperScreen buttons"]),
             (is_all_printers_supported_continue_prompt, "printer-klipper-ops", "All-printer support continuation", ["all printers", "support matrix", "slice test", "print/send readiness"]),
@@ -11311,7 +11381,7 @@ def golden_test_from_prompt(prompt, source):
             (is_dry_room_sub_10_humidity_prompt, "printer-klipper-ops", "Sub-10% dry-room humidity control", ["10% RH", "desiccant", "sealed room", "dry boxes", "monitoring"]),
             (is_project_github_link_prompt, "codex-cli-ui-local-agent", "Current project GitHub remote", ["github.com", "origin remote", "local changes"]),
             (is_stock_firmware_password_prompt, "embedded-linux-images", "Firmware stock password boundary", ["pi", "raspberry", "firmware image caveat", "change the password"]),
-            (is_flightops_pi_vpn_mobile_access_prompt, "flightops-tracker", "Flight Ops mobile access architecture", ["Raspberry Pi", "pilots/customers", "mobile HTTPS login", "PrivateVPN admin", "role-based access"]),
+            (is_flightops_pi_vpn_mobile_access_prompt, "flightops-tracker", "Flight Ops mobile access architecture", ["Raspberry Pi", "pilots/customers", "mobile HTTPS login", "MakersVPN admin", "role-based access"]),
             (is_ratrig_vcore_extrusion_gantry_prompt, "printer-klipper-ops", "Rat Rig V-Core gantry extrusion spec", ["Rat Rig", "3030", "steel X-axis gantry", "BOM or measure"]),
             (is_humidity_control_box_minimal_heat_prompt, "cad-modeling-projects", "Low-heat humidity-control box design", ["sealed box", "desiccant", "fan", "humidity sensor", "minimal/no heat"]),
             (is_flightops_document_not_found_user_prompt, "flightops-tracker", "Flight Ops document-not-found diagnostic", ["Document not found", "database record", "file path", "user permission", "document ID"]),
@@ -11500,9 +11570,9 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractKind"] = "RatOS directory snapshot for compare"
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
-        test["directTerms"] = ["rsync", "192.0.2.10"]
+        test["directTerms"] = ["rsync", "192.0.2.118"]
         test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "new folder", "rsync", "no changes"], limit=10)
-        test["requiredContractProof"] = ["192.0.2.10", "new folder", "rsync", "not mixed with old files", "no changes"]
+        test["requiredContractProof"] = ["192.0.2.118", "new folder", "rsync", "not mixed with old files", "no changes"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
         test["minAnalyticalScore"] = 100
@@ -11599,6 +11669,34 @@ def golden_test_from_prompt(prompt, source):
         test["minAnalyticalScore"] = 100
         test["maxDurationMs"] = 750
         test["goal"] = "Real chat-history regression: Rat Rig speed/accel prompts should route to printer setup, not CNC turning, and provide conservative starting ranges."
+    if is_agent_preference_question_prompt(prompt):
+        test["expectedProjectId"] = "general"
+        test["expectedContractKind"] = "Direct answer"
+        test["expectedContractGate"] = "pass"
+        test["directAnswer"] = True
+        test["directTerms"] = ["Codex"]
+        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "preference"], limit=8)
+        test["requiredContractProof"] = ["direct answer", "why/caveat shape"]
+        test["anyTerms"] = normalize_terms(["Codex", "Red Codex", "Red"], limit=6)
+        test["requiresSource"] = False
+        test["webSearch"] = "disabled"
+        test["minAnalyticalScore"] = 84
+        test["maxDurationMs"] = 750
+        test["goal"] = "Real chat-history regression: answer agent naming/preference questions conversationally and directly instead of routing to Local Research."
+    if is_mac_memory_ai_performance_prompt(prompt):
+        test["expectedProjectId"] = "mac-system-accounts"
+        test["expectedContractKind"] = "Mac memory upgrade local facts"
+        test["expectedContractGate"] = "pass"
+        test["directAnswer"] = True
+        test["directTerms"] = ["No internal memory upgrade"]
+        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "unified memory", "AI"], limit=8)
+        test["requiredContractProof"] = ["local hardware profile", "unified memory", "no internal memory upgrade", "AI performance"]
+        test["anyTerms"] = []
+        test["requiresSource"] = False
+        test["webSearch"] = "disabled"
+        test["minAnalyticalScore"] = 84
+        test["maxDurationMs"] = 750
+        test["goal"] = "Real chat-history regression: answer Mac memory and AI-performance questions from this Mac's local hardware profile instead of generic research."
     if not test["expectedProjectId"]:
         test.pop("expectedProjectId")
     if not test["requiredTerms"]:

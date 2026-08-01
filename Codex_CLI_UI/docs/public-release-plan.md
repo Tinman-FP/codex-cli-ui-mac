@@ -35,6 +35,8 @@ Before any GitHub push or public ZIP/DMG:
 11. Create the public ZIP/DMG from the sanitized export folder, not from the live local working folder.
 12. Push only after Tinman approves the final diff and package contents.
 
+Also review `docs/support.md`, `docs/security.md`, and `docs/release-checklist.md` before publishing so public support, responsible disclosure, rollback, and launch approval instructions match the package being released.
+
 ## Sanitized Export Dry Run
 
 Use this before any public release packaging:

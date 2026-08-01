@@ -1,0 +1,60 @@
+{
+  "suite": "evidence-grounding-p4",
+  "provenance": {
+    "source": "P4 acceptance cases derived from the evidence ledger policy; no raw chat transcript content is included.",
+    "purpose": "Prevent unsupported confidence while preserving direct, useful answers."
+  },
+  "cases": [
+    {
+      "id": "current-availability-claim-gets-boundary-without-source",
+      "messages": [{"role": "user", "text": "Is this product currently available?"}],
+      "route": {"objectivePlan": {"evidenceNeed": "current-web-evidence"}},
+      "answer": "It is available today at the stated price.",
+      "expectations": {"status": "review", "sourceType": "current-web", "boundary": true}
+    },
+    {
+      "id": "current-availability-claim-keeps-citation",
+      "messages": [{"role": "user", "text": "Is this product currently available?"}],
+      "route": {"objectivePlan": {"evidenceNeed": "current-web-evidence"}},
+      "answer": "It is available today. Source: https://store.example/product.",
+      "expectations": {"status": "pass", "sourceType": "current-web", "boundary": false}
+    },
+    {
+      "id": "datasheet-claim-gets-boundary-without-paper",
+      "messages": [{"role": "user", "text": "Does the datasheet support this material at the stated temperature?"}],
+      "route": {"objectivePlan": {"evidenceNeed": "scientific-or-datasheet-evidence"}},
+      "answer": "The datasheet supports the use at that temperature.",
+      "expectations": {"status": "review", "sourceType": "scientific", "boundary": true}
+    },
+    {
+      "id": "datasheet-claim-keeps-explicit-source",
+      "messages": [{"role": "user", "text": "Does the datasheet support this material at the stated temperature?"}],
+      "route": {"objectivePlan": {"evidenceNeed": "scientific-or-datasheet-evidence"}},
+      "evidence": [{"title": "Material datasheet", "url": "https://manufacturer.example/datasheet.pdf", "sourceType": "scientific"}],
+      "answer": "The datasheet supports the use at that temperature.",
+      "expectations": {"status": "pass", "sourceType": "scientific", "boundary": false}
+    },
+    {
+      "id": "live-printer-claim-gets-boundary-without-readback",
+      "messages": [{"role": "user", "text": "Restart Klipper on the Qidi."}],
+      "route": {"objectivePlan": {"evidenceNeed": "live-local-app-evidence"}},
+      "answer": "The printer is idle and the restart completed.",
+      "expectations": {"status": "review", "sourceType": "live-state", "boundary": true}
+    },
+    {
+      "id": "human-approval-gets-boundary-without-observation",
+      "messages": [{"role": "user", "text": "Can we approve this from a physical inspection?"}],
+      "route": {"objectivePlan": {"evidenceNeed": "human-evidence"}},
+      "answer": "The inspection passed and this is approved.",
+      "expectations": {"status": "review", "sourceType": "human", "boundary": true}
+    },
+    {
+      "id": "local-receipt-remains-direct",
+      "messages": [{"role": "user", "text": "Verify the local package health result."}],
+      "route": {"objectivePlan": {"evidenceNeed": "live-local-app-evidence"}},
+      "evidence": [{"claim": "Package health", "status": "verified", "sourceType": "local", "proof": "Local receipt: 322 passing checks."}],
+      "answer": "Package health passed 322/322.",
+      "expectations": {"status": "not-needed", "sourceType": "local", "boundary": false}
+    }
+  ]
+}

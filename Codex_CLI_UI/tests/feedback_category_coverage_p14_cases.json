@@ -1,0 +1,18 @@
+{
+  "suite": "feedback-category-coverage-p14",
+  "provenance": {
+    "source": "Maps every available feedback category to explicit redacted conversation regressions without copying user feedback text."
+  },
+  "policy": {
+    "minimumCategoryCount": 6,
+    "minimumScenarioCount": 1,
+    "categories": [
+      {"id": "misunderstood", "scenarioIds": ["newest-project-pivot-replaces-earlier-focus", "ambiguous-repair-asks-one-unblocker"]},
+      {"id": "too-generic", "scenarioIds": ["direct-preference-avoids-generic-detour"]},
+      {"id": "too-verbose", "scenarioIds": ["direct-preference-avoids-generic-detour"]},
+      {"id": "wrong-expertise", "scenarioIds": ["artifact-revision-stays-in-deliverable-domain"]},
+      {"id": "missing-evidence", "scenarioIds": ["current-source-judgment-stays-traceable", "recommendation-separates-source-and-inference"]},
+      {"id": "tone", "scenarioIds": ["tone-correction-stays-natural-and-direct"]}
+    ]
+  }
+}

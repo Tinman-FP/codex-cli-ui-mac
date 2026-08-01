@@ -1,0 +1,137 @@
+{
+  "suite": "evidence-ledger-p3",
+  "provenance": {
+    "source": "Derived from the July 17, 2026 local Codex usage analysis and the existing evidence-policy architecture without copying raw chat transcripts.",
+    "purpose": "Keep response confidence proportional to decision-relevant proof."
+  },
+  "cases": [
+    {
+      "id": "current-release-cites-a-current-source",
+      "messages": [{"role": "user", "text": "What is the current software release and does it fix this bug?"}],
+      "route": {"objectivePlan": {"evidenceNeed": "current-web-evidence"}},
+      "contract": {"kind": "Research", "hardGate": false},
+      "answer": "The current release notes list the fix here: https://vendor.example/releases. Confirm the deployed build before treating it as resolved.",
+      "expectations": {
+        "sourceType": "current-web",
+        "freshness": "current",
+        "required": true,
+        "statuses": ["cited"],
+        "entrySourceTypes": ["current-web"]
+      }
+    },
+    {
+      "id": "current-claim-stays-open-without-a-source",
+      "messages": [{"role": "user", "text": "Is this product currently available at that price?"}],
+      "route": {"objectivePlan": {"evidenceNeed": "current-web-evidence"}},
+      "contract": {"kind": "Research", "hardGate": false},
+      "answer": "I cannot confirm current availability or price from the information attached to this response.",
+      "expectations": {
+        "sourceType": "current-web",
+        "freshness": "current",
+        "required": true,
+        "statuses": ["open"],
+        "entrySourceTypes": ["current-web"],
+        "nextEvidenceTerms": ["current primary source"]
+      }
+    },
+    {
+      "id": "datasheet-claim-separates-citation-and-inference",
+      "messages": [{"role": "user", "text": "Does the datasheet support using this material at the stated temperature?"}],
+      "route": {"objectivePlan": {"evidenceNeed": "scientific-or-datasheet-evidence"}},
+      "contract": {"kind": "Research", "hardGate": false},
+      "evidence": [{
+        "title": "Manufacturer material datasheet",
+        "url": "https://manufacturer.example/material-datasheet.pdf",
+        "sourceType": "scientific",
+        "freshness": "source-version"
+      }],
+      "answer": "The datasheet supports the temperature rating. The final application recommendation is an inference until the actual load and enclosure conditions are confirmed.",
+      "expectations": {
+        "sourceType": "scientific",
+        "freshness": "source-version",
+        "required": true,
+        "statuses": ["cited", "inference"],
+        "entrySourceTypes": ["scientific"]
+      }
+    },
+    {
+      "id": "source-bounded-study-keeps-authority-boundary",
+      "messages": [{"role": "user", "text": "Using the KJV only, explain the passage without bringing in other sources."}],
+      "route": {"objectivePlan": {"evidenceNeed": "source-bounded-evidence"}},
+      "contract": {"kind": "Research", "hardGate": false},
+      "answer": "The KJV text remains the authority for this explanation. Source: https://www.kingjamesbibleonline.org.",
+      "expectations": {
+        "sourceType": "source-bounded",
+        "freshness": "source-bounded",
+        "required": true,
+        "statuses": ["cited"],
+        "entrySourceTypes": ["source-bounded"]
+      }
+    },
+    {
+      "id": "local-package-receipt-earns-verified-state",
+      "messages": [{"role": "user", "text": "Verify the local package health result."}],
+      "route": {"objectivePlan": {"evidenceNeed": "live-local-app-evidence"}},
+      "contract": {"kind": "Code/config", "hardGate": false},
+      "evidence": [{
+        "claim": "Package-health release gate",
+        "status": "verified",
+        "sourceType": "local",
+        "freshness": "current",
+        "proof": "The local package-health receipt reports 321 passing checks."
+      }],
+      "answer": "The local package-health receipt passes 321/321.",
+      "expectations": {
+        "sourceType": "local",
+        "freshness": "current",
+        "required": true,
+        "statuses": ["verified"],
+        "entrySourceTypes": ["local"]
+      }
+    },
+    {
+      "id": "printer-restart-remains-open-until-live-readback",
+      "messages": [{"role": "user", "text": "Restart Klipper on the Qidi."}],
+      "route": {"objectivePlan": {"evidenceNeed": "live-local-app-evidence"}},
+      "contract": {"kind": "Klipper restart safety", "hardGate": true, "mustDo": ["require target printer", "require idle/standby state"]},
+      "answer": "Do not restart yet. Confirm the target printer and verify idle/standby before any action. No restart is claimed here.",
+      "expectations": {
+        "sourceType": "live-state",
+        "freshness": "live",
+        "required": true,
+        "statuses": ["open"],
+        "entrySourceTypes": ["live-state"],
+        "nextEvidenceTerms": ["target", "safety gate"]
+      }
+    },
+    {
+      "id": "physical-inspection-remains-human-evidence",
+      "messages": [{"role": "user", "text": "Can we approve this from a physical inspection?"}],
+      "route": {"objectivePlan": {"evidenceNeed": "human-evidence"}},
+      "contract": {"kind": "General help", "hardGate": false},
+      "answer": "A physical inspection has not been recorded, so approval remains open.",
+      "expectations": {
+        "sourceType": "human",
+        "freshness": "live",
+        "required": true,
+        "statuses": ["open"],
+        "entrySourceTypes": ["human"],
+        "nextEvidenceTerms": ["record the human observation"]
+      }
+    },
+    {
+      "id": "preference-does-not-get-a-research-dump",
+      "messages": [{"role": "user", "text": "Keep the normal conversation warm, direct, and concise."}],
+      "route": {"objectivePlan": {"evidenceNeed": "none"}},
+      "contract": {"kind": "General help", "hardGate": false},
+      "answer": "Yes. I will keep the answer warm, direct, and focused on the decision.",
+      "expectations": {
+        "sourceType": "not-needed",
+        "freshness": "not-applicable",
+        "required": false,
+        "statuses": ["not-needed"],
+        "entrySourceTypes": ["not-needed"]
+      }
+    }
+  ]
+}

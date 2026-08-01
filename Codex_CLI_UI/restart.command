@@ -4,11 +4,31 @@ set -euo pipefail
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 PORT="${CODEX_UI_PORT:-8765}"
 URL="http://127.0.0.1:${PORT}"
+NATIVE_APP_PATH="${CODEX_CLI_UI_NATIVE_APP_PATH:-$APP_DIR/build/Codex CLI UI.app}"
 LAUNCH_AGENT_LABEL="${CODEX_CLI_UI_LAUNCH_AGENT_LABEL:-com.localuser.codex-cli-ui}"
 LAUNCH_AGENT_DOMAIN="gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
 
 cd "$APP_DIR"
 mkdir -p data logs
+
+open_ui_shell() {
+  if [ "${CODEX_CLI_UI_OPEN_BROWSER:-0}" = "1" ]; then
+    open "$URL" >/dev/null 2>&1 || true
+    return
+  fi
+
+  if [ "${CODEX_CLI_UI_OPEN_NATIVE:-1}" = "1" ]; then
+    if [ -d "$NATIVE_APP_PATH" ]; then
+      open "$NATIVE_APP_PATH" >/dev/null 2>&1 || true
+      return
+    fi
+    if open -a "Codex CLI UI" >/dev/null 2>&1; then
+      return
+    fi
+  fi
+
+  echo "Native app window was not opened automatically. URL remains available at $URL"
+}
 
 if launchctl print "$LAUNCH_AGENT_DOMAIN" >/dev/null 2>&1; then
   echo "Restarting Codex CLI UI LaunchAgent ${LAUNCH_AGENT_LABEL}..."
@@ -20,7 +40,7 @@ if launchctl print "$LAUNCH_AGENT_DOMAIN" >/dev/null 2>&1; then
       echo "$LISTENER_PID" > data/server.pid
     fi
     echo "Codex CLI UI is running at $URL"
-    open "$URL" >/dev/null 2>&1 || true
+    open_ui_shell
     exit 0
   fi
   echo "LaunchAgent restarted, but the server did not answer yet. Falling back to manual restart."
@@ -73,7 +93,7 @@ if curl -fsS "$URL/api/config" >/dev/null 2>&1; then
   LISTENER_PID="$(lsof -t -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | head -1 || true)"
   echo "${LISTENER_PID:-$LAUNCH_PID}" > data/server.pid
   echo "Codex CLI UI is running at $URL"
-  open "$URL" >/dev/null 2>&1 || true
+  open_ui_shell
 else
   echo "The server did not answer yet. Check logs/server.log and PID $LAUNCH_PID."
   exit 1

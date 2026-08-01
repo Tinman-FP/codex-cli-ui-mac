@@ -1,0 +1,40 @@
+{
+  "suite": "acknowledgement-cadence-p24",
+  "provenance": {
+    "source": "Uses redacted synthetic conversation turns to keep adjacent acknowledgement variants from becoming repetitive while preserving direct, non-repeated openings."
+  },
+  "cases": [
+    {
+      "id": "adjacent-acknowledgement-variant-is-trimmed",
+      "messages": [
+        {"role": "assistant", "text": "That makes sense. The configuration is the source of truth here."},
+        {"role": "user", "text": "What should I do next?"}
+      ],
+      "answer": "Fair point. Start with the source-of-truth configuration, then make the smallest reversible change.",
+      "expectedPrefix": "Start with the source-of-truth configuration",
+      "expectsRevision": true
+    },
+    {
+      "id": "acknowledgement-after-technical-opening-is-preserved",
+      "messages": [
+        {"role": "assistant", "text": "Use ASA for exposed outdoor parts."},
+        {"role": "user", "text": "Why is that the right choice?"}
+      ],
+      "answer": "Fair point. ASA is the better fit because UV and heat resistance matter more outdoors than ease of printing.",
+      "expectedPrefix": "Fair point. ASA is the better fit",
+      "expectsRevision": false
+    },
+    {
+      "id": "acknowledgement-after-intervening-technical-turn-is-preserved",
+      "messages": [
+        {"role": "assistant", "text": "That makes sense. The first check is complete."},
+        {"role": "user", "text": "Can you give me the material choice too?"},
+        {"role": "assistant", "text": "Use ASA for exposed outdoor parts."},
+        {"role": "user", "text": "Why is that the right choice?"}
+      ],
+      "answer": "Good call. ASA is the better fit because UV and heat resistance matter more outdoors than ease of printing.",
+      "expectedPrefix": "Good call. ASA is the better fit",
+      "expectsRevision": false
+    }
+  ]
+}

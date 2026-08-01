@@ -1,0 +1,26 @@
+{
+  "suite": "continuation-affirmation-prefix-p26",
+  "provenance": {
+    "source": "Uses redacted high-frequency continuation phrases to ensure normal conversational enthusiasm does not interrupt a saved next-step recommendation or authorization."
+  },
+  "cases": [
+    {
+      "id": "period-prefixed-next-step-recommends",
+      "messages": [{"role": "user", "text": "Awesome. What's next?"}],
+      "sessionCompass": {"phase": "active", "objective": "Finish the interaction work.", "nextStep": "Run the focused quality suite."},
+      "expectedResponseKind": "recommend-session-next-step"
+    },
+    {
+      "id": "dash-prefixed-approval-executes",
+      "messages": [{"role": "user", "text": "Perfect - let's do it."}],
+      "sessionCompass": {"phase": "active", "objective": "Finish the interaction work.", "nextStep": "Run the focused quality suite."},
+      "expectedResponseKind": "execute-session-next-step"
+    },
+    {
+      "id": "multiword-prefix-continues",
+      "messages": [{"role": "user", "text": "Sounds good: continue with that."}],
+      "sessionCompass": {"phase": "active", "objective": "Finish the interaction work.", "nextStep": "Run the focused quality suite."},
+      "expectedResponseKind": "execute-session-next-step"
+    }
+  ]
+}

@@ -3,7 +3,28 @@ set -euo pipefail
 
 SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
 TARGET_DIR="$HOME/Applications/Codex_CLI_UI"
+URL="http://127.0.0.1:8765"
+NATIVE_APP_PATH="${CODEX_CLI_UI_NATIVE_APP_PATH:-$TARGET_DIR/build/Codex CLI UI.app}"
 MISSING=()
+
+open_ui_shell() {
+  if [ "${CODEX_CLI_UI_OPEN_BROWSER:-0}" = "1" ]; then
+    open "$URL" >/dev/null 2>&1 || true
+    return
+  fi
+
+  if [ "${CODEX_CLI_UI_OPEN_NATIVE:-1}" = "1" ]; then
+    if [ -d "$NATIVE_APP_PATH" ]; then
+      open "$NATIVE_APP_PATH" >/dev/null 2>&1 || true
+      return
+    fi
+    if open -a "Codex CLI UI" >/dev/null 2>&1; then
+      return
+    fi
+  fi
+
+  echo "Native app window was not opened automatically. URL remains available at $URL"
+}
 
 if ! command -v python3 >/dev/null 2>&1; then
   MISSING+=("python3")
@@ -60,9 +81,9 @@ python3 server.py &
 SERVER_PID=$!
 sleep 2
 
-if curl -fsS "http://127.0.0.1:8765/api/config" >/dev/null 2>&1; then
-  echo "Codex CLI UI is running at http://127.0.0.1:8765"
-  open "http://127.0.0.1:8765" >/dev/null 2>&1 || true
+if curl -fsS "$URL/api/config" >/dev/null 2>&1; then
+  echo "Codex CLI UI is running at $URL"
+  open_ui_shell
 else
   echo "The server did not answer yet. Check this process if needed: $SERVER_PID"
 fi
