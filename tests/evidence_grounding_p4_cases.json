@@ -15,7 +15,15 @@
     {
       "id": "current-availability-claim-keeps-citation",
       "messages": [{"role": "user", "text": "Is this product currently available?"}],
-      "route": {"objectivePlan": {"evidenceNeed": "current-web-evidence"}},
+      "route": {"_liveRunId": "p4-current-availability", "objectivePlan": {"evidenceNeed": "current-web-evidence"}},
+      "evidence": [{
+        "id": "store-product",
+        "title": "Store product page",
+        "url": "https://store.example/product",
+        "excerpt": "The retrieved product page reports current availability.",
+        "fetched": true,
+        "sourceType": "current-web"
+      }],
       "answer": "It is available today. Source: https://store.example/product.",
       "expectations": {"status": "pass", "sourceType": "current-web", "boundary": false}
     },
@@ -29,8 +37,8 @@
     {
       "id": "datasheet-claim-keeps-explicit-source",
       "messages": [{"role": "user", "text": "Does the datasheet support this material at the stated temperature?"}],
-      "route": {"objectivePlan": {"evidenceNeed": "scientific-or-datasheet-evidence"}},
-      "evidence": [{"title": "Material datasheet", "url": "https://manufacturer.example/datasheet.pdf", "sourceType": "scientific"}],
+      "route": {"_liveRunId": "p4-material-datasheet", "objectivePlan": {"evidenceNeed": "scientific-or-datasheet-evidence"}},
+      "evidence": [{"id": "material-datasheet", "title": "Material datasheet", "url": "https://manufacturer.example/datasheet.pdf", "excerpt": "The retrieved datasheet states the supported temperature rating.", "fetched": true, "sourceType": "scientific"}],
       "answer": "The datasheet supports the use at that temperature.",
       "expectations": {"status": "pass", "sourceType": "scientific", "boundary": false}
     },

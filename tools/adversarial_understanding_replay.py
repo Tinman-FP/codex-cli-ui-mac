@@ -11,6 +11,7 @@ import argparse
 import json
 import re
 import socket
+import sys
 import time
 import unicodedata
 import urllib.error
@@ -259,6 +260,51 @@ CASES = [
         "followupRequiredAll": ["foam", "plywood", "8 hours"],
         "forbidden": ["3d printer release"],
     },
+    {
+        "id": "stable-topological-sort-clarification",
+        "topic": "Programming contract clarification and semantic implementation",
+        "webSearch": "disabled",
+        "first": (
+            "Implement a stable topological sort in Python using Kahn's algorithm. "
+            "Preserve input order when multiple nodes are ready and include tests."
+        ),
+        "followup": "Use an explicit ordered node list.",
+        "reference": (
+            "Ask which collection defines input order, then use the explicit ordered node list as the "
+            "authoritative identity and priority domain. Reject or define duplicate identities, validate "
+            "graph-domain closure, choose globally by input priority whenever nodes become ready, detect "
+            "cycles, and include executable assertions."
+        ),
+        "requiredAll": ["implementation should not be guessed"],
+        "clarificationRequiredAll": ["input order"],
+        "clarificationRequiredAny": [
+            "explicit ordered node list",
+            "graph mapping's key order",
+            "first appearance",
+        ],
+        "followupRequiredAll": ["```python", "assert", "cycle", "duplicate"],
+        "followupRequiredAny": ["heapq", "min(ready", "sorted("],
+        "forbidden": [
+            "printing examples alone",
+            "local research",
+            "load failed",
+            "repair path:",
+        ],
+        "programmingContract": True,
+        "expectedFirstTargetSurface": "conversation.programming_contract",
+        "expectedFirstCapability": "focused-clarification",
+        "expectedFollowupTargetSurface": "conversation.programming_answer",
+        "expectedFollowupCapability": "conversation-reasoning",
+        "expectedFollowupContextScope": "clarification-resolution",
+        "payloadOverrides": {
+            "cwd": str(APP_DIR),
+            "accessLevel": "danger-full-access",
+            "reasoningLevel": "high",
+            "managerDepth": "balanced",
+            "friendlinessLevel": "warm",
+            "humorLevel": "light",
+        },
+    },
 ]
 
 
@@ -286,7 +332,7 @@ def parse_json_stream_events(text):
     return events
 
 
-def post_run(server, messages, web_search="disabled", timeout=240):
+def post_run(server, messages, web_search="disabled", timeout=240, payload_overrides=None):
     payload = {
         "messages": messages,
         "profile": "manager",
@@ -294,6 +340,8 @@ def post_run(server, messages, web_search="disabled", timeout=240):
         "webSearch": web_search,
         "testRun": True,
     }
+    if isinstance(payload_overrides, dict):
+        payload.update(payload_overrides)
     request = urllib.request.Request(
         f"{server.rstrip('/')}/api/run",
         data=json.dumps(payload).encode("utf-8"),
@@ -409,7 +457,7 @@ def score_answer(answer, required_all=None, required_any=None, forbidden=None):
     }
 
 
-def score_case_answer(case, answer, followup=False):
+def score_case_answer(case, answer, followup=False, messages=None, route=None):
     required_all_key = "followupRequiredAll" if followup else "requiredAll"
     required_any_key = "followupRequiredAny" if followup else "requiredAny"
     score = score_answer(
@@ -418,6 +466,19 @@ def score_case_answer(case, answer, followup=False):
         required_any=case.get(required_any_key),
         forbidden=case.get("forbidden"),
     )
+    if followup and case.get("programmingContract"):
+        if str(APP_DIR) not in sys.path:
+            sys.path.insert(0, str(APP_DIR))
+        import server as app_server
+
+        semantic_issues = app_server.deterministic_generic_reasoning_issues(
+            answer,
+            messages=messages or [],
+            route=route or {},
+        )
+        score["semanticIssues"] = semantic_issues
+        if semantic_issues:
+            score["passed"] = False
     if followup or score.get("passed") or not case.get("clarificationRequiredAny"):
         score["acceptedMode"] = "answer"
         return score
@@ -439,17 +500,80 @@ def score_case_answer(case, answer, followup=False):
     return score
 
 
-def run_case(server, case, timeout):
+def route_expectation_checks(case, first, follow):
+    first_route = first.get("route") or {}
+    follow_route = follow.get("route") or {}
+    first_frame = first_route.get("intentFrame") or {}
+    follow_frame = follow_route.get("intentFrame") or {}
+    first_plan = first_route.get("capabilityPlan") or {}
+    follow_plan = follow_route.get("capabilityPlan") or {}
+    checks = {}
+    expectations = (
+        ("firstTargetSurface", case.get("expectedFirstTargetSurface"), first_frame.get("targetSurface")),
+        ("firstCapability", case.get("expectedFirstCapability"), first_plan.get("id")),
+        ("followupTargetSurface", case.get("expectedFollowupTargetSurface"), follow_frame.get("targetSurface")),
+        ("followupCapability", case.get("expectedFollowupCapability"), follow_plan.get("id")),
+        ("followupContextScope", case.get("expectedFollowupContextScope"), follow_frame.get("contextScope")),
+    )
+    for key, expected, actual in expectations:
+        if expected:
+            checks[key] = {"expected": expected, "actual": actual, "passed": actual == expected}
+    return checks
+
+
+def run_case(server, case, timeout, progress_callback=None):
     first_messages = [{"role": "user", "text": case["first"]}]
-    first = post_run(server, first_messages, web_search=case.get("webSearch", "disabled"), timeout=timeout)
-    first_score = score_case_answer(case, first["answer"])
+    first = post_run(
+        server,
+        first_messages,
+        web_search=case.get("webSearch", "disabled"),
+        timeout=timeout,
+        payload_overrides=case.get("payloadOverrides"),
+    )
+    first_score = score_case_answer(
+        case,
+        first["answer"],
+        messages=first_messages,
+        route=first.get("route"),
+    )
+    if callable(progress_callback):
+        progress_callback(
+            {
+                "id": case["id"],
+                "topic": case["topic"],
+                "reference": case["reference"],
+                "firstPrompt": case["first"],
+                "followupPrompt": case["followup"],
+                "first": first,
+                "firstScore": first_score,
+                "followup": {"answer": "", "route": {}, "returnCode": None},
+                "followupScore": {"passed": False, "pending": True},
+                "routeChecks": {},
+                "phase": "first-turn-complete",
+                "passed": False,
+            }
+        )
     follow_messages = [
         {"role": "user", "text": case["first"]},
         {"role": "assistant", "text": first["answer"]},
         {"role": "user", "text": case["followup"]},
     ]
-    follow = post_run(server, follow_messages, web_search=case.get("followupWebSearch", case.get("webSearch", "disabled")), timeout=timeout)
-    follow_score = score_case_answer(case, follow["answer"], followup=True)
+    follow = post_run(
+        server,
+        follow_messages,
+        web_search=case.get("followupWebSearch", case.get("webSearch", "disabled")),
+        timeout=timeout,
+        payload_overrides=case.get("payloadOverrides"),
+    )
+    follow_score = score_case_answer(
+        case,
+        follow["answer"],
+        followup=True,
+        messages=follow_messages,
+        route=follow.get("route"),
+    )
+    route_checks = route_expectation_checks(case, first, follow)
+    routes_passed = all(item.get("passed") for item in route_checks.values())
     return {
         "id": case["id"],
         "topic": case["topic"],
@@ -460,7 +584,15 @@ def run_case(server, case, timeout):
         "firstScore": first_score,
         "followup": follow,
         "followupScore": follow_score,
-        "passed": first_score["passed"] and follow_score["passed"] and first.get("returnCode") == 0 and follow.get("returnCode") == 0,
+        "routeChecks": route_checks,
+        "phase": "complete",
+        "passed": (
+            first_score["passed"]
+            and follow_score["passed"]
+            and routes_passed
+            and first.get("returnCode") == 0
+            and follow.get("returnCode") == 0
+        ),
     }
 
 
@@ -540,7 +672,16 @@ def main():
     for index, case in enumerate(selected, start=1):
         print(f"[{index}/{len(selected)}] {case['id']}: {case['topic']}", flush=True)
         try:
-            result = run_case(args.server, case, args.timeout)
+            result = run_case(
+                args.server,
+                case,
+                args.timeout,
+                progress_callback=lambda partial: write_reports(
+                    [*results, partial],
+                    Path(args.out_dir),
+                    stamp=stamp,
+                ),
+            )
         except Exception as exc:
             result = {
                 "id": case["id"],

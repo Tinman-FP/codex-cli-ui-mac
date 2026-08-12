@@ -51,6 +51,7 @@ CASES = (
         "project": "general",
         "engine": "local",
         "profile": "local-fast",
+        "directMode": "kernel-social-acknowledgement",
     },
     {
         "id": "supplied-source",
@@ -122,6 +123,8 @@ def main() -> int:
             web_search="live",
             allow_legacy=bool(decision.get("allowLegacyDirectAnswer")),
         )
+        expected_direct_mode = case.get("directMode")
+        direct_mode = (direct or {}).get("mode") if isinstance(direct, dict) else None
         passed = bool(
             frame.get("domain") == case["domain"]
             and plan.get("registered") is True
@@ -131,7 +134,11 @@ def main() -> int:
             and route.get("projectId") == case["project"]
             and route.get("engine") == case["engine"]
             and route.get("effectiveProfile") == case["profile"]
-            and direct is None
+            and (
+                direct_mode == expected_direct_mode
+                if expected_direct_mode
+                else direct is None
+            )
         )
         rows.append(
             {
@@ -144,7 +151,7 @@ def main() -> int:
                 "project": route.get("projectId"),
                 "engine": route.get("engine"),
                 "profile": route.get("effectiveProfile"),
-                "directAnswer": (direct or {}).get("mode") if isinstance(direct, dict) else None,
+                "directAnswer": direct_mode,
             }
         )
 
@@ -223,8 +230,10 @@ def main() -> int:
         and (capability_route.get("kernelDecision") or {}).get("mode") == "deterministic-capability"
         and capability_direct.get("mode") == "runtime-capability-introspection"
         and "Full Access" in capability_answer
-        and "Think with you" in capability_answer
-        and "work directly on this Mac" in capability_answer
+        and "turn a rough idea into a clear problem" in capability_answer
+        and "work directly here" in capability_answer
+        and "**" not in capability_answer
+        and "\n-" not in capability_answer
         and "visible commands" not in capability_answer
         and "visible commands" in inventory_answer
         and len(capability_answer) < 1500

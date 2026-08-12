@@ -5,6 +5,9 @@
 @property(nonatomic, strong) NSWindow *window;
 @property(nonatomic, strong) WKWebView *webView;
 @property(nonatomic, strong) NSTask *serverTask;
+@property(nonatomic, assign) BOOL reconnectMonitorActive;
+@property(nonatomic, assign) NSInteger reconnectAttempt;
+@property(nonatomic, assign) BOOL applicationPageLoadPending;
 @end
 
 @implementation AppDelegate
@@ -82,8 +85,7 @@
     for (NSInteger attempt = 0; attempt < 20; attempt++) {
         if ([self isServerReady]) {
             dispatch_async(dispatch_get_main_queue(), ^{
-                NSURL *url = [NSURL URLWithString:@"http://127.0.0.1:8765/"];
-                [self.webView loadRequest:[NSURLRequest requestWithURL:url]];
+                [self loadApplicationPage];
             });
             return;
         }
@@ -91,30 +93,85 @@
     }
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        [self loadErrorPage];
+        [self loadReconnectPage];
+        [self beginReconnectMonitoring];
+    });
+}
+
+- (void)loadApplicationPage {
+    NSURL *url = [NSURL URLWithString:@"http://127.0.0.1:8765/"];
+    self.applicationPageLoadPending = YES;
+    [self.webView loadRequest:[NSURLRequest requestWithURL:url
+                                               cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
+                                           timeoutInterval:5.0]];
+}
+
+- (void)beginReconnectMonitoring {
+    if (self.reconnectMonitorActive) {
+        return;
+    }
+    self.reconnectMonitorActive = YES;
+    self.reconnectAttempt = 0;
+    [self scheduleReconnectAttempt];
+}
+
+- (void)scheduleReconnectAttempt {
+    if (!self.reconnectMonitorActive) {
+        return;
+    }
+
+    NSTimeInterval delay = MIN(3.0, 0.75 + (self.reconnectAttempt * 0.25));
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!self.reconnectMonitorActive) {
+            return;
+        }
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            BOOL ready = [self isServerReady];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (!self.reconnectMonitorActive) {
+                    return;
+                }
+                if (ready) {
+                    self.reconnectMonitorActive = NO;
+                    self.reconnectAttempt = 0;
+                    [self loadApplicationPage];
+                    return;
+                }
+                self.reconnectAttempt += 1;
+                [self scheduleReconnectAttempt];
+            });
+        });
     });
 }
 
 - (BOOL)isServerReady {
-    NSURL *url = [NSURL URLWithString:@"http://127.0.0.1:8765/api/config"];
+    NSURL *url = [NSURL URLWithString:@"http://127.0.0.1:8765/"];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-    request.timeoutInterval = 0.75;
+    request.cachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+    request.timeoutInterval = 1.5;
+    [request setValue:@"no-cache" forHTTPHeaderField:@"Cache-Control"];
+    [request setValue:@"close" forHTTPHeaderField:@"Connection"];
 
     __block BOOL ok = NO;
     dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-    NSURLSessionDataTask *task = [[NSURLSession sharedSession]
+    NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+    configuration.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+    configuration.timeoutIntervalForRequest = 1.5;
+    NSURLSession *session = [NSURLSession sessionWithConfiguration:configuration];
+    NSURLSessionDataTask *task = [session
         dataTaskWithRequest:request
           completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
               if ([response isKindOfClass:[NSHTTPURLResponse class]]) {
                   NSInteger status = [(NSHTTPURLResponse *)response statusCode];
-                  ok = status >= 200 && status < 500;
+                  ok = status >= 200 && status < 300;
               }
               dispatch_semaphore_signal(semaphore);
           }];
 
     [task resume];
-    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)));
+    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)));
     [task cancel];
+    [session invalidateAndCancel];
     return ok;
 }
 
@@ -152,20 +209,38 @@
     }
 }
 
-- (void)loadErrorPage {
+- (void)loadReconnectPage {
+    self.applicationPageLoadPending = NO;
     NSString *html = @"<!doctype html>"
     "<html><head><meta charset=\"utf-8\"><style>"
     "html,body{height:100%;margin:0;background:#0f1115;color:#f5f3ee;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;}"
     "body{display:grid;place-items:center;}"
-    ".panel{width:min(540px,calc(100vw - 48px));border:1px solid rgba(255,105,97,.45);border-radius:8px;padding:24px;background:#181b21;}"
+    ".panel{width:min(540px,calc(100vw - 48px));border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:24px;background:#181b21;}"
     "h1{margin:0 0 10px;font-size:22px;letter-spacing:0;}"
     "p{margin:0;color:rgba(245,243,238,.72);line-height:1.45;font-size:14px;}"
-    "code{color:#ff8a80;}"
+    "code{color:#f5f3ee;}"
     "</style></head><body><main class=\"panel\">"
-    "<h1>Codex CLI UI did not start</h1>"
-    "<p>The native app could not reach <code>127.0.0.1:8765</code>. Try restarting the app or running <code>~/Applications/Codex_CLI_UI/start.command</code>.</p>"
+    "<h1>Reconnecting to Codex CLI UI</h1>"
+    "<p>The local service at <code>127.0.0.1:8765</code> is restarting. This window will reconnect automatically when it is ready.</p>"
     "</main></body></html>";
     [self.webView loadHTMLString:html baseURL:nil];
+}
+
+- (BOOL)isLocalServiceURL:(NSURL *)url {
+    NSString *host = url.host.lowercaseString ?: @"";
+    return [host isEqualToString:@"127.0.0.1"] || [host isEqualToString:@"localhost"];
+}
+
+- (void)handleNavigationFailure:(NSError *)error {
+    if (error.code == NSURLErrorCancelled) {
+        return;
+    }
+    NSURL *failedURL = error.userInfo[NSURLErrorFailingURLErrorKey];
+    if (failedURL && ![self isLocalServiceURL:failedURL]) {
+        return;
+    }
+    [self loadReconnectPage];
+    [self beginReconnectMonitoring];
 }
 
 - (NSString *)contentTypeForPath:(NSString *)path {
@@ -306,6 +381,26 @@ decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     }
 
     decisionHandler(WKNavigationActionPolicyAllow);
+}
+
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
+    if (self.applicationPageLoadPending && [self isLocalServiceURL:webView.URL]) {
+        self.applicationPageLoadPending = NO;
+        self.reconnectMonitorActive = NO;
+        self.reconnectAttempt = 0;
+    }
+}
+
+- (void)webView:(WKWebView *)webView
+didFailProvisionalNavigation:(WKNavigation *)navigation
+      withError:(NSError *)error {
+    [self handleNavigationFailure:error];
+}
+
+- (void)webView:(WKWebView *)webView
+didFailNavigation:(WKNavigation *)navigation
+      withError:(NSError *)error {
+    [self handleNavigationFailure:error];
 }
 
 @end

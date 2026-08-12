@@ -15,7 +15,15 @@
     {
       "id": "current-source-is-grounded",
       "messages": [{"role": "user", "text": "Is this product currently available?"}],
-      "route": {"objectivePlan": {"evidenceNeed": "current-web-evidence"}},
+      "route": {"_liveRunId": "p5-current-availability", "objectivePlan": {"evidenceNeed": "current-web-evidence"}},
+      "evidence": [{
+        "id": "store-product",
+        "title": "Store product page",
+        "url": "https://store.example/product",
+        "excerpt": "The retrieved product page reports current availability.",
+        "fetched": true,
+        "sourceType": "current-web"
+      }],
       "answer": "It is available today. Source: https://store.example/product.",
       "expectedLevel": "grounded"
     },
@@ -28,11 +36,11 @@
       "expectedLevel": "grounded"
     },
     {
-      "id": "explicit-inference-is-bounded",
+      "id": "explicit-inference-without-source-needs-evidence",
       "messages": [{"role": "user", "text": "Does the datasheet support this material choice?"}],
       "route": {"objectivePlan": {"evidenceNeed": "scientific-or-datasheet-evidence"}},
       "answer": "This is an inference until a material-specific datasheet is attached.",
-      "expectedLevel": "bounded"
+      "expectedLevel": "needs-evidence"
     },
     {
       "id": "unsupported-current-claim-needs-evidence",

@@ -196,7 +196,26 @@ def audit(root):
             stable_secret_text = " ".join(stable_secret_text.split()[:5])
             stable_forbidden = stable_forbidden[:4]
             messages = [{"role": "user", "text": "How to save a stable note " + stable_secret_text}]
-            route = {"projectId": "printer-klipper-ops"}
+            stable_answer = (
+                "Procedure: keep this durable answer "
+                + stable_secret_text
+                + " This is why: stable test."
+            )
+            route = {
+                "projectId": "printer-klipper-ops",
+                "_supervisionStatus": "pass",
+                "_answerEnvelope": {
+                    "status": "complete",
+                    "final_text_sha256": server.text_sha256(stable_answer),
+                    "terminal_state": {"mayClaimComplete": True},
+                    "evidence_provenance": {
+                        "mayClaimVerified": True,
+                        "verifiedReceiptCount": 1,
+                        "sourceTypes": ["synthetic-privacy-fixture"],
+                        "issues": [],
+                    },
+                },
+            }
             admin_topic = {
                 "projectId": "3d-printers",
                 "projectName": "3D Printers",
@@ -208,7 +227,7 @@ def audit(root):
             stored_id = server.record_stable_knowledge(
                 messages,
                 route,
-                "Procedure: keep this durable answer " + stable_secret_text + " This is why: stable test.",
+                stable_answer,
                 admin_topic,
             )
             knowledge_disk = server.ADMIN_KNOWLEDGE_PATH.read_text(encoding="utf-8")

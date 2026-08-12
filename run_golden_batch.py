@@ -13,6 +13,8 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+from golden_test_contract import normalize_golden_test_presentation
+
 
 APP_DIR = Path(__file__).resolve().parent
 DATA_DIR = APP_DIR / "data"
@@ -613,7 +615,7 @@ def main():
         args.source = "history-harvest" if args.group == "Slow" else ""
 
     bench = ensure_local_server(args.server)
-    tests = bench.get("tests") or []
+    tests = [normalize_golden_test_presentation(test) for test in (bench.get("tests") or [])]
     selected = select_tests(tests, args)
     started = time.time()
     results = []

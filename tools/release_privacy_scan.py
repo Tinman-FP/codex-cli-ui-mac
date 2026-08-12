@@ -24,12 +24,18 @@ SKIP_SUFFIXES = (
     ".zip",
 )
 
+SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)\b(?P<name>password|passwd|pwd|api[_-]?key|token|secret)\s*"
+    r"(?P<operator>:(?![:=])|(?<![=!<>])=(?![=>]))\s*"
+    r"(?P<value>\"[^\"\n]*\"|'[^'\n]*'|"
+    r"[A-Za-z_$][A-Za-z0-9_.$]*\[(?:[A-Za-z_$][A-Za-z0-9_$]*|\d+|\"[^\"\n]+\"|'[^'\n]+')\]|"
+    r"[^\"',\s;\]}]+)"
+)
+
 PATTERNS = {
     "private_ipv4": re.compile(r"\b(?:10|172\.(?:1[6-9]|2\d|3[0-1])|192\.168)\.\d{1,3}\.\d{1,3}\b"),
     "absolute_user_path": re.compile(r"/Users/[A-Za-z0-9._-]+/[^\s`\"')\]}]+"),
-    "secret_assignment": re.compile(
-        r"(?i)\b(password|passwd|pwd|api[_-]?key|token|secret)\s*[:=]\s*[\"']?[^,\s\"']+"
-    ),
+    "secret_assignment": SECRET_ASSIGNMENT_RE,
 }
 
 BENIGN_SECRET_ASSIGNMENT_SNIPPETS = (
@@ -39,6 +45,67 @@ BENIGN_SECRET_ASSIGNMENT_SNIPPETS = (
     "redacted",
     "[REDACTED]",
 )
+
+CODE_SUFFIXES = {
+    ".c",
+    ".cc",
+    ".cpp",
+    ".go",
+    ".h",
+    ".hpp",
+    ".java",
+    ".js",
+    ".m",
+    ".py",
+    ".rb",
+    ".rs",
+    ".sh",
+    ".ts",
+}
+BARE_IDENTIFIER_ASSIGNMENT_RE = re.compile(
+    r"(?i)^\s*(?:password|passwd|pwd|api[_-]?key|token|secret)\s*[:=]\s*"
+    r"[A-Za-z_][A-Za-z0-9_]*\s*$"
+)
+GENERATED_IDENTIFIER_VALUE_RE = re.compile(
+    r"(?i)^(?:"
+    r"crypto\.randomUUID\s*\(\s*\)|"
+    r"crypto\.randomBytes\s*\(|"
+    r"uuid\.uuid4\s*\(\s*\)|"
+    r"secrets\.token_(?:bytes|hex|urlsafe)\s*\(|"
+    r"os\.urandom\s*\("
+    r")"
+)
+INDEXED_RUNTIME_VALUE_RE = re.compile(
+    r"^[A-Za-z_$][A-Za-z0-9_.$]*\["
+    r"(?:[A-Za-z_$][A-Za-z0-9_$]*|\d+|\"[^\"\n]+\"|'[^'\n]+')"
+    r"\]$"
+)
+SELF_DERIVED_SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)^\s*(?P<name>password|passwd|pwd|api[_-]?key|token|secret)\s*"
+    r"(?::(?![:=])|(?<![=!<>])=(?![=>]))\s*(?P=name)(?:\[|\.)"
+)
+
+
+def is_benign_secret_assignment(rel_path, match):
+    match_text = match.group(0)
+    if any(token in match_text for token in BENIGN_SECRET_ASSIGNMENT_SNIPPETS):
+        return True
+    if Path(rel_path).suffix.lower() not in CODE_SUFFIXES:
+        return False
+    value = str(match.groupdict().get("value") or "").strip()
+    if (
+        len(value) >= 2
+        and value[0] == value[-1]
+        and value[0] in {"\"", "'"}
+        and not value[1:-1]
+    ):
+        return True
+    return bool(
+        BARE_IDENTIFIER_ASSIGNMENT_RE.fullmatch(match_text)
+        or GENERATED_IDENTIFIER_VALUE_RE.match(value)
+        or INDEXED_RUNTIME_VALUE_RE.fullmatch(value)
+        or SELF_DERIVED_SECRET_ASSIGNMENT_RE.match(match_text)
+    )
 
 
 def git_ls_files(root):
@@ -70,7 +137,7 @@ def scan_file(root, rel_path):
     for line_no, line in enumerate(text.splitlines(), 1):
         for kind, pattern in PATTERNS.items():
             for match in pattern.finditer(line):
-                if kind == "secret_assignment" and any(token in match.group(0) for token in BENIGN_SECRET_ASSIGNMENT_SNIPPETS):
+                if kind == "secret_assignment" and is_benign_secret_assignment(rel_path, match):
                     continue
                 findings.append(
                     {

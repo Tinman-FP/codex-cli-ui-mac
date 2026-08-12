@@ -13,7 +13,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from answer_envelope import synthetic_envelope_check
-from capability_registry import build_capability_plan, synthetic_registry_check
+from capability_registry import (
+    build_capability_plan,
+    plan_allows_legacy_fallback,
+    synthetic_registry_check,
+)
 import server
 
 
@@ -48,6 +52,12 @@ def main() -> int:
             "frame": {"domain": "current_market_research"},
             "decision": {"mode": "model-first", "selectedCapability": "research-parts-reference"},
             "expected": "current-web-research",
+        },
+        {
+            "id": "ebay-marketplace",
+            "frame": {"domain": "marketplace_listing_research"},
+            "decision": {"mode": "model-first", "selectedCapability": "ebay_marketplace_research"},
+            "expected": "ebay-marketplace-research",
         },
         {
             "id": "comparison",
@@ -139,6 +149,39 @@ def main() -> int:
         and advisory_plan.get("review_policy") == "engineering-contract"
         and source_plan.get("review_policy") == "source-fidelity-audit"
     )
+    cad_plan = build_capability_plan(
+        {"domain": "cad_artifact_work"},
+        {"mode": "capability-first", "selectedCapability": "cad_artifact"},
+    )
+    bounded_plan = build_capability_plan(
+        {"domain": "bounded_specialist_capability"},
+        {
+            "mode": "deterministic-capability",
+            "selectedCapability": "bounded_specialist_direct",
+        },
+    )
+    ownership_boundary_ok = bool(
+        not plan_allows_legacy_fallback(
+            cad_plan,
+            {"allowLegacyDirectAnswer": True},
+        )
+        and not plan_allows_legacy_fallback(
+            advisory_plan,
+            {"allowLegacyDirectAnswer": True},
+        )
+        and plan_allows_legacy_fallback(
+            bounded_plan,
+            {"allowLegacyDirectAnswer": True},
+        )
+        and plan_allows_legacy_fallback(
+            {"registered": False, "handler_key": "legacy_dispatch"},
+            {"allowLegacyDirectAnswer": True},
+        )
+        and not plan_allows_legacy_fallback(
+            {"registered": False, "handler_key": "legacy_dispatch"},
+            {"allowLegacyDirectAnswer": False},
+        )
+    )
     power_audit_calls = []
     power_candidate = "At 72 V, a 150 A battery-current ceiling is 10.8 kW of electrical input."
 
@@ -223,7 +266,7 @@ def main() -> int:
     advisory_candidate = (
         "I would choose an RTX 4060 desktop when reliable inference across all ten cameras "
         "is the priority. The Jetson Orin is the low-power alternative, while the N100 is better "
-        "used as the dashboard host. The RTX desktop uses lower power than Jetson Orin. "
+        "used as the dashboard host. The RTX desktop typically uses more power and needs more cooling than Jetson Orin. "
         "It will always draw exactly 500 W. Validate with recorded "
         "clips and measure decode load, inference latency, dropped frames, thermals, and power."
     )
@@ -248,6 +291,654 @@ def main() -> int:
         and "more power" in advisory_final
         and "second model" not in advisory_final.lower()
         and advisory_route.get("_supervisionStatus") == "pass"
+    )
+    fictional_decision_route = {
+        "intentFrame": {
+            "actionType": "answer_engineering_judgment",
+            "objectRefs": [
+                {"type": "comparison-option", "name": "Atlas controller"},
+                {"type": "comparison-option", "name": "Boreal controller"},
+                {"type": "comparison-option", "name": "Cinder controller"},
+            ],
+        }
+    }
+    fictional_decision_messages = [
+        {
+            "role": "user",
+            "text": "Would you choose Atlas controller, Boreal controller, or Cinder controller?",
+        }
+    ]
+    decision_axis_issues = server.deterministic_engineering_decision_issues(
+        fictional_decision_messages,
+        fictional_decision_route,
+        (
+            "Atlas controller is the low-power alternative. Boreal controller uses lower power "
+            "than Atlas controller, while Cinder controller has the highest throughput."
+        ),
+    )
+    decision_axis_clean = server.deterministic_engineering_decision_issues(
+        fictional_decision_messages,
+        fictional_decision_route,
+        (
+            "Atlas controller is the low-power alternative. Boreal controller has the highest "
+            "throughput, while Cinder controller is easier to service."
+        ),
+    )
+    unbounded_default_candidate = (
+        "Atlas controller is the default choice. Boreal controller emphasizes estimation throughput, while "
+        "Cinder controller emphasizes serviceability. If the workload requires complex estimation, Boreal "
+        "controller becomes preferable. What estimation complexity does the workload require?"
+    )
+    unbounded_default_issues = server.deterministic_engineering_decision_issues(
+        fictional_decision_messages,
+        fictional_decision_route,
+        unbounded_default_candidate,
+    )
+    bounded_default_candidate = unbounded_default_candidate.replace(
+        "Atlas controller is the default choice.",
+        "Assuming a simple estimation workload, Atlas controller is the default choice.",
+    )
+    mismatched_clarification_candidate = bounded_default_candidate.replace(
+        "What estimation complexity does the workload require?",
+        "What connector does the system use?",
+    )
+    mismatched_clarification_issues = server.deterministic_engineering_decision_issues(
+        fictional_decision_messages,
+        fictional_decision_route,
+        mismatched_clarification_candidate,
+    )
+    incomplete_clause_issues = server.deterministic_engineering_reasoning_issues(
+        "The options differ in power and throughput. A practical validation step is"
+    )
+    complete_clause_issues = server.deterministic_engineering_reasoning_issues(
+        "The options differ in power and throughput. A practical validation step is to measure both under the same workload."
+    )
+    recovered_default_candidate = server.bound_unverified_engineering_default(
+        fictional_decision_messages,
+        fictional_decision_route,
+        unbounded_default_candidate,
+        {"issues": unbounded_default_issues},
+    )
+    decision_axis_consistency_ok = bool(
+        any(item.get("kind") == "decision-axis-direction-conflict" for item in decision_axis_issues)
+        and not decision_axis_clean
+        and any(item.get("kind") == "unbounded-provisional-default" for item in unbounded_default_issues)
+        and not server.deterministic_engineering_decision_issues(
+            fictional_decision_messages,
+            fictional_decision_route,
+            bounded_default_candidate,
+        )
+        and any(
+            item.get("kind") == "clarification-misses-reversal-condition"
+            for item in mismatched_clarification_issues
+        )
+        and any(item.get("kind") == "incomplete-final-clause" for item in incomplete_clause_issues)
+        and not complete_clause_issues
+        and recovered_default_candidate.startswith("No defensible default exists")
+        and "Boreal controller becomes preferable" in recovered_default_candidate
+        and "What estimation complexity" in recovered_default_candidate
+        and not server.deterministic_engineering_decision_issues(
+            fictional_decision_messages,
+            fictional_decision_route,
+            recovered_default_candidate,
+        )
+    )
+    bounded_decision_models = []
+
+    def bounded_decision_generate(_prompt, **kwargs):
+        bounded_decision_models.append(kwargs.get("model"))
+        return {
+            "text": (
+                "I would choose a small RTX desktop when sustained inference headroom across all 10 cameras "
+                "is the priority because it leaves the most expansion margin for concurrent vision work. "
+                "Jetson Orin is the lower-power, quieter edge option, while an N100 mini PC fits the HDMI "
+                "dashboard and orchestration role better than heavy vision inference. The recommendation changes "
+                "with camera resolution, frame rate, model size, and concurrent inference count; if low power and "
+                "silence outweigh expansion headroom, Jetson Orin becomes the better fit. Validate with recorded "
+                "clips from all 10 cameras while measuring dropped frames, alert latency, processor load, memory, "
+                "wall power, noise, and temperatures."
+            )
+        }
+
+    bounded_decision_audit = server.run_engineering_reasoning_audit(
+        advisory_messages,
+        advisory_route,
+        (
+            "I would choose a small RTX desktop for all 10 cameras. Jetson Orin is the low-power alternative, "
+            "but a small RTX desktop uses lower power than Jetson Orin. An N100 mini PC can host the HDMI dashboard."
+        ),
+        fast_triage_fn=lambda *_args, **_kwargs: {"attempted": False, "passed": False},
+        generate_fn=bounded_decision_generate,
+    )
+    failed_repair_models = []
+
+    def failed_bounded_repair_generate(_prompt, **kwargs):
+        failed_repair_models.append(kwargs.get("model"))
+        return {"text": "I cannot complete the comparison until the missing condition is supplied."}
+
+    failed_repair_primary = (
+        "A small RTX desktop is the default choice. Jetson Orin emphasizes lower power because its architecture "
+        "targets constrained edge operation, while an N100 mini PC emphasizes the dashboard role because it lacks "
+        "the same acceleration headroom. If silence is the hard constraint, Jetson Orin becomes preferable. "
+        "Validate every option with the same workload while measuring throughput, power, noise, and temperature. "
+        "What noise constraint must the system meet?"
+    )
+    failed_repair_recovery = server.run_engineering_reasoning_audit(
+        advisory_messages,
+        advisory_route,
+        failed_repair_primary,
+        fast_triage_fn=lambda *_args, **_kwargs: {"attempted": False, "passed": False},
+        generate_fn=failed_bounded_repair_generate,
+    )
+    bounded_decision_review_ok = bool(
+        bounded_decision_models == [server.LOCAL_RESEARCH_MODEL]
+        and bounded_decision_audit.get("repairApplied") is True
+        and bounded_decision_audit.get("finalVerificationPassed") is True
+        and bounded_decision_audit.get("modelReviewSkipped") is True
+        and bounded_decision_audit.get("resolvedDeterministicIssues") is True
+        and "small RTX desktop" in str(bounded_decision_audit.get("finalAnswer") or "")
+        and "Jetson Orin" in str(bounded_decision_audit.get("finalAnswer") or "")
+        and "N100 mini PC" in str(bounded_decision_audit.get("finalAnswer") or "")
+        and failed_repair_models == [server.LOCAL_RESEARCH_MODEL, server.LOCAL_RESEARCH_MODEL]
+        and failed_repair_recovery.get("repairAttemptCount") == 2
+        and failed_repair_recovery.get("finalVerificationPassed") is True
+        and failed_repair_recovery.get("modelReviewSkipped") is True
+        and failed_repair_recovery.get("resolvedDeterministicIssues") is True
+        and failed_repair_recovery.get("verificationVerdict") == "bounded-decision-sanitized-primary-draft"
+        and str(failed_repair_recovery.get("finalAnswer") or "").startswith("No defensible default exists")
+        and "Jetson Orin" in str(failed_repair_recovery.get("finalAnswer") or "")
+        and "N100 mini PC" in str(failed_repair_recovery.get("finalAnswer") or "")
+        and "small RTX desktop" in str(failed_repair_recovery.get("finalAnswer") or "")
+        and "I cannot complete" not in str(failed_repair_recovery.get("finalAnswer") or "")
+    )
+    camera_scope_issues = server.deterministic_engineering_scope_issues(
+        advisory_messages,
+        advisory_route,
+        (
+            "A small RTX desktop wins because its PCIe lanes can keep all ten USB cameras connected. "
+            "The N100 mini PC makes real-time high-resolution detection impractical, while Jetson Orin is compact."
+        ),
+    )
+    camera_scope_clean = server.deterministic_engineering_scope_issues(
+        advisory_messages,
+        advisory_route,
+        (
+            "A small RTX desktop is the conservative choice if all ten feeds run inference concurrently. "
+            "Jetson Orin becomes more attractive when silence and power matter and inference is sampled. "
+            "An N100 mini PC can host the HDMI dashboard when inference runs elsewhere. USB cameras load host "
+            "ports and controllers; IP cameras shift transport to the network, so camera interface, resolution, "
+            "frame rate, codec, and model load must be measured before the final hardware choice."
+        ),
+    )
+    camera_scope_conditional = server.deterministic_engineering_scope_issues(
+        advisory_messages,
+        advisory_route,
+        (
+            "A small RTX desktop is the conservative choice if high-resolution real-time inference must run "
+            "on every feed, while Jetson Orin becomes more attractive when inference is sampled and low power "
+            "matters. An N100 mini PC fits the dashboard role when the vision workload runs elsewhere."
+        ),
+    )
+    camera_cooling_assumption = server.deterministic_engineering_scope_issues(
+        advisory_messages,
+        advisory_route,
+        (
+            "Jetson Orin is the quiet option because it runs without a fan. An N100 mini PC fits the dashboard "
+            "role, while a small RTX desktop offers more inference headroom. Validate all three under load."
+        ),
+    )
+    camera_cooling_conditional = server.deterministic_engineering_scope_issues(
+        advisory_messages,
+        advisory_route,
+        (
+            "Cooling and acoustics depend on the exact board, enclosure, heatsink, fan policy, and workload. "
+            "Jetson Orin can favor lower-power edge inference, an N100 mini PC can favor the dashboard role, "
+            "and a small RTX desktop can favor inference headroom. Verify noise and temperatures under load."
+        ),
+    )
+    camera_scope_boundary_ok = bool(
+        {
+            "assumed-interface-topology",
+            "assumed-workload-envelope",
+        }.issubset({item.get("kind") for item in camera_scope_issues})
+        and any(item.get("kind") == "assumed-cooling-implementation" for item in camera_cooling_assumption)
+        and not camera_scope_clean
+        and not camera_scope_conditional
+        and not camera_cooling_conditional
+    )
+    contaminated_repair_prompt = server.engineering_reasoning_repair_prompt(
+        advisory_messages,
+        advisory_route,
+        (
+            "Choose an RTX 3060 because ten USB cameras at 30 fps require it. "
+            "Jetson Orin has 16 GB and an N100 mini PC is too slow."
+        ),
+        [
+            {
+                "claim": "The draft assumed a local USB camera topology.",
+                "kind": "assumed-interface-topology",
+                "reason": "The camera interface was not supplied.",
+            },
+            {
+                "claim": "The draft invented a workload.",
+                "kind": "unsupported-technical-precision",
+                "reason": "The frame rate was not supplied.",
+            },
+        ],
+        [],
+    )
+    followup_quantity_prompt = server.engineering_reasoning_repair_prompt(
+        [
+            *advisory_messages,
+            {
+                "role": "assistant",
+                "text": "The platform choice depends on the camera workload.",
+            },
+            {
+                "role": "user",
+                "text": "The cameras are 1080p at 5 fps, and I want it silent and low power.",
+            },
+        ],
+        advisory_route,
+        "An untrusted draft invented 30 fps.",
+        [
+            {
+                "claim": "The draft invented a frame rate.",
+                "kind": "unsupported-technical-precision",
+                "reason": "Only user-authored quantities may be retained.",
+            }
+        ],
+        [],
+    )
+    repair_prompt_hygiene_ok = bool(
+        "rejected draft is intentionally withheld" in contaminated_repair_prompt
+        and "RTX 3060" not in contaminated_repair_prompt
+        and "30 fps" not in contaminated_repair_prompt
+        and "Jetson Orin" in contaminated_repair_prompt
+        and "N100 mini PC" in contaminated_repair_prompt
+        and "small RTX desktop" in contaminated_repair_prompt
+        and "FINAL OUTPUT CONSTRAINT" in contaminated_repair_prompt
+        and "User-supplied quantitative phrases allowed in the answer: 10" in contaminated_repair_prompt
+        and "first sentence must either name the default choice" in contaminated_repair_prompt
+        and "final sentence must be exactly one focused question" in contaminated_repair_prompt
+        and "1080p" in followup_quantity_prompt
+        and "5 fps" in followup_quantity_prompt
+        and "30 fps" not in followup_quantity_prompt
+        and "must appear exactly in the answer" in followup_quantity_prompt
+        and not server.missing_numeric_constraints(
+            ["only 1080p at 5 fps"],
+            "At 1080p and 5 fps, the workload is bounded by the stated operating point.",
+        )
+        and server.missing_numeric_constraints(
+            ["only 1080p at 5 fps"],
+            "At a modest resolution and frame rate, the workload is lighter.",
+        )
+    )
+    conditional_selection_answer = (
+        "If sustained inference headroom is the priority, a small RTX desktop is the conservative choice because "
+        "its discrete GPU leaves the most expansion margin. If silence and low power matter more, Jetson Orin is "
+        "the stronger edge option, while an N100 mini PC is better suited to the HDMI dashboard when inference is "
+        "lightweight or handled elsewhere. The recommendation therefore depends on the actual camera and model load.\n\n"
+        "Validate with all 10 camera feeds while measuring dropped frames, alert latency, processor load, memory, "
+        "wall power, noise, and temperatures. What resolution and frame rate should I use for each camera?"
+    )
+    conditional_selection_validation = server.engineering_single_pass_repair_validation(
+        advisory_messages,
+        advisory_route,
+        conditional_selection_answer,
+    )
+    no_decision_candidate = (
+        "Jetson Orin emphasizes compact local acceleration and lower power, an N100 mini PC emphasizes cost and "
+        "the HDMI dashboard role, and a small RTX desktop emphasizes inference headroom. Each path has a different "
+        "balance of throughput, power, noise, thermal load, and expansion margin, so the winner depends on the "
+        "operating priorities.\n\n"
+        "Validate with all 10 camera feeds while measuring dropped frames, alert latency, processor load, memory, "
+        "wall power, noise, and temperatures before committing."
+    )
+    no_decision_validation = server.engineering_single_pass_repair_validation(
+        advisory_messages,
+        advisory_route,
+        no_decision_candidate,
+    )
+    salvaged_no_decision = server.salvage_engineering_no_decision_answer(
+        advisory_messages,
+        advisory_route,
+        no_decision_candidate,
+        no_decision_validation,
+    )
+    salvaged_no_decision_validation = server.engineering_single_pass_repair_validation(
+        advisory_messages,
+        advisory_route,
+        salvaged_no_decision,
+    )
+    followup_messages = [
+        *advisory_messages,
+        {
+            "role": "assistant",
+            "text": "The platform choice depends on the camera workload.",
+        },
+        {
+            "role": "user",
+            "text": "The cameras are only 1080p at 5 fps, and I want it silent and low power.",
+        },
+    ]
+    followup_route = server.route_manager(
+        followup_messages,
+        requested_profile="manager",
+        web_search="disabled",
+    )
+    followup_primary_prompt = server.build_intelligence_kernel_prompt(
+        followup_messages,
+        followup_route,
+        cwd=str(ROOT),
+    )
+    followup_decision_brief = followup_route.get("decisionBrief", {})
+    initial_preflight_route = server.route_manager(
+        advisory_messages,
+        requested_profile="manager",
+        web_search="disabled",
+    )
+    initial_preflight = server.engineering_decision_preflight_response(
+        advisory_messages,
+        initial_preflight_route,
+    )
+    followup_preflight_route = server.route_manager(
+        followup_messages,
+        requested_profile="manager",
+        web_search="disabled",
+    )
+    followup_preflight = server.engineering_decision_preflight_response(
+        followup_messages,
+        followup_preflight_route,
+    )
+    fully_specified_messages = [
+        {
+            "role": "user",
+            "text": (
+                "I need one local box to watch 10 printer cameras and drive an HDMI command center. "
+                "Should I use a Jetson Orin, an N100 mini PC, or a small RTX desktop? All 10 cameras "
+                "run concurrently at 1080p and 5 fps using YOLO11n, and alerts must arrive within 2 seconds."
+            ),
+        }
+    ]
+    fully_specified_route = server.route_manager(
+        fully_specified_messages,
+        requested_profile="manager",
+        web_search="disabled",
+    )
+    fully_specified_preflight = server.engineering_decision_preflight_response(
+        fully_specified_messages,
+        fully_specified_route,
+    )
+    decision_preflight_ok = bool(
+        initial_preflight.get("handled") is True
+        and "Jetson Orin, N100 mini PC, and small RTX desktop"
+        in str(initial_preflight.get("answer") or "")
+        and "resolution and analyzed frame rate" in str(initial_preflight.get("answer") or "")
+        and "all need inference at the same time" in str(initial_preflight.get("answer") or "")
+        and (initial_preflight_route.get("_decisionPreflight") or {}).get("modelCalls") == 0
+        and (initial_preflight_route.get("decisionBrief") or {}).get("decisionContext")
+        == "compute-workload"
+        and "10 printer cameras"
+        in (initial_preflight_route.get("decisionBrief") or {}).get("userSuppliedOperatingConstraints", [])
+        and followup_preflight.get("handled") is True
+        and "all 10 printer cameras need inference at the same time"
+        in str(followup_preflight.get("answer") or "")
+        and "maximum alert latency or minimum detection performance"
+        in str(followup_preflight.get("answer") or "")
+        and not fully_specified_preflight
+    )
+    unsupported_sufficiency_issues = server.deterministic_engineering_scope_issues(
+        followup_messages,
+        followup_route,
+        (
+            "The N100 mini PC best meets the stated workload. It can process all ten streams and allows a fanless cooling solution. "
+            "Jetson Orin typically requires active cooling, while a small RTX desktop uses more power."
+        ),
+    )
+    unsupported_sufficiency_kinds = {
+        item.get("kind") for item in unsupported_sufficiency_issues
+    }
+    polished_decision_fallback = server.engineering_boundary_analysis_recovery_answer(
+        followup_messages,
+        followup_route,
+    )
+    evidence_boundary_model_calls = []
+
+    def unexpected_evidence_boundary_generate(_prompt, **kwargs):
+        evidence_boundary_model_calls.append(kwargs.get("model"))
+        return {"text": "This repair model should not run without checked option evidence."}
+
+    evidence_boundary_audit = server.run_engineering_reasoning_audit(
+        followup_messages,
+        followup_route,
+        (
+            "The N100 mini PC best meets the stated workload. It can process all ten streams and allows a fanless cooling solution. "
+            "Jetson Orin typically requires active cooling, while a small RTX desktop uses more power."
+        ),
+        fast_triage_fn=lambda *_args, **_kwargs: {
+            "attempted": False,
+            "passed": False,
+        },
+        generate_fn=unexpected_evidence_boundary_generate,
+    )
+    evidence_boundary_fast_path_ok = bool(
+        not evidence_boundary_model_calls
+        and evidence_boundary_audit.get("repairApplied") is True
+        and evidence_boundary_audit.get("repairAttemptCount") == 0
+        and evidence_boundary_audit.get("finalVerificationPassed") is True
+        and evidence_boundary_audit.get("verificationVerdict")
+        == "bounded-decision-evidence-boundary"
+        and evidence_boundary_audit.get("model") == "deterministic-evidence-boundary"
+        and "1080p and 5 fps" in str(evidence_boundary_audit.get("finalAnswer") or "")
+        and "lower power use and silence" in str(evidence_boundary_audit.get("finalAnswer") or "")
+    )
+    decision_brief_recovery_calls = []
+
+    def unexpected_decision_brief_recovery_generate(_prompt, **kwargs):
+        decision_brief_recovery_calls.append(kwargs.get("model"))
+        return {"text": "This repair model should not run when the draft only dropped supplied decision context."}
+
+    decision_brief_recovery_audit = server.run_engineering_reasoning_audit(
+        followup_messages,
+        followup_route,
+        "Silence and low power narrow the choice, but I need more workload details.",
+        fast_triage_fn=lambda *_args, **_kwargs: {
+            "attempted": False,
+            "passed": False,
+        },
+        generate_fn=unexpected_decision_brief_recovery_generate,
+    )
+    decision_brief_recovery_fast_path_ok = bool(
+        not decision_brief_recovery_calls
+        and decision_brief_recovery_audit.get("repairApplied") is True
+        and decision_brief_recovery_audit.get("repairAttemptCount") == 0
+        and decision_brief_recovery_audit.get("finalVerificationPassed") is True
+        and decision_brief_recovery_audit.get("verificationVerdict")
+        == "bounded-decision-brief-recovery"
+        and decision_brief_recovery_audit.get("model")
+        == "deterministic-decision-brief-recovery"
+        and "1080p and 5 fps" in str(decision_brief_recovery_audit.get("finalAnswer") or "")
+        and "Jetson Orin, N100 mini PC, and small RTX desktop"
+        in str(decision_brief_recovery_audit.get("finalAnswer") or "")
+    )
+
+    provenance_route = server.route_manager(
+        followup_messages,
+        requested_profile="manager",
+        web_search="disabled",
+    )
+    server.build_intelligence_kernel_prompt(
+        followup_messages,
+        provenance_route,
+        cwd=str(ROOT),
+    )
+    provenance_coach_calls = []
+
+    def unexpected_provenance_coach(*_args, **_kwargs):
+        provenance_coach_calls.append(True)
+        return {"text": "The provenance regression should not launch a quality-coach rewrite."}
+
+    def synthetic_rejected_engineering_audit(_messages, _route, _draft, emit=None):
+        return {
+            "ok": True,
+            "verdict": "revise",
+            "issues": [
+                {
+                    "claim": "The option capability was asserted without evidence.",
+                    "kind": "unsupported-system-capability-sufficiency",
+                    "reason": "The stated operating point does not prove complete-system performance.",
+                }
+            ],
+            "missingConstraints": [],
+            "notes": "Synthetic rejected repair for caller provenance coverage.",
+            "model": "synthetic-rejected-repair",
+            "finalAnswer": "",
+            "repairApplied": False,
+            "repairAttemptCount": 1,
+            "verificationCompleted": True,
+            "finalVerificationPassed": False,
+            "verificationVerdict": "bounded-decision-rejected",
+            "modelReviewSkipped": True,
+        }
+
+    provenance_final = server.supervise_answer_before_emit(
+        followup_messages,
+        provenance_route,
+        server.route_admin_topic(followup_messages, provenance_route),
+        "The N100 mini PC can process all ten streams and is the best choice.",
+        web_search="disabled",
+        quality_coach_fn=unexpected_provenance_coach,
+        reasoning_audit_fn=server.synthetic_sound_reasoning_audit,
+        engineering_audit_fn=synthetic_rejected_engineering_audit,
+    )
+    provenance_receipt = provenance_route.get("_engineeringReasoningAudit") or {}
+    caller_fallback_provenance_ok = bool(
+        "lower power use and silence" in provenance_final
+        and provenance_receipt.get("repairApplied") is True
+        and provenance_receipt.get("finalVerificationPassed") is True
+        and provenance_receipt.get("resolvedDeterministicIssues") is True
+        and provenance_receipt.get("verificationVerdict")
+        == "caller-deterministic-boundary-recovery"
+        and provenance_route.get("_supervisionStatus") == "pass"
+        and not provenance_coach_calls
+    )
+    decision_brief_prompt_ok = bool(
+        followup_decision_brief.get("options")
+        == ["Jetson Orin", "N100 mini PC", "small RTX desktop"]
+        and {"1080p", "5 fps"}.issubset(
+            set(followup_decision_brief.get("userSuppliedOperatingConstraints") or [])
+        )
+        and {"acoustics", "power/efficiency"}.issubset(
+            {
+                item.get("axis")
+                for item in followup_decision_brief.get("changedPriorityWeights") or []
+                if isinstance(item, dict)
+            }
+        )
+        and "simultaneous inference"
+        in str(followup_decision_brief.get("highestLeverageMissingInput") or "")
+        and "alert latency or detection target"
+        in str(followup_decision_brief.get("highestLeverageMissingInput") or "")
+        and "supplies no option facts or winner"
+        in str(followup_decision_brief.get("evidenceBoundary") or "")
+        and "Decision brief:" in followup_primary_prompt
+        and "changedPriorityWeights" in followup_primary_prompt
+        and "Decision brief (user-stated structure only; not product evidence):"
+        in followup_quantity_prompt
+        and {
+            "unsupported-system-capability-sufficiency",
+            "assumed-cooling-implementation",
+        }.issubset(unsupported_sufficiency_kinds)
+        and "lower power use and silence" in polished_decision_fallback
+        and "power/efficiency" not in polished_decision_fallback
+        and evidence_boundary_fast_path_ok
+        and decision_brief_recovery_fast_path_ok
+        and caller_fallback_provenance_ok
+        and decision_preflight_ok
+    )
+    omitted_numeric_candidate = (
+        "Jetson Orin emphasizes compact local acceleration and lower power, while an N100 mini PC emphasizes "
+        "the dashboard role and a small RTX desktop emphasizes inference headroom. The preferred platform depends "
+        "on whether silence and power matter more than expansion margin."
+    )
+    restored_numeric_candidate = server.restore_omitted_user_numeric_constraints(
+        followup_messages,
+        followup_route,
+        omitted_numeric_candidate,
+    )
+    restored_numeric_constraints_ok = bool(
+        "1080p" in restored_numeric_candidate
+        and "5 fps" in restored_numeric_candidate
+        and "30 fps" not in restored_numeric_candidate
+        and not server.missing_numeric_constraints(
+            server.analytical_core_profile(
+                followup_messages,
+                followup_route,
+                web_search="disabled",
+                local_tools=True,
+            ).get("explicitConstraints") or [],
+            restored_numeric_candidate,
+        )
+    )
+    conditional_owner_route = server.route_manager(
+        advisory_messages,
+        requested_profile="manager",
+        web_search="disabled",
+    )
+
+    def synthetic_conditional_repair(_messages, _route, _draft, emit=None):
+        return {
+            "ok": True,
+            "verdict": "revise",
+            "issues": [
+                {
+                    "claim": "The original answer forced a winner.",
+                    "kind": "assumed-workload-envelope",
+                    "reason": "The missing workload changes the winner.",
+                }
+            ],
+            "missingConstraints": [],
+            "notes": "Conditional selection repaired.",
+            "model": "synthetic-bounded-repair",
+            "finalAnswer": conditional_selection_answer,
+            "repairApplied": True,
+            "resolvedDeterministicIssues": True,
+            "verificationCompleted": True,
+            "finalVerificationPassed": True,
+            "verificationVerdict": "bounded-decision-deterministic-pass",
+            "modelReviewSkipped": True,
+        }
+
+    conditional_owner_final = server.supervise_answer_before_emit(
+        advisory_messages,
+        conditional_owner_route,
+        server.route_admin_topic(advisory_messages, conditional_owner_route),
+        "A small RTX desktop always wins.",
+        web_search="disabled",
+        quality_coach_fn=unexpected_advisory_coach,
+        engineering_audit_fn=synthetic_conditional_repair,
+    )
+    conditional_selection_ok = bool(
+        server.answer_is_conditional_engineering_clarification(
+            advisory_messages,
+            advisory_route,
+            conditional_selection_answer,
+        )
+        and server.answer_is_conditional_engineering_clarification(
+            advisory_messages,
+            advisory_route,
+            conditional_selection_answer.replace("Jetson Orin", "Jetson\u202fOrin"),
+        )
+        and conditional_selection_validation.get("ok") is True
+        and conditional_selection_validation.get("conditionalClarification") is True
+        and no_decision_validation.get("ok") is False
+        and "Which should be the hard constraint" in salvaged_no_decision
+        and salvaged_no_decision_validation.get("ok") is True
+        and restored_numeric_constraints_ok
+        and "What resolution and frame rate" in conditional_owner_final
+        and "I don’t trust the current draft" not in conditional_owner_final
+        and conditional_owner_route.get("_supervisionStatus") == "pass"
     )
     metric_table = (
         "| Platform | Throughput |\n"
@@ -524,12 +1215,12 @@ def main() -> int:
         and engineering_repair_audit.get("repairApplied") is True
         and engineering_repair_audit.get("verificationCompleted") is True
         and engineering_repair_audit.get("repairAttemptCount") == 2
-        and engineering_repair_audit.get("verificationAttemptCount") == 2
+        and engineering_repair_audit.get("verificationAttemptCount") == 1
         and "8 hours" in engineering_repair_answer
         and "closed-loop steppers" in engineering_repair_answer
         and "AC servos" in engineering_repair_answer
         and "commanded current" in engineering_repair_answer
-        and len(engineering_repair_models) == 5
+        and len(engineering_repair_models) == 4
         and not server.engineering_advisory_fast_direct_answer(
             engineering_repair_messages,
             engineering_repair_route,
@@ -682,8 +1373,10 @@ def main() -> int:
     )
     reasoning_verification_ok = bool(
         "final cross-domain reasoning verifier" in verification_prompt
-        and "arrowheads point into the collider" in verification_prompt
         and "Do not rewrite the answer" in verification_prompt
+        and "Candidate evidence spans" in verification_prompt
+        and "Controller-normalized candidate" not in verification_prompt
+        and "arrowheads point into the collider" not in verification_prompt
     )
     causal_rules = server.formal_reasoning_rules(
         [
@@ -808,6 +1501,31 @@ def main() -> int:
         )
         == 2
     )
+
+    def p182_structured_review_fixture(result, kwargs):
+        """Bind legacy synthetic reviewer JSON to the active exact-ID schema."""
+        row = dict(result or {})
+        payload = server.parse_model_json_object(row.get("text") or "")
+        schema = kwargs.get("response_format") if isinstance(kwargs.get("response_format"), dict) else {}
+        obligations = ((schema.get("properties") or {}).get("obligations") or {})
+        item_schema = obligations.get("items") if isinstance(obligations.get("items"), dict) else {}
+        properties = item_schema.get("properties") if isinstance(item_schema.get("properties"), dict) else {}
+        expected_ids = list((properties.get("id") or {}).get("enum") or [])
+        evidence_refs = list((((properties.get("evidence") or {}).get("items") or {}).get("enum") or []))
+        if payload and expected_ids:
+            payload.pop("finalAnswer", None)
+            satisfied = payload.get("verdict") == "sound" and bool(evidence_refs)
+            payload["obligations"] = [
+                {
+                    "id": item,
+                    "status": "satisfied" if satisfied else "missing",
+                    "evidence": [evidence_refs[0]] if satisfied else [],
+                }
+                for item in expected_ids
+            ]
+            row["text"] = json.dumps(payload)
+        return row
+
     original_generate = server.run_ollama_generate
     audit_calls = []
     audit_outputs = iter(
@@ -835,7 +1553,7 @@ def main() -> int:
 
     def fake_generate(_prompt, **kwargs):
         audit_calls.append(kwargs.get("model"))
-        return next(audit_outputs)
+        return p182_structured_review_fixture(next(audit_outputs), kwargs)
 
     try:
         server.run_ollama_generate = fake_generate
@@ -912,7 +1630,7 @@ def main() -> int:
 
     def fake_iterative_generate(_prompt, **kwargs):
         iterative_calls.append(kwargs.get("model"))
-        return next(iterative_outputs)
+        return p182_structured_review_fixture(next(iterative_outputs), kwargs)
 
     try:
         server.run_ollama_generate = fake_iterative_generate
@@ -953,7 +1671,7 @@ def main() -> int:
 
     def fake_fallback_generate(_prompt, **kwargs):
         fallback_calls.append(kwargs.get("model"))
-        return next(fallback_outputs)
+        return p182_structured_review_fixture(next(fallback_outputs), kwargs)
 
     try:
         server.run_ollama_generate = fake_fallback_generate
@@ -987,7 +1705,7 @@ def main() -> int:
 
     def fake_retry_generate(_prompt, **kwargs):
         retry_calls.append(kwargs.get("model"))
-        return next(retry_outputs)
+        return p182_structured_review_fixture(next(retry_outputs), kwargs)
 
     try:
         server.run_ollama_generate = fake_retry_generate
@@ -1032,11 +1750,42 @@ def main() -> int:
             for item in unavailable_audit.get("issues") or []
         )
         and unavailable_calls
-        == [
-            server.GENERIC_REASONING_AUDIT_MODEL,
-            server.GENERIC_REASONING_AUDIT_MODEL,
-            server.GENERIC_REASONING_AUDIT_FALLBACK_MODEL,
-        ]
+        == [server.GENERIC_REASONING_AUDIT_MODEL]
+    )
+    sound_review_calls = {"review": 0, "repair": 0}
+
+    def fake_sound_review(*_args, **_kwargs):
+        sound_review_calls["review"] += 1
+        return {
+            "payload": {"verdict": "sound", "issues": [], "notes": "The draft is internally consistent."},
+            "model": "synthetic-sound-reviewer",
+            "attemptedModels": ["synthetic-sound-reviewer"],
+            "fallbackApplied": False,
+            "retryApplied": False,
+            "error": "",
+            "durationMs": 1,
+            "attemptDurationsMs": [1],
+        }
+
+    def unexpected_sound_repair(*_args, **_kwargs):
+        sound_review_calls["repair"] += 1
+        return {"text": "A sound draft should not be repaired."}
+
+    sound_branch_audit = server.run_generic_reasoning_audit(
+        [{"role": "user", "text": "Why is the square of every even integer also even?"}],
+        {"intentFrame": {"domain": "knowledge_question"}},
+        "Write the integer as n = 2k. Then n^2 = 2(2k^2), so n^2 is even.",
+        review_fn=fake_sound_review,
+        repair_generate_fn=unexpected_sound_repair,
+    )
+    sound_branch_state_ok = bool(
+        sound_branch_audit.get("ok") is True
+        and sound_branch_audit.get("verdict") == "sound"
+        and sound_branch_audit.get("repairApplied") is False
+        and sound_branch_audit.get("verificationCompleted") is False
+        and sound_branch_audit.get("verificationUnavailableAccepted") is False
+        and sound_branch_audit.get("verificationAttemptCount") == 0
+        and sound_review_calls == {"review": 1, "repair": 0}
     )
     final_owner_messages = [
         {
@@ -1202,8 +1951,15 @@ def main() -> int:
         registry.get("status") == "pass"
         and envelope.get("status") == "pass"
         and review_policy_ok
+        and ownership_boundary_ok
         and calculation_review_boundary_ok
         and engineering_review_ownership_ok
+        and decision_axis_consistency_ok
+        and bounded_decision_review_ok
+        and camera_scope_boundary_ok
+        and repair_prompt_hygiene_ok
+        and decision_brief_prompt_ok
+        and conditional_selection_ok
         and named_option_preservation_ok
         and focused_clarification_ok
         and safety_control_contract_ok
@@ -1227,6 +1983,7 @@ def main() -> int:
         and reasoning_fallback_ok
         and reasoning_retry_ok
         and reasoning_fail_closed_ok
+        and sound_branch_state_ok
         and reasoning_final_ownership_ok
         and sentence_safe_polish_ok
         and source_audit_prompt_ok
@@ -1242,6 +1999,7 @@ def main() -> int:
         "envelope": envelope,
         "reviewPolicies": {
             "passed": review_policy_ok,
+            "exclusiveOwnershipPassed": ownership_boundary_ok,
             "conversation": conversation_plan.get("review_policy"),
             "comparison": comparison_plan.get("review_policy"),
             "engineeringPower": power_plan.get("review_policy"),
@@ -1249,6 +2007,26 @@ def main() -> int:
             "sourceBacked": source_plan.get("review_policy"),
             "calculationBoundaryPassed": calculation_review_boundary_ok,
             "engineeringReviewOwnershipPassed": engineering_review_ownership_ok,
+            "decisionAxisConsistencyPassed": decision_axis_consistency_ok,
+            "decisionAxisIssues": decision_axis_issues,
+            "boundedDecisionReviewPassed": bounded_decision_review_ok,
+            "boundedDecisionModels": bounded_decision_models,
+            "cameraScopeBoundaryPassed": camera_scope_boundary_ok,
+            "cameraScopeIssues": camera_scope_issues,
+            "repairPromptHygienePassed": repair_prompt_hygiene_ok,
+            "decisionBriefPromptPassed": decision_brief_prompt_ok,
+            "evidenceBoundaryFastPathPassed": evidence_boundary_fast_path_ok,
+            "decisionBriefRecoveryFastPathPassed": decision_brief_recovery_fast_path_ok,
+            "decisionPreflightPassed": decision_preflight_ok,
+            "callerFallbackProvenancePassed": caller_fallback_provenance_ok,
+            "callerFallbackProvenance": provenance_receipt,
+            "callerFallbackFinal": provenance_final,
+            "callerFallbackSupervisionStatus": provenance_route.get("_supervisionStatus"),
+            "callerFallbackCoachCalls": len(provenance_coach_calls),
+            "decisionBrief": followup_decision_brief,
+            "unsupportedSufficiencyIssueKinds": sorted(unsupported_sufficiency_kinds),
+            "polishedDecisionFallback": polished_decision_fallback,
+            "conditionalSelectionClarificationPassed": conditional_selection_ok,
             "namedOptionPreservationPassed": named_option_preservation_ok,
             "namedOptions": advisory_comparison_names,
             "focusedClarificationPassed": focused_clarification_ok,
@@ -1256,6 +2034,20 @@ def main() -> int:
             "safetyControlIssueKinds": sorted(safety_issue_kinds),
             "engineeringCurrentContextRepairPassed": engineering_current_context_repair_ok,
             "engineeringRepairModels": engineering_repair_models,
+            "engineeringRepairAnswer": engineering_repair_answer,
+            "engineeringRepairAudit": {
+                key: engineering_repair_audit.get(key)
+                for key in (
+                    "ok",
+                    "verdict",
+                    "repairApplied",
+                    "repairAttemptCount",
+                    "verificationCompleted",
+                    "verificationAttemptCount",
+                    "verificationVerdict",
+                    "issues",
+                )
+            },
             "metricTableEvidenceBoundaryPassed": metric_table_guard_ok,
             "sanitizedCoherencePassed": coherence_guard_ok,
         },
@@ -1300,6 +2092,7 @@ def main() -> int:
             "fallbackPassed": reasoning_fallback_ok,
             "retryPassed": reasoning_retry_ok,
             "failClosedPassed": reasoning_fail_closed_ok,
+            "soundBranchStatePassed": sound_branch_state_ok,
             "finalOwnershipPassed": reasoning_final_ownership_ok,
             "sentenceSafePolishPassed": sentence_safe_polish_ok,
             "escapedJsonParsed": bool(escaped_audit),

@@ -5,17 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Codex CLI</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/styles.css?v=20260729-polished-chat-shell" />
+    <link rel="stylesheet" href="/styles.css?v=20260805-calm-conversation-shell" />
   </head>
   <body>
     <a class="skip-link" href="#conversation">Skip to chat</a>
     <a class="skip-link" href="#promptInput">Skip to composer</a>
     <a class="skip-link" href="#logOutput">Skip to run log</a>
-    <div class="app-shell" id="appShell">
+    <div class="app-shell" id="appShell" data-boot-state="loading" aria-busy="true">
+      <div class="boot-status" id="bootStatus" role="status" aria-live="polite">Loading saved workspace…</div>
       <aside class="sidebar">
         <div class="brand-row">
           <div class="brand-mark" aria-hidden="true">C</div>
-          <div>
+          <div class="thread-heading">
             <div class="brand-title">Codex CLI</div>
             <div class="brand-subtitle" id="profileLabel">local-oss</div>
           </div>
@@ -537,6 +538,6 @@
       </aside>
     </div>
 
-    <script src="/app.js?v=20260729-polished-chat-shell"></script>
+    <script src="/app.js?v=20260805-calm-conversation-shell"></script>
   </body>
 </html>

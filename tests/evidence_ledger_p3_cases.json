@@ -8,8 +8,17 @@
     {
       "id": "current-release-cites-a-current-source",
       "messages": [{"role": "user", "text": "What is the current software release and does it fix this bug?"}],
-      "route": {"objectivePlan": {"evidenceNeed": "current-web-evidence"}},
+      "route": {"_liveRunId": "p3-current-release", "objectivePlan": {"evidenceNeed": "current-web-evidence"}},
       "contract": {"kind": "Research", "hardGate": false},
+      "evidence": [{
+        "id": "vendor-release-notes",
+        "title": "Vendor release notes",
+        "url": "https://vendor.example/releases",
+        "excerpt": "The retrieved release notes list the current fix.",
+        "fetched": true,
+        "sourceType": "current-web",
+        "freshness": "current"
+      }],
       "answer": "The current release notes list the fix here: https://vendor.example/releases. Confirm the deployed build before treating it as resolved.",
       "expectations": {
         "sourceType": "current-web",
@@ -37,11 +46,13 @@
     {
       "id": "datasheet-claim-separates-citation-and-inference",
       "messages": [{"role": "user", "text": "Does the datasheet support using this material at the stated temperature?"}],
-      "route": {"objectivePlan": {"evidenceNeed": "scientific-or-datasheet-evidence"}},
+      "route": {"_liveRunId": "p3-material-datasheet", "objectivePlan": {"evidenceNeed": "scientific-or-datasheet-evidence"}},
       "contract": {"kind": "Research", "hardGate": false},
       "evidence": [{
         "title": "Manufacturer material datasheet",
         "url": "https://manufacturer.example/material-datasheet.pdf",
+        "excerpt": "The retrieved manufacturer datasheet states the material temperature rating.",
+        "fetched": true,
         "sourceType": "scientific",
         "freshness": "source-version"
       }],
@@ -57,8 +68,17 @@
     {
       "id": "source-bounded-study-keeps-authority-boundary",
       "messages": [{"role": "user", "text": "Using the KJV only, explain the passage without bringing in other sources."}],
-      "route": {"objectivePlan": {"evidenceNeed": "source-bounded-evidence"}},
+      "route": {"_liveRunId": "p3-kjv-source", "objectivePlan": {"evidenceNeed": "source-bounded-evidence"}},
       "contract": {"kind": "Research", "hardGate": false},
+      "evidence": [{
+        "id": "kjv-source",
+        "title": "KJV source text",
+        "url": "https://www.kingjamesbibleonline.org",
+        "excerpt": "The retrieved source contains the KJV text used for the explanation.",
+        "fetched": true,
+        "sourceType": "source-bounded",
+        "freshness": "source-bounded"
+      }],
       "answer": "The KJV text remains the authority for this explanation. Source: https://www.kingjamesbibleonline.org.",
       "expectations": {
         "sourceType": "source-bounded",

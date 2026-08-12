@@ -128,6 +128,7 @@ def main():
             "friendlinessLevel": "warm",
             "humorLevel": "light",
             "webSearch": "disabled",
+            "testRun": True,
             "messages": [
                 {
                     "role": "user",

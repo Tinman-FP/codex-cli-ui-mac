@@ -180,17 +180,18 @@ let config = {
   verificationSummary: null,
   admin: null,
 };
+let configReady = false;
+let adminRefreshPromise = null;
 let activeController = null;
 let activeRun = null;
 let activeRunTimer = null;
 let lastRunStateText = "";
 let pendingAttachments = [];
+let activeAttachmentIntake = null;
+let activeLocalActionRetry = null;
 const MAX_BROWSER_UPLOAD_BYTES = 250 * 1024 * 1024;
 const nativeFilePickers = new Map();
 let composerIntent = { kind: "", messageId: "" };
-let staleAeroRecoveryRunning = false;
-let staleAeroRecoveryTimer = null;
-const staleAeroRecoveryIds = new Set();
 let activeWorkingProfileProjectId = "";
 const PROMPT_STARTER_SETS = {
   chat: [
@@ -311,6 +312,11 @@ const monitor = {
 init();
 
 async function init() {
+  installResponsiveRailBehavior();
+  await Promise.resolve();
+  const savedReceiptRevalidation = revalidateSavedLocalActionReceipts(state);
+  if (savedReceiptRevalidation.changed) saveState();
+  renderSavedTaskShellBeforeConfig();
   try {
     const response = await fetch("/api/config");
     config = await response.json();
@@ -319,8 +325,7 @@ async function init() {
   } catch (_error) {
     appendLog("warning", "Could not read server config");
   }
-
-  installResponsiveRailBehavior();
+  configReady = true;
 
   els.profileLabel.textContent = profileSummaryLabel(config.profile);
   if (!state.threads.length) {
@@ -337,8 +342,30 @@ async function init() {
     thread.textScale = normalizeTextScale(config.textScale);
   }
   render();
+  els.appShell.dataset.bootState = "ready";
+  els.appShell.setAttribute("aria-busy", "false");
   startMonitor();
   refreshAdmin();
+}
+
+function renderSavedTaskShellBeforeConfig() {
+  const thread = currentThread();
+  if (!thread || (state.sidebarView || "chats") !== "chats") return false;
+  els.cwdInput.value = thread.cwd || "";
+  els.threadTitle.textContent = thread.title || "Saved task";
+  const compass = sessionCompassForThread(thread);
+  els.threadMeta.textContent = `${thread.messages?.length || 0} messages${sessionCompassHasContent(compass) ? " · session context active" : ""}`;
+  els.logSubtitle.textContent = thread.logs?.length ? `${thread.logs.length} entries` : "No active run";
+  els.profileLabel.textContent = profileSummaryLabel(thread.profile || config.profile);
+  renderThreads();
+  renderSidebarMode();
+  renderMessages();
+  renderAttachmentTray();
+  renderLogs();
+  renderRailPanels();
+  els.appShell.dataset.bootState = "restored";
+  els.appShell.setAttribute("aria-busy", "true");
+  return true;
 }
 
 function loadState() {
@@ -379,7 +406,10 @@ function sanitizeInterruptedRuns(parsed) {
       threadChanged = true;
       message.running = false;
       message.interrupted = true;
-      message.text = "Run interrupted by page reload.\n\nThis is why: the task state was preserved, but the browser cannot safely reconnect to the old local run stream. Use Edit question or Send again from this saved task when you are ready.";
+      message.recoveryState = "interrupted";
+      message.provisional = false;
+      resetAssistantResultMetadata(message, { keepRoute: false });
+      message.text = "This run was interrupted when the page reloaded. The conversation is saved, but the browser cannot reconnect to the old local stream. Use Edit question or Send again when you are ready.";
       message.displayMode = { answerSurface: DEFAULT_ANSWER_SURFACE, showDiagnostics: false, showReceiptsWhenDone: false };
       message.thoughts = [...(message.thoughts || []), "Recovered after page reload without auto-starting duplicate work."].slice(-8);
     }
@@ -622,6 +652,11 @@ function updateActiveRunTiming() {
   els.runState.dataset.longTask = isLong ? "true" : "false";
   els.runState.dataset.stuckWatch = isStuckWatch ? "true" : "false";
   els.runState.dataset.recoveryPath = "steer-stop-retry";
+  if (elapsedMs >= 10000) {
+    els.runState.dataset.elapsedLabel = formatElapsedCompact(elapsedMs);
+  } else {
+    delete els.runState.dataset.elapsedLabel;
+  }
   els.runState.title = `Elapsed ${formatSeconds(elapsedMs)}. You can steer or stop this run; no ETA is assumed. If it times out, retry from the saved task.`;
   if (isLong && lastRunStateText === "Working · request received") {
     setRunState("Working · still running, steering available", "warning", "long-running");
@@ -651,6 +686,7 @@ function stopActiveRunTiming(keepLast = true) {
   delete els.runState.dataset.longTask;
   delete els.runState.dataset.stuckWatch;
   delete els.runState.dataset.recoveryPath;
+  delete els.runState.dataset.elapsedLabel;
 }
 
 function setBackgroundTaskStatus(label, status, tone = "warning", stage = "background-running") {
@@ -773,11 +809,11 @@ function render() {
   renderAttachmentTray();
   renderEngineeringStatus();
   renderRunControls();
+  renderAttachmentIntakeControls();
   renderLogs();
   renderMonitorSummary();
   renderRailPanels();
   saveState();
-  scheduleStaleAeroRecovery();
 }
 
 function renderRailPanels() {
@@ -869,6 +905,7 @@ function renderThreads() {
     const button = document.createElement("button");
     button.className = `thread-button${thread.id === state.activeThreadId ? " active" : ""}`;
     button.type = "button";
+    button.disabled = Boolean(activeController) || attachmentIntakeBusy();
     button.innerHTML = `
       <span class="thread-name"></span>
       <span class="thread-date"></span>
@@ -876,9 +913,11 @@ function renderThreads() {
     button.querySelector(".thread-name").textContent = thread.title;
     button.querySelector(".thread-date").textContent = shortDate(thread.updatedAt);
     button.addEventListener("click", () => {
-      if (activeController) return;
+      if (activeController || attachmentIntakeBusy()) return;
+      if (thread.id !== state.activeThreadId) resetComposerLineage();
       state.activeThreadId = thread.id;
       render();
+      setRunState("Prompt ready", "warning", "prompt-ready");
     });
     els.threadList.appendChild(button);
   });
@@ -897,6 +936,7 @@ function renderProjects() {
       : thread && (thread.cwd || config.cwd) === project.path;
     button.className = `project-button${active ? " active" : ""}`;
     button.type = "button";
+    button.disabled = Boolean(activeController) || attachmentIntakeBusy();
     button.innerHTML = `
       <span class="project-name"></span>
       <span class="project-path"></span>
@@ -904,6 +944,7 @@ function renderProjects() {
     button.querySelector(".project-name").textContent = project.name;
     button.querySelector(".project-path").textContent = project.description || project.path;
     button.addEventListener("click", () => {
+      if (activeController || attachmentIntakeBusy()) return;
       const activeThread = currentThread();
       activeThread.cwd = project.path;
       activeThread.historyProjectId = project.historyProjectId || "";
@@ -1197,6 +1238,14 @@ function renderPackageHealth() {
   });
 }
 
+function verificationReceiptMetric(item) {
+  const presentation = item && typeof item.presentation === "object" ? item.presentation : null;
+  const controlledMetric = presentation && typeof presentation.metric === "string"
+    ? presentation.metric.trim()
+    : "";
+  return controlledMetric || item?.metric || item?.status || "unknown";
+}
+
 function renderVerificationSummary() {
   const summary = config.verificationSummary;
   if (!els.verificationSummaryList) return;
@@ -1210,7 +1259,7 @@ function renderVerificationSummary() {
   }
   const header = document.createElement("div");
   header.className = `verification-summary-header ${summary.status || "warn"}`;
-  header.textContent = `${String(summary.status || "unknown").toUpperCase()} · ${summary.passed || 0}/${summary.total || 0} receipts · ${summary.checkedAt || "local"}`;
+  header.textContent = `${String(summary.status || "unknown").toUpperCase()} · ${summary.passed || 0}/${summary.total || 0} qualifying receipts · ${summary.checkedAt || "local"}`;
   els.verificationSummaryList.appendChild(header);
   (summary.items || []).forEach((item) => {
     const row = document.createElement("button");
@@ -1221,7 +1270,7 @@ function renderVerificationSummary() {
     const label = document.createElement("strong");
     label.textContent = item.label || "receipt";
     const metric = document.createElement("span");
-    metric.textContent = item.metric || item.status || "unknown";
+    metric.textContent = verificationReceiptMetric(item);
     const detail = document.createElement("em");
     detail.textContent = item.detail || item.path || "";
     const meta = document.createElement("small");
@@ -2121,6 +2170,15 @@ function renderMessages() {
       body.appendChild(topic);
     }
 
+    const steeringReceipt = buildLiveSteeringReceipt(message);
+    if (steeringReceipt) body.appendChild(steeringReceipt);
+    const localActionReceipt = buildLocalActionReceipt(message);
+    if (localActionReceipt) body.appendChild(localActionReceipt);
+    const terminalReceipt = buildTerminalEnvelopeReceipt(message);
+    if (terminalReceipt) body.appendChild(terminalReceipt);
+    const evidenceReceipt = buildEvidenceReceipt(message);
+    if (evidenceReceipt) body.appendChild(evidenceReceipt);
+
     const answer = document.createElement("div");
     answer.className = "answer-text";
     renderMessageText(answer, message);
@@ -2153,11 +2211,12 @@ function buildThoughtsCard(message) {
   const thoughts = document.createElement("details");
   thoughts.className = "thoughts-card";
   thoughts.setAttribute("aria-label", message.running ? "Current work notes" : "Work receipts");
-  thoughts.open = Boolean(message.running);
+  thoughts.open = false;
+  thoughts.dataset.state = message.running ? "running" : "complete";
   const thoughtsTitle = document.createElement("div");
   thoughtsTitle.className = "thoughts-title";
   thoughtsTitle.textContent = message.running
-    ? "What I’m checking"
+    ? `Working notes · ${message.thoughts.length} update${message.thoughts.length === 1 ? "" : "s"}`
     : `Work receipts · ${message.thoughts.length} step${message.thoughts.length === 1 ? "" : "s"}`;
   const summary = document.createElement("summary");
   summary.appendChild(thoughtsTitle);
@@ -2438,7 +2497,8 @@ function buildFeedbackActions(message) {
   const actions = document.createElement("div");
   actions.className = "feedback-actions";
   const status = document.createElement("span");
-  status.className = `feedback-status${message.feedback === "error" ? " error" : ""}`;
+  const retryRefusal = localActionRetryRefusalLabel(message?.localActionRetryRefusal);
+  status.className = `feedback-status${message.feedback === "error" || retryRefusal ? " error" : ""}`;
   if (message.feedback === "saving") {
     status.textContent = "Saving feedback";
   } else if (message.feedback === "good") {
@@ -2452,6 +2512,8 @@ function buildFeedbackActions(message) {
     status.textContent = "Crash repair queued";
   } else if (message.feedback === "error") {
     status.textContent = "Feedback not saved";
+  } else if (retryRefusal) {
+    status.textContent = retryRefusal;
   }
 
   const good = document.createElement("button");
@@ -2503,6 +2565,32 @@ function buildFeedbackActions(message) {
   steer.setAttribute("aria-label", "Steer the current or next Codex run from this answer");
   steer.disabled = message.feedback === "saving";
 
+  const localActionRetry = localActionRetryEligible(message);
+  if (isRetryableAssistantMessage(message) || localActionRetry) {
+    const retry = document.createElement("button");
+    const retryConcurrent = localActionRetry && localActionRetryConcurrent();
+    retry.className = "feedback-button recovery";
+    retry.type = "button";
+    retry.dataset.retryMessageId = message.id;
+    retry.textContent = localActionRetry ? "Retry action" : "Try again";
+    retry.title = retryConcurrent
+      ? "Retry unavailable while another run or attachment check is active"
+      : localActionRetry
+        ? "Retry this unsuccessful local action from its saved request and attachments"
+      : "Retry the saved question with its attachments";
+    retry.setAttribute(
+      "aria-label",
+      retryConcurrent
+        ? "Retry this unsuccessful local action, unavailable while another run is active"
+        : localActionRetry
+        ? "Retry this unsuccessful local action from its original request and attachments"
+        : "Try this saved question again",
+    );
+    if (retryConcurrent) retry.setAttribute("aria-disabled", "true");
+    retry.disabled = message.feedback === "saving" || Boolean(activeController) || Boolean(retryConcurrent);
+    actions.appendChild(retry);
+  }
+
   if (isServerCrashRecoveryMessage(message)) {
     actions.append(fix, crashRepair, steer);
   } else {
@@ -2516,29 +2604,14 @@ function renderMessageText(container, message) {
   const text = message.text || (message.thoughts?.length ? "" : "Working...");
   if (!text) return;
   if (message.role === "assistant") {
-    renderMarkdown(container, conversationalAssistantText(text));
+    renderMarkdown(container, text);
     return;
   }
   container.textContent = text;
 }
 
-function conversationalAssistantText(text) {
-  const source = String(text || "");
-  return source.split(/(```[\s\S]*?```)/g).map((part) => {
-    if (part.startsWith("```")) return part;
-    return part
-      .replace(/(^|\n)This is why:/g, "$1Why I'm saying that:")
-      .replace(/(^|\n)Why this works:/g, "$1Why I like this path:")
-      .replace(/(^|\n)You should also consider:/g, "$1A few things I'd keep in mind:")
-      .replace(/(^|\n)Caveats:/g, "$1What could trip this up:")
-      .replace(/(^|\n)Next step:/g, "$1Next move:")
-      .replace(/(^|\n)Required evidence:/g, "$1Evidence I want:")
-      .replace(/(^|\n)Local Research found results but could not extract useful evidence\./g, "$1I found local research hits, but nothing I trust enough to cite yet.")
-      .replace(/(^|\n)Local Research could not find free web results for that query\./g, "$1I couldn't find useful free local or web evidence for that query yet.");
-  }).join("");
-}
-
 const LOCAL_PATH_INLINE_PATTERN = /(\/(?:Users|Applications|Volumes|private\/tmp|tmp|var\/folders)\/[^`"'<>]*?\.(?:py|scad|stl|step|stp|f3d|f3z|json|md|cfg|ini|txt|gcode|3mf|pdf|png|jpg|jpeg|csv|log|sh|command|cpp|cxx|cc|c|h|hpp|js|html|css|yaml|yml|toml|plist|inp|msh|dat|frd|geo))(?=[$\s\]\),.;:]|$)|(\/(?:Users|Applications|Volumes|private\/tmp|tmp|var\/folders)\/[^\s`"'<>),;]+)/g;
+const WEB_URL_INLINE_PATTERN = /\bhttps?:\/\/[^\s<>"'`]+/gi;
 
 function looksLikeLocalPath(value) {
   return /^\/(?:Users|Applications|Volumes|private\/tmp|tmp|var\/folders)\//.test(String(value || "").trim());
@@ -2585,6 +2658,55 @@ function appendTextWithLocalPaths(parent, text) {
   }
   if (lastIndex < source.length) {
     parent.appendChild(document.createTextNode(source.slice(lastIndex)));
+  }
+}
+
+function splitWebUrlToken(value) {
+  let url = String(value || "");
+  let suffix = "";
+  while (/[.,;:!?]$/.test(url)) {
+    suffix = url.slice(-1) + suffix;
+    url = url.slice(0, -1);
+  }
+  for (const [closing, opening] of [[")", "("], ["]", "["], ["}", "{"]]) {
+    while (url.endsWith(closing)) {
+      const openingCount = url.split(opening).length - 1;
+      const closingCount = url.split(closing).length - 1;
+      if (closingCount <= openingCount) break;
+      suffix = closing + suffix;
+      url = url.slice(0, -1);
+    }
+  }
+  return { url, suffix };
+}
+
+function buildExternalLink(url, label = "") {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
+  anchor.className = "external-source-link";
+  anchor.textContent = label || url;
+  anchor.title = "Open in browser";
+  anchor.dataset.externalSource = "true";
+  anchor.setAttribute("aria-label", `Open ${label || url} in browser`);
+  return anchor;
+}
+
+function appendTextWithDetectedLinks(parent, text) {
+  const source = String(text || "");
+  let lastIndex = 0;
+  for (const match of source.matchAll(WEB_URL_INLINE_PATTERN)) {
+    if (match.index > lastIndex) {
+      appendTextWithLocalPaths(parent, source.slice(lastIndex, match.index));
+    }
+    const { url, suffix } = splitWebUrlToken(match[0]);
+    if (url) parent.appendChild(buildExternalLink(url));
+    if (suffix) parent.appendChild(document.createTextNode(suffix));
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < source.length) {
+    appendTextWithLocalPaths(parent, source.slice(lastIndex));
   }
 }
 
@@ -2707,7 +2829,7 @@ function appendInlineMarkdown(parent, text) {
   const source = String(text || "");
   for (const match of source.matchAll(pattern)) {
     if (match.index > lastIndex) {
-      appendTextWithLocalPaths(parent, source.slice(lastIndex, match.index));
+      appendTextWithDetectedLinks(parent, source.slice(lastIndex, match.index));
     }
     const token = match[0];
     if (token.startsWith("`")) {
@@ -2721,7 +2843,7 @@ function appendInlineMarkdown(parent, text) {
       }
     } else if (token.startsWith("**")) {
       const strong = document.createElement("strong");
-      strong.textContent = token.slice(2, -2);
+      appendTextWithDetectedLinks(strong, token.slice(2, -2));
       parent.appendChild(strong);
     } else {
       const link = token.match(/^\[([^\]]+)\]\(((?:https?:\/\/[^)\s]+|\/[^)]+))(?:\s+"[^"]*")?\)$/);
@@ -2729,21 +2851,16 @@ function appendInlineMarkdown(parent, text) {
         if (looksLikeLocalPath(link[2])) {
           parent.appendChild(buildLocalPathLink(link[2], link[1]));
         } else {
-          const anchor = document.createElement("a");
-          anchor.href = link[2];
-          anchor.target = "_blank";
-          anchor.rel = "noopener noreferrer";
-          anchor.textContent = link[1];
-          parent.appendChild(anchor);
+          parent.appendChild(buildExternalLink(link[2], link[1]));
         }
       } else {
-        appendTextWithLocalPaths(parent, token);
+        appendTextWithDetectedLinks(parent, token);
       }
     }
     lastIndex = match.index + token.length;
   }
   if (lastIndex < source.length) {
-    appendTextWithLocalPaths(parent, source.slice(lastIndex));
+    appendTextWithDetectedLinks(parent, source.slice(lastIndex));
   }
 }
 
@@ -2809,6 +2926,12 @@ function buildStartupCard(hasMessages) {
 
   const heading = document.createElement("summary");
   heading.className = "startup-summary";
+  if (!configReady) {
+    details.classList.add("loading");
+    heading.textContent = "Loading local inventory…";
+    details.appendChild(heading);
+    return details;
+  }
   const name = summary.preferredName || context.preferredName || "Tinman";
   heading.textContent = `${name}'s startup inventory: ${summary.machines || 0} machines, ${summary.sshHosts || 0} SSH aliases, ${summary.tailscaleHosts || 0} Tailscale hosts, ${summary.resources || 0} Mac resources`;
   details.appendChild(heading);
@@ -2925,21 +3048,27 @@ async function refreshHealth() {
   }
 }
 
-async function refreshAdmin() {
-  try {
-    const [adminResponse, verificationResponse] = await Promise.all([
-      fetch("/api/admin", { cache: "no-store" }),
-      fetch("/api/verification-summary", { cache: "no-store" }),
-    ]);
-    if (!adminResponse.ok) throw new Error(`admin ${adminResponse.status}`);
-    config.admin = await adminResponse.json();
-    if (verificationResponse.ok) {
-      config.verificationSummary = await verificationResponse.json();
+function refreshAdmin() {
+  if (adminRefreshPromise) return adminRefreshPromise;
+  adminRefreshPromise = (async () => {
+    try {
+      const [adminResponse, verificationResponse] = await Promise.all([
+        fetch("/api/admin", { cache: "no-store" }),
+        fetch("/api/verification-summary", { cache: "no-store" }),
+      ]);
+      if (!adminResponse.ok) throw new Error(`admin ${adminResponse.status}`);
+      config.admin = await adminResponse.json();
+      if (verificationResponse.ok) {
+        config.verificationSummary = await verificationResponse.json();
+      }
+      renderAdmin();
+    } catch (_error) {
+      appendLog("warning", "Admin cleanup summary unavailable");
     }
-    renderAdmin();
-  } catch (_error) {
-    appendLog("warning", "Admin cleanup summary unavailable");
-  }
+  })();
+  return adminRefreshPromise.finally(() => {
+    adminRefreshPromise = null;
+  });
 }
 
 async function refreshWarmup() {
@@ -2975,7 +3104,7 @@ async function runPackageHealth() {
   if (els.packageHealthButton) els.packageHealthButton.disabled = true;
   setBackgroundTaskStatus("Package check", "running", "warning", "background-running");
   try {
-    const response = await fetch("/api/package-health", { cache: "no-store" });
+    const response = await fetch("/api/package-health?refresh=1&wait=1", { cache: "no-store" });
     if (!response.ok) throw new Error(`package health ${response.status}`);
     config.packageHealth = await response.json();
     try {
@@ -3321,7 +3450,7 @@ function printerDetail(printer) {
   const telemetry = printer.telemetry || {};
   const parts = [state];
   const progress = Number(printer.progress);
-  if (Number.isFinite(progress) && progress > 0) {
+  if (Number.isFinite(progress) ) {
     const progressText = Number.isInteger(progress) ? `${progress}%` : `${progress.toFixed(1)}%`;
     parts.push(progressText);
   }
@@ -3755,18 +3884,110 @@ function nativeFilePickerAvailable() {
   return Boolean(window.webkit?.messageHandlers?.codexOpenFiles);
 }
 
-function openNativeFilePicker() {
+function attachmentIntakeBusy() {
+  return Boolean(activeAttachmentIntake);
+}
+
+function attachmentIntakeLineageKey() {
+  const thread = currentThread();
+  const workspace = String(els.cwdInput?.value || thread?.cwd || config.cwd || "").trim();
+  return [
+    thread?.id || "",
+    thread?.historyProjectId || "",
+    workspace,
+    composerIntent.kind || "",
+    composerIntent.messageId || "",
+  ].join(":");
+}
+
+function attachmentIntakeTokenCurrent(intake) {
+  return Boolean(intake?.token && activeAttachmentIntake?.token === intake.token);
+}
+
+function attachmentIntakeOriginCurrent(intake) {
+  return attachmentIntakeTokenCurrent(intake)
+    && !activeController
+    && currentThread()?.id === intake.threadId
+    && attachmentIntakeLineageKey() === intake.lineageKey;
+}
+
+function renderAttachmentIntakeControls() {
+  const busy = attachmentIntakeBusy();
+  if (busy) {
+    els.sendButton.disabled = true;
+    els.attachButton.disabled = true;
+    els.fileInput.disabled = true;
+    els.cwdInput.disabled = true;
+    els.newThreadButton.disabled = true;
+    if (els.mobileNewThreadButton) els.mobileNewThreadButton.disabled = true;
+    if (els.mobileViewSelect) els.mobileViewSelect.disabled = true;
+    if (els.runDeeperButton) els.runDeeperButton.disabled = true;
+    if (els.runAeroButton) els.runAeroButton.disabled = true;
+    if (els.runStructuralButton) els.runStructuralButton.disabled = true;
+  } else if (!activeController) {
+    els.sendButton.disabled = false;
+    els.attachButton.disabled = false;
+    els.fileInput.disabled = false;
+    els.cwdInput.disabled = false;
+    els.newThreadButton.disabled = false;
+    if (els.mobileNewThreadButton) els.mobileNewThreadButton.disabled = false;
+    if (els.mobileViewSelect) els.mobileViewSelect.disabled = false;
+    if (els.runDeeperButton) els.runDeeperButton.disabled = false;
+    if (els.runAeroButton) els.runAeroButton.disabled = false;
+    if (els.runStructuralButton) els.runStructuralButton.disabled = false;
+  }
+  if (els.clearThreadsButton) els.clearThreadsButton.disabled = busy || Boolean(activeController);
+  if (els.composerWrap) {
+    els.composerWrap.classList.toggle("attaching", busy);
+    els.composerWrap.setAttribute("aria-busy", String(busy));
+  }
+  document.querySelectorAll(
+    ".thread-button, .project-button, [data-prompt-starter], [data-edit-message-id], [data-steer-message-id], [data-retry-message-id], [data-attachment-id]"
+  ).forEach((button) => {
+    button.disabled = busy || Boolean(activeController);
+  });
+}
+
+function beginAttachmentIntake(text = "Attaching files", stage = "attachment-uploading") {
+  const thread = currentThread();
+  if (!thread || activeController || attachmentIntakeBusy()) return null;
+  const intake = {
+    token: crypto.randomUUID(),
+    threadId: thread.id,
+    lineageKey: attachmentIntakeLineageKey(),
+  };
+  activeAttachmentIntake = intake;
+  renderAttachmentIntakeControls();
+  setRunState(text, "warning", stage);
+  return intake;
+}
+
+function finishAttachmentIntake(intake, text, tone, stage) {
+  if (!attachmentIntakeTokenCurrent(intake)) return false;
+  activeAttachmentIntake = null;
+  renderAttachmentIntakeControls();
+  setRunState(text, tone, stage);
+  return true;
+}
+
+function openNativeFilePicker(intake, timeoutMs = 120000) {
   return new Promise((resolve, reject) => {
     if (!nativeFilePickerAvailable()) {
       reject(new Error("Native file picker is not available"));
       return;
     }
+    if (!attachmentIntakeTokenCurrent(intake)) {
+      reject(new Error("Attachment intake is no longer active"));
+      return;
+    }
     const requestId = crypto.randomUUID();
+    const boundedTimeoutMs = Math.max(1, Number(timeoutMs) || 120000);
     const timeoutId = window.setTimeout(() => {
       nativeFilePickers.delete(requestId);
       reject(new Error("Native file picker timed out"));
-    }, 120000);
+    }, boundedTimeoutMs);
     nativeFilePickers.set(requestId, {
+      intakeToken: intake.token,
       resolve: (files) => {
         window.clearTimeout(timeoutId);
         resolve(files);
@@ -3812,22 +4033,58 @@ function attachmentFromNativeFile(file) {
   };
 }
 
-async function handleNativeFiles(files) {
+async function handleNativeFiles(files, intake) {
+  if (!attachmentIntakeTokenCurrent(intake)) return false;
   const selected = Array.from(files || []).filter((file) => file?.path);
-  if (!selected.length || activeController) return;
-  els.runState.textContent = "Attaching";
-  els.runState.className = "run-state warning";
-  for (const file of selected) {
-    const attachment = attachmentFromNativeFile(file);
-    pendingAttachments.push(attachment);
+  const staged = normalizeAttachmentList(selected.map(attachmentFromNativeFile));
+  if (!attachmentIntakeOriginCurrent(intake)) {
+    finishAttachmentIntake(intake, "Attachment not added · turn changed", "warning", "attachment-discarded");
+    return true;
+  }
+  if (!staged.length) {
+    finishAttachmentIntake(
+      intake,
+      "Attachment selection cancelled",
+      "warning",
+      "attachment-cancelled",
+    );
+    return true;
+  }
+  pendingAttachments = mergeAttachmentLists(pendingAttachments, staged);
+  for (const attachment of staged) {
     appendLog(
       "event",
       `Attached local file ${attachment.name} (${formatFileSize(attachment.size || 0)})`
     );
   }
   renderAttachmentTray();
-  els.runState.textContent = "Attachment ready";
-  els.runState.className = "run-state ok";
+  finishAttachmentIntake(intake, "Attachment ready", "ok", "attachment-ready");
+  return true;
+}
+
+async function handleNativeFilePickerIntake(timeoutMs = 120000) {
+  const intake = beginAttachmentIntake("Choosing files", "attachment-choosing");
+  if (!intake) return true;
+  try {
+    const files = await openNativeFilePicker(intake, timeoutMs);
+    await handleNativeFiles(files, intake);
+    return true;
+  } catch (error) {
+    if (!attachmentIntakeOriginCurrent(intake)) {
+      finishAttachmentIntake(intake, "Attachment not added · turn changed", "warning", "attachment-discarded");
+      return true;
+    }
+    appendLog("warning", `Native file picker failed: ${error.message}`);
+    if (finishAttachmentIntake(
+      intake,
+      "Attachment picker failed · retry available",
+      "error",
+      "attachment-failed",
+    )) {
+      focusTarget(els.promptInput);
+    }
+    return false;
+  }
 }
 
 async function uploadAttachment(file) {
@@ -3865,58 +4122,51 @@ async function uploadAttachment(file) {
 
 async function handleFiles(files) {
   const selected = Array.from(files || []).filter((file) => file && file.name);
-  if (!selected.length || activeController) return;
+  if (!selected.length || activeController || attachmentIntakeBusy()) return;
   const tooLarge = selected.find((file) => Number(file.size || 0) > MAX_BROWSER_UPLOAD_BYTES);
   if (tooLarge) {
     appendLog(
       "error",
       `${tooLarge.name} is ${formatFileSize(tooLarge.size)}. Use the native + button so Codex can reference the local path instead of uploading a copy.`
     );
-    els.runState.textContent = "Use + button";
-    els.runState.className = "run-state error";
+    setRunState("Attachment too large · use native +", "error", "attachment-too-large");
     return;
   }
-  els.runState.textContent = "Attaching";
-  els.runState.className = "run-state warning";
+  const intake = beginAttachmentIntake();
+  if (!intake) return;
+  const uploaded = [];
   for (const file of selected) {
     try {
       appendLog("event", `Uploading attachment ${file.name}`);
       const attachment = await uploadAttachment(file);
-      pendingAttachments.push(attachment);
-      appendLog("event", `Attached ${attachment.name} (${formatFileSize(attachment.size)})`);
-      renderAttachmentTray();
+      uploaded.push(attachment);
+      appendLog("event", `Uploaded ${attachment.name} (${formatFileSize(attachment.size)})`);
     } catch (error) {
       appendLog("error", `Attachment failed for ${file.name}: ${error.message}`);
-      els.runState.textContent = "Attachment failed";
-      els.runState.className = "run-state error";
+      if (finishAttachmentIntake(intake, "Attachment failed · retry available", "error", "attachment-failed")) {
+        focusTarget(els.promptInput);
+      }
       return;
     }
   }
-  els.runState.textContent = "Attachment ready";
-  els.runState.className = "run-state ok";
+  if (!attachmentIntakeOriginCurrent(intake)) {
+    finishAttachmentIntake(intake, "Attachment not added · task changed", "warning", "attachment-discarded");
+    return;
+  }
+  pendingAttachments = mergeAttachmentLists(pendingAttachments, uploaded);
+  appendLog("event", `${uploaded.length} attachment${uploaded.length === 1 ? "" : "s"} ready for this turn`);
+  renderAttachmentTray();
+  finishAttachmentIntake(intake, "Attachment ready", "ok", "attachment-ready");
 }
 
 function clientRecoveryMessage(error, thread) {
-  const reason = error?.message || "local load failure";
   const cwd = thread?.cwd || config.cwd;
-  const messages = recoveryMessagesForThread(thread, null);
-  if (isAeroCfdRecoveryPrompt(messages)) {
-    return [
-      "I did not complete the aero/CFD build yet.",
-      "",
-      `This is why: the local run returned \`${reason}\`, and the browser could not get a server-side aero recovery answer before falling back.`,
-      "",
-      "You should also consider: retry the run or click Aero/Deeper Analysis. For this kind of wind-turbine STEP request, the correct recovery path is geometry resolution, STEP-to-solver-surface conversion, surface repair/check, one case for 3 mph, 5 mph, and 15 mph, then volume mesh, solver run, report, and revised STEP only after the CFD result is real.",
-      "",
-      `Last working directory: \`${cwd}\`.`,
-    ].join("\n");
-  }
   return [
-    "I hit a local runtime/load failure before I could confirm the requested action was completed.",
+    "I couldn’t finish that run.",
     "",
-    `This is why: the run returned \`${reason}\`, so I should treat the action as unfinished instead of claiming it worked.`,
+    "Your conversation is saved, and I have not treated any unfinished action as complete.",
     "",
-    "You should also consider: retry the local path/search step, save a clearly labeled fallback artifact if the real target folder cannot be confirmed, and state plainly whether anything touched a live machine.",
+    "Use Send again to retry from this saved conversation.",
     "",
     `Last working directory: \`${cwd}\`.`,
   ].join("\n");
@@ -3926,31 +4176,47 @@ function recoveryMessagesForThread(thread, pending) {
   const messages = thread?.messages || [];
   const pendingIndex = pending?.id ? messages.findIndex((message) => message.id === pending.id) : -1;
   const scoped = pendingIndex >= 0 ? messages.slice(0, pendingIndex + 1) : messages;
-  return scoped.filter((message) => !message.running && (!pending || message !== pending));
+  return serializeConversationMessages(
+    scoped.filter((message) => !message.running && (!pending || message !== pending)),
+  );
 }
 
-function latestUserTextFromMessages(messages) {
-  for (let index = (messages || []).length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message?.role === "user") return String(message.text || "");
+function serializeConversationMessage(message) {
+  const serialized = {
+    role: message?.role === "assistant" ? "assistant" : "user",
+    text: String(message?.text || ""),
+  };
+  if (message?.id) serialized.messageId = String(message.id).slice(0, 128);
+  const attachments = normalizeAttachmentList(message?.attachments || []);
+  if (attachments.length) serialized.attachments = attachments;
+  if (message?.steering === true) serialized.steering = true;
+  if (
+    serialized.role === "assistant"
+    && message?.structuredAnalyticalFacts
+    && typeof message.structuredAnalyticalFacts === "object"
+    && message.structuredAnalyticalFacts.status === "pass"
+    && message.structuredAnalyticalFacts.mayClaimVerified === true
+  ) {
+    serialized.structuredAnalyticalFacts = message.structuredAnalyticalFacts;
   }
-  return "";
+  if (serialized.role === "assistant") {
+    if (message?.runId) serialized.runId = String(message.runId).slice(0, 96);
+    if (message?.sourceMessageId) serialized.sourceMessageId = String(message.sourceMessageId).slice(0, 128);
+    if (
+      message?.feedbackTurnReceipt
+      && typeof message.feedbackTurnReceipt === "object"
+      && message.feedbackTurnReceipt.kind === "feedback-turn-receipt"
+    ) {
+      serialized.feedbackTurnReceipt = message.feedbackTurnReceipt;
+    }
+  }
+  return serialized;
 }
 
-function attachmentTextFromMessages(messages) {
+function serializeConversationMessages(messages) {
   return (messages || [])
-    .flatMap((message) => Array.isArray(message?.attachments) ? message.attachments : [])
-    .map((attachment) => `${attachment?.name || ""} ${attachment?.path || ""}`)
-    .join(" ");
-}
-
-function isAeroCfdRecoveryPrompt(messages) {
-  const text = `${latestUserTextFromMessages(messages)} ${attachmentTextFromMessages(messages)}`.toLowerCase();
-  if (!text.trim()) return false;
-  const hasAero = /\b(aero|aerodynamic|cfd|openfoam|wind turbine|airfoil|blade|propeller|drag|lift)\b/.test(text);
-  const hasAnalysis = /\b(run|model|simulate|simulation|solver|mesh|surface|performance|report|revised step|step file output)\b/.test(text);
-  const hasGeometry = /\.(step|stp|stl|obj|3mf)\b/.test(text) || /\battached\b/.test(text);
-  return hasAero && (hasAnalysis || hasGeometry);
+    .filter((message) => !message?.running)
+    .map((message) => serializeConversationMessage(message));
 }
 
 function isGenericLoadFailureText(text) {
@@ -3985,6 +4251,7 @@ function extractLocalPathFromText(text, suffix = "") {
 }
 
 function applyRecoveryPayloadToPending(pending, payload) {
+  resetAssistantResultMetadata(pending, { keepRoute: false });
   pending.text = payload.text || payload.error || "The recovery path finished without a final message.";
   pending.displayMode = payload.displayMode || { answerSurface: DEFAULT_ANSWER_SURFACE, showDiagnostics: false, showReceiptsWhenDone: false };
   if (payload.route) pending.route = payload.route;
@@ -3993,6 +4260,7 @@ function applyRecoveryPayloadToPending(pending, payload) {
   if (payload.roleStyle) pending.roleStyle = payload.roleStyle;
   if (payload.interactionDirector) pending.interactionDirector = payload.interactionDirector;
   if (Array.isArray(payload.evidenceLedger)) pending.evidenceLedger = payload.evidenceLedger;
+  applyEvidenceStatus(pending, payload);
   if (payload.evidenceClaimGate) pending.evidenceClaimGate = payload.evidenceClaimGate;
   if (payload.expertiseConfidence) pending.expertiseConfidence = payload.expertiseConfidence;
   if (payload.responseComposer) pending.responseComposer = payload.responseComposer;
@@ -4008,34 +4276,6 @@ function applyRecoveryPayloadToPending(pending, payload) {
   if (payload.recovery) pending.recovery = payload.recovery;
   if (Array.isArray(payload.thoughts) && payload.thoughts.length) {
     pending.thoughts = payload.thoughts;
-  }
-}
-
-async function recoverWithEngineeringTool(thread, pending, error, messagesOverride = null) {
-  const messages = Array.isArray(messagesOverride) ? messagesOverride : recoveryMessagesForThread(thread, pending);
-  if (!isAeroCfdRecoveryPrompt(messages)) return false;
-  try {
-    addThought(pending, "Primary recovery failed, so I am trying the dedicated Aero/CFD analysis tool.");
-    const response = await fetch("/api/tools/deeper-analysis", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        kind: "aero",
-        cwd: thread.cwd,
-        sessionCompass: sessionCompassForThread(thread),
-        messages,
-        recoveryFrom: error?.message || String(error || "load failed"),
-      }),
-    });
-    const payload = await response.json();
-    if (!response.ok || !payload.text) throw new Error(payload.error || `aero recovery ${response.status}`);
-    applyRecoveryPayloadToPending(pending, payload);
-    addThought(pending, "Recovered through the dedicated Aero/CFD tool path.");
-    return true;
-  } catch (toolError) {
-    appendLog("warning", `Aero/CFD recovery tool failed: ${toolError.message}`);
-    addThought(pending, `Aero/CFD recovery tool was unavailable: ${toolError.message}`);
-    return false;
   }
 }
 
@@ -4058,18 +4298,16 @@ async function recoverRunFailure(thread, pending, error) {
     const payload = await response.json();
     if (!payload.ok || !payload.text) throw new Error(payload.error || "no recovery text");
     applyRecoveryPayloadToPending(pending, payload);
-    if (isGenericLoadFailureText(pending.text) && await recoverWithEngineeringTool(thread, pending, error)) {
-      return true;
-    }
     if (payload.toolRecovery?.issue) {
       addThought(pending, `Tool recovery: ${payload.toolRecovery.issue.title || payload.toolRecovery.status || "recovery planned"}.`);
     }
+    pending.recoveryState = "recovered";
     addThought(pending, "Recovered from the local load failure with a safe fallback answer.");
     return true;
   } catch (recoverError) {
     appendLog("warning", `Recovery answer failed: ${recoverError.message}`);
-    if (await recoverWithEngineeringTool(thread, pending, error)) return true;
     pending.text = clientRecoveryMessage(error, thread);
+    pending.recoveryState = "unavailable";
     addThought(pending, "Local recovery endpoint was unavailable, so the browser wrote a safe fallback note.");
     return false;
   }
@@ -4094,71 +4332,12 @@ function cancelCurrentRun() {
   activeController.abort();
 }
 
-function staleAeroFailureMessages(thread) {
-  return (thread?.messages || []).filter((message) => (
-    message?.role === "assistant"
-    && !message.running
-    && message.id
-    && isGenericLoadFailureText(message.text)
-    && isAeroCfdRecoveryPrompt(recoveryMessagesForThread(thread, message))
-  ));
-}
-
-function scheduleStaleAeroRecovery() {
-  if (staleAeroRecoveryRunning || activeController) return;
-  if (staleAeroRecoveryTimer) window.clearTimeout(staleAeroRecoveryTimer);
-  staleAeroRecoveryTimer = window.setTimeout(() => {
-    staleAeroRecoveryTimer = null;
-    autoRecoverStaleAeroFailures();
-  }, 500);
-}
-
-async function autoRecoverStaleAeroFailures() {
-  if (staleAeroRecoveryRunning || activeController) return;
-  const thread = currentThread();
-  const message = staleAeroFailureMessages(thread).find((item) => !staleAeroRecoveryIds.has(item.id));
-  if (!thread || !message) return;
-
-  staleAeroRecoveryRunning = true;
-  staleAeroRecoveryIds.add(message.id);
-  message.running = true;
-  message.feedback = message.feedback || "fix";
-  addThought(message, "Auto-recovering stale Aero/CFD load-failure answer.");
-  els.runState.textContent = "Recovering";
-  els.runState.className = "run-state warning";
-  renderMessages();
-
-  try {
-    const scopedMessages = recoveryMessagesForThread(thread, message);
-    const recovered = await recoverWithEngineeringTool(thread, message, new Error(message.text || "load failed"), scopedMessages);
-    if (recovered) {
-      message.feedbackSelfHealing = message.feedbackSelfHealing || { recovered: true, source: "stale-aero-auto-recovery" };
-      els.runState.textContent = "Recovered";
-      els.runState.className = "run-state ok";
-      appendLog("event", "Auto-recovered stale Aero/CFD load-failure answer");
-    } else {
-      els.runState.textContent = "Recovery needs review";
-      els.runState.className = "run-state warning";
-      appendLog("warning", "Stale Aero/CFD auto-recovery did not produce a replacement answer");
-    }
-  } catch (error) {
-    els.runState.textContent = "Recovery failed";
-    els.runState.className = "run-state error";
-    appendLog("warning", `Stale Aero/CFD auto-recovery failed: ${error.message}`);
-  } finally {
-    message.running = false;
-    staleAeroRecoveryRunning = false;
-    thread.updatedAt = new Date().toISOString();
-    saveState();
-    render();
-    await refreshAdmin();
-  }
-}
-
 async function sendLiveSteer() {
   const thread = currentThread();
   const text = els.promptInput.value.trim();
   if (!thread || !activeRun || !text) return;
+  const runId = activeRun.id;
+  const threadId = thread.id;
   const pending = activeRun.pending;
   const steerMessage = {
     id: crypto.randomUUID(),
@@ -4188,18 +4367,30 @@ async function sendLiveSteer() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        runId: activeRun.id,
+        runId,
         text,
-        threadId: thread.id,
+        threadId,
       }),
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload.ok) {
+    if (!response.ok || !payload.ok || payload.accepted !== true) {
       throw new Error(payload.error || `steer ${response.status}`);
     }
+    if (payload.runId !== runId) {
+      throw new Error("steering receipt did not match the active run");
+    }
     const steerCount = Number(payload.count || 0);
+    const steering = mergeLiveSteeringReceipt(pending, payload);
     addThought(pending, payload.message || "Steering note accepted by the active run.");
-    setRunState(steerCount > 1 ? `Steer sent (${steerCount})` : "Steer sent", "warning", "steer-sent");
+    setRunState(
+      steering.requiresPlanRestart
+        ? "Steer accepted · replacing plan"
+        : steerCount > 1
+          ? `Steer accepted · applying (${steerCount})`
+          : "Steer accepted · applying",
+      "warning",
+      steering.requiresPlanRestart ? "steer-replanning" : "steer-applying",
+    );
     appendLog("event", `live steer sent: ${compactLabel(text, 120)}`);
     renderMessages();
     saveState();
@@ -4211,7 +4402,561 @@ async function sendLiveSteer() {
   }
 }
 
+function mergeLiveSteeringReceipt(pending, value = {}) {
+  const nested = value.liveSteering && typeof value.liveSteering === "object" ? value.liveSteering : {};
+  const previous = pending.liveSteering && typeof pending.liveSteering === "object" ? pending.liveSteering : {};
+  const acceptedThrough = Number(
+    value.acceptedThrough ?? nested.acceptedThrough ?? value.steerRevision ?? previous.acceptedThrough ?? 0,
+  );
+  const appliedThrough = Number(value.appliedThrough ?? nested.appliedThrough ?? previous.appliedThrough ?? 0);
+  const status = String(
+    value.steeringStatus || nested.status || value.status || previous.status || "",
+  ).trim();
+  const receipt = {
+    status,
+    acceptedThrough,
+    appliedThrough,
+    noteCount: Number(value.noteCount ?? nested.noteCount ?? value.count ?? previous.noteCount ?? 0),
+    requiresPlanRestart: Boolean(
+      value.requiresPlanRestart ?? nested.requiresPlanRestart ?? previous.requiresPlanRestart,
+    ),
+    semanticSupersession: Boolean(
+      value.semanticSupersession ?? nested.semanticSupersession ?? previous.semanticSupersession,
+    ),
+    staleOutputWithheld: Boolean(
+      value.staleOutputWithheld ?? nested.staleOutputWithheld ?? previous.staleOutputWithheld,
+    ),
+  };
+  if (receipt.semanticSupersession) receipt.requiresPlanRestart = true;
+  pending.liveSteering = receipt;
+  return receipt;
+}
+
+function liveSteeringReceiptLabel(message) {
+  const receipt = message?.liveSteering;
+  if (!receipt || typeof receipt !== "object") return "";
+  const status = String(receipt.status || "").trim();
+  const acceptedThrough = Number(receipt.acceptedThrough || 0);
+  const appliedThrough = Number(receipt.appliedThrough || 0);
+  if (message.steeringIncomplete || message.steeringFailed || status === "failed") return "Steering not applied";
+  if (status === "cancelled") return "Steering stopped with the run";
+  if (status === "superseding-plan") return "Steering received · replacing earlier plan";
+  if (status === "superseded-plan") return "Steering applied · earlier plan replaced";
+  if (status === "applied") return "Steering applied";
+  if (status === "accepted" && receipt.requiresPlanRestart) return "Steering accepted · replacing earlier plan";
+  if (acceptedThrough > appliedThrough) return "Steering accepted · applying";
+  if (acceptedThrough > 0 && appliedThrough >= acceptedThrough) return "Steering applied";
+  return "";
+}
+
+function buildLiveSteeringReceipt(message) {
+  if (message?.role !== "assistant") return null;
+  const label = liveSteeringReceiptLabel(message);
+  if (!label) return null;
+  const receipt = document.createElement("div");
+  receipt.className = `steering-receipt${message.steeringIncomplete || message.steeringFailed ? " error" : ""}`;
+  receipt.dataset.status = message.liveSteering?.status || "unknown";
+  receipt.setAttribute("role", "status");
+  receipt.setAttribute("aria-label", label);
+  receipt.textContent = label;
+  return receipt;
+}
+
+function applyEvidenceStatus(message, payload = {}) {
+  message.evidencePolicy = payload.evidencePolicy && typeof payload.evidencePolicy === "object"
+    ? payload.evidencePolicy
+    : null;
+  message.answerEnvelope = payload.answerEnvelope && typeof payload.answerEnvelope === "object"
+    ? payload.answerEnvelope
+    : null;
+  const provenance = payload.sourceProvenance
+    || payload.answerEnvelope?.evidence_provenance
+    || payload.answerEnvelope?.evidenceProvenance;
+  message.sourceProvenance = provenance && typeof provenance === "object" ? provenance : null;
+}
+
+function resetAssistantResultMetadata(message, options = {}) {
+  if (!message || typeof message !== "object") return;
+  if (!options.keepRoute) message.route = null;
+  message.feedbackTurnReceipt = null;
+  message.displayMode = { answerSurface: DEFAULT_ANSWER_SURFACE, showDiagnostics: false, showReceiptsWhenDone: false };
+  message.adminTopic = null;
+  message.taskContract = null;
+  message.roleStyle = null;
+  message.compositionStyle = null;
+  message.interactionDirector = null;
+  message.evidenceLedger = [];
+  applyEvidenceStatus(message, {});
+  message.evidenceClaimGate = null;
+  message.expertiseConfidence = null;
+  message.responseComposer = null;
+  message.preSendReview = null;
+  message.feedbackGuidance = null;
+  message.workingProfile = null;
+  message.sessionCompass = null;
+  message.sessionCompassProgress = null;
+  message.objectivePlan = null;
+  message.deliverables = [];
+  message.assumptions = [];
+  message.scorecard = null;
+  message.contractGate = null;
+  message.analyticalCore = null;
+  message.recovery = null;
+  message.localActionReceipts = null;
+  message.localActionReceiptError = "";
+  message.structuredAnalyticalFacts = null;
+}
+
+const LOCAL_ACTION_RECEIPT_ITEM_KEYS = new Set([
+  "id", "kind", "status", "reasonCode", "exitCode", "verified", "result", "surface",
+  "paths", "changedPaths", "mutationMarkers", "beforeSha256", "afterSha256", "restoredSha256",
+  "expectedRestoredSha256", "sourceSha256", "requestSha256", "contextSha256",
+  "proposalSha256", "outputSha256", "beforeByteCount", "afterByteCount",
+  "restoredByteCount", "sourceByteCount", "proposalByteCount", "outputByteCount",
+  "contextStart", "contextEnd", "contextLineCount", "sourceMode", "restoredMode",
+  "modePreserved", "durationMs", "controllerReceiptCount", "testRequested", "testRun",
+  "sourceEvidenceVerified", "controllerOwned", "contentsRecorded", "sourceContentsRecorded",
+  "proposalContentsRecorded", "outputContentsRecorded", "rollbackContentsRecorded",
+]);
+
+function normalizeLocalActionReceiptItem(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const normalized = {};
+  LOCAL_ACTION_RECEIPT_ITEM_KEYS.forEach((key) => {
+    const item = value[key];
+    if (Array.isArray(item) && ["paths", "changedPaths", "mutationMarkers"].includes(key)) {
+      normalized[key] = item.slice(0, 8).map((entry) => String(entry || "").slice(0, 180));
+    } else if (typeof item === "string") {
+      normalized[key] = item.slice(0, 180);
+    } else if (typeof item === "number" && Number.isFinite(item)) {
+      normalized[key] = item;
+    } else if (typeof item === "boolean") {
+      normalized[key] = item;
+    }
+  });
+  normalized.contentsRecorded = false;
+  return normalized;
+}
+
+function normalizeLocalActionReceiptList(value) {
+  return Array.isArray(value) ? value.slice(0, 8).map(normalizeLocalActionReceiptItem) : [];
+}
+
+function localActionSha256(value) {
+  return /^[0-9a-f]{64}$/.test(String(value || ""));
+}
+
+function localActionRelativePath(value) {
+  const path = String(value || "");
+  const parts = path.split("/");
+  return Boolean(path)
+    && !path.startsWith("/")
+    && !path.includes("\\")
+    && !/[?*\[\]{}]/.test(path)
+    && parts.every((part) => part && part !== "." && part !== "..");
+}
+
+function localActionReceiptOrder(items) {
+  const order = items.map((item) => {
+    const match = String(item?.id || "").match(/^(?:local-command|local-action)-(\d+)$/);
+    return match ? Number(match[1]) : NaN;
+  });
+  return order.length && order.every(Number.isInteger) && new Set(order).size === order.length
+    ? order
+    : [];
+}
+
+function validateLocalActionReceipts(value, expectedRunId) {
+  const fail = (reason) => ({ receipt: null, error: reason });
+  if (!value || typeof value !== "object" || Array.isArray(value)) return fail("sidecar-missing");
+  const runId = String(value.runId || "");
+  if (!expectedRunId || !runId || runId !== expectedRunId) return fail("run-lineage-mismatch");
+  if (value.kind !== "local-action-receipt-sidecar" || Number(value.version) !== 1) {
+    return fail("sidecar-version-invalid");
+  }
+  if (value.contentsRecorded !== false) return fail("sidecar-contents-not-bounded");
+  const rawReceiptItems = [
+    value.proposal,
+    ...(Array.isArray(value.editReceipts) ? value.editReceipts : []),
+    ...(Array.isArray(value.testReceipts) ? value.testReceipts : []),
+    ...(Array.isArray(value.rollbackReceipts) ? value.rollbackReceipts : []),
+    value.verifiedNoOpReceipt,
+    value.finalReconciliation,
+  ].filter((item) => item && typeof item === "object" && !Array.isArray(item));
+  if (rawReceiptItems.some((item) => Object.entries(item).some(
+    ([key, itemValue]) => /contentsRecorded$/i.test(key) && itemValue === true,
+  ))) return fail("sidecar-contents-not-bounded");
+  const outcome = String(value.outcome || "");
+  if (!new Set(["applied", "verified-noop", "rolled-back", "failed"]).has(outcome)) {
+    return fail("sidecar-outcome-invalid");
+  }
+  const receipt = {
+    kind: "local-action-receipt-sidecar",
+    version: 1,
+    runId,
+    outcome,
+    completed: value.completed === true,
+    proposalStatus: String(value.proposalStatus || "missing").slice(0, 80),
+    proposal: normalizeLocalActionReceiptItem(value.proposal),
+    editReceipts: normalizeLocalActionReceiptList(value.editReceipts),
+    testReceipts: normalizeLocalActionReceiptList(value.testReceipts),
+    rollbackReceipts: normalizeLocalActionReceiptList(value.rollbackReceipts),
+    verifiedNoOpReceipt: normalizeLocalActionReceiptItem(value.verifiedNoOpReceipt),
+    finalReconciliation: normalizeLocalActionReceiptItem(value.finalReconciliation),
+    contentsRecorded: false,
+  };
+  const testsPassed = receipt.testReceipts.every(
+    (item) => item.kind === "focused-test"
+      && item.status === "passed"
+      && item.verified === true
+      && item.exitCode === 0,
+  );
+  const reconciliationVerified = receipt.finalReconciliation.kind === "local-action-file-reconciliation"
+    && receipt.finalReconciliation.status === "verified"
+    && receipt.finalReconciliation.verified === true
+    && receipt.finalReconciliation.exitCode === 0
+    && !(receipt.finalReconciliation.changedPaths || []).length
+    && !(receipt.finalReconciliation.mutationMarkers || []).length;
+  const appliedStructural = outcome === "applied"
+    && receipt.completed
+    && receipt.editReceipts.length === 1
+    && !receipt.rollbackReceipts.length
+    && !receipt.verifiedNoOpReceipt.kind
+    && receipt.finalReconciliation.kind === "local-action-file-reconciliation";
+  const noOpStructural = outcome === "verified-noop"
+    && receipt.completed
+    && !receipt.editReceipts.length
+    && !receipt.rollbackReceipts.length
+    && receipt.verifiedNoOpReceipt.kind === "local-action-verified-noop"
+    && receipt.finalReconciliation.kind === "local-action-file-reconciliation";
+  const rollbackStructural = outcome === "rolled-back"
+    && !receipt.completed
+    && receipt.rollbackReceipts.length >= 1
+    && receipt.finalReconciliation.kind === "local-action-file-reconciliation";
+  const failureStructural = outcome === "failed" && !receipt.completed;
+  if (!(appliedStructural || noOpStructural || rollbackStructural || failureStructural)) {
+    return fail("sidecar-proof-inconsistent");
+  }
+
+  const proofIssues = [];
+  const orderedProof = (resolution, tests, reconciliation) => {
+    const orderedItems = [resolution, ...tests, reconciliation];
+    const order = localActionReceiptOrder(orderedItems);
+    return order.length === orderedItems.length && order.every((value, index) => index === 0 || order[index - 1] < value);
+  };
+  let appliedValid = false;
+  let noOpValid = false;
+  let rollbackValid = false;
+  if (outcome === "applied") {
+    const edit = receipt.editReceipts[0] || {};
+    const paths = edit.paths || [];
+    const changedPaths = edit.changedPaths || [];
+    appliedValid = edit.kind === "file-change"
+      && edit.status === "completed"
+      && edit.verified === true
+      && edit.exitCode === 0
+      && edit.controllerOwned === true
+      && paths.length === 1
+      && changedPaths.length === 1
+      && paths[0] === changedPaths[0]
+      && localActionRelativePath(paths[0])
+      && localActionSha256(edit.beforeSha256)
+      && localActionSha256(edit.afterSha256)
+      && edit.beforeSha256 !== edit.afterSha256
+      && Number(edit.beforeByteCount) >= 0
+      && Number(edit.afterByteCount) >= 0
+      && edit.modePreserved === true
+      && testsPassed
+      && reconciliationVerified
+      && orderedProof(edit, receipt.testReceipts, receipt.finalReconciliation);
+    if (!appliedValid) proofIssues.push("applied-controller-proof-incomplete");
+  } else if (outcome === "verified-noop") {
+    const noOp = receipt.verifiedNoOpReceipt;
+    const paths = noOp.paths || [];
+    const contextStart = Number(noOp.contextStart);
+    const contextEnd = Number(noOp.contextEnd);
+    noOpValid = noOp.status === "verified"
+      && noOp.verified === true
+      && noOp.exitCode === 0
+      && noOp.result === "requested-state-already-satisfied"
+      && noOp.controllerOwned === true
+      && noOp.sourceEvidenceVerified === true
+      && noOp.sourceContentsRecorded === false
+      && noOp.proposalContentsRecorded === false
+      && paths.length === 1
+      && localActionRelativePath(paths[0])
+      && ["requestSha256", "sourceSha256", "contextSha256", "proposalSha256"]
+        .every((key) => localActionSha256(noOp[key]))
+      && Number(noOp.sourceByteCount) > 0
+      && Number.isInteger(contextStart)
+      && Number.isInteger(contextEnd)
+      && contextStart >= 1
+      && contextEnd >= contextStart
+      && contextEnd - contextStart + 1 <= 60
+      && Number(noOp.contextLineCount) === contextEnd - contextStart + 1
+      && ((noOp.testRun === true && receipt.testReceipts.length === 1)
+        || (noOp.testRun !== true && !receipt.testReceipts.length))
+      && testsPassed
+      && reconciliationVerified
+      && orderedProof(noOp, receipt.testReceipts, receipt.finalReconciliation);
+    if (!noOpValid) proofIssues.push("verified-noop-controller-proof-incomplete");
+  } else if (outcome === "rolled-back") {
+    const rollback = receipt.rollbackReceipts[receipt.rollbackReceipts.length - 1] || {};
+    rollbackValid = rollback.kind === "file-rollback"
+      && rollback.verified === true
+      && rollback.exitCode === 0
+      && localActionSha256(rollback.restoredSha256)
+      && rollback.restoredSha256 === rollback.expectedRestoredSha256
+      && reconciliationVerified
+      && orderedProof(rollback, [], receipt.finalReconciliation);
+    if (!rollbackValid) proofIssues.push("rollback-controller-proof-incomplete");
+  } else {
+    proofIssues.push("server-reported-failure");
+  }
+  receipt.proofVerified = appliedValid || noOpValid || rollbackValid;
+  receipt.proofIssue = proofIssues[0] || "";
+  return { receipt, error: "" };
+}
+
+function applyLocalActionReceipts(message, value, expectedRunId) {
+  const result = validateLocalActionReceipts(value, expectedRunId);
+  message.localActionReceipts = result.receipt;
+  message.localActionReceiptError = result.error;
+  return result;
+}
+
+function revalidateSavedLocalActionReceipts(savedState) {
+  let changed = false;
+  for (const thread of savedState?.threads || []) {
+    for (const message of thread?.messages || []) {
+      if (!message?.localActionReceipts) continue;
+      const previousReceipt = JSON.stringify(message.localActionReceipts);
+      const previousError = String(message.localActionReceiptError || "");
+      const result = validateLocalActionReceipts(message.localActionReceipts, String(message.runId || ""));
+      message.localActionReceipts = result.receipt;
+      message.localActionReceiptError = result.error;
+      if (JSON.stringify(result.receipt) !== previousReceipt || result.error !== previousError) changed = true;
+    }
+  }
+  return { state: savedState, changed };
+}
+
+function clearLocalActionReceiptsForIncompleteSteering(message) {
+  if (!message?.steeringIncomplete) return false;
+  message.localActionReceipts = null;
+  message.localActionReceiptError = "";
+  return true;
+}
+
+function localActionReceiptState(message) {
+  if (message?.steeringIncomplete) return null;
+  if (message?.localActionReceiptError) {
+    return {
+      outcome: "invalid",
+      label: "Local action status unavailable · receipt rejected",
+      runLabel: "Receipt rejected · local action unconfirmed",
+      tone: "error",
+      stage: "local-action-receipt-invalid",
+    };
+  }
+  const sidecar = message?.localActionReceipts;
+  if (!sidecar || typeof sidecar !== "object") return null;
+  if (!sidecar.proofVerified) {
+    const reportedStates = {
+      applied: {
+        outcome: "applied",
+        status: "reported",
+        label: "Server reported local change applied · proof incomplete",
+        runLabel: "Local change reported · proof incomplete",
+        tone: "warning",
+        stage: "local-action-applied-unverified",
+      },
+      "verified-noop": {
+        outcome: "verified-noop",
+        status: "reported",
+        label: "Server reported no change needed · proof incomplete",
+        runLabel: "No-change result reported · proof incomplete",
+        tone: "warning",
+        stage: "local-action-verified-noop-unverified",
+      },
+      "rolled-back": {
+        outcome: "rolled-back",
+        status: "reported",
+        label: "Server reported local change rolled back · proof incomplete",
+        runLabel: "Rollback reported · proof incomplete",
+        tone: "warning",
+        stage: "local-action-rolled-back-unverified",
+      },
+      failed: {
+        outcome: "failed",
+        status: "failed",
+        label: "Server reported local change failed · completion not claimed",
+        runLabel: "Failed · local change not completed",
+        tone: "error",
+        stage: "local-action-failed",
+      },
+    };
+    return reportedStates[sidecar.outcome] || null;
+  }
+  const states = {
+    applied: {
+      outcome: "applied",
+      status: "applied",
+      label: "Local change applied · controller proof verified",
+      runLabel: "Complete · local change verified",
+      tone: "ok",
+      stage: "local-action-applied",
+    },
+    "verified-noop": {
+      outcome: "verified-noop",
+      status: "verified-noop",
+      label: "No change needed · requested state verified",
+      runLabel: "Complete · requested state already verified",
+      tone: "ok",
+      stage: "local-action-verified-noop",
+    },
+    "rolled-back": {
+      outcome: "rolled-back",
+      status: "rolled-back",
+      label: "Local change rolled back · restoration verified",
+      runLabel: "Rolled back · local change not retained",
+      tone: "warning",
+      stage: "local-action-rolled-back",
+    },
+  };
+  return states[sidecar.outcome] || null;
+}
+
+function buildLocalActionReceipt(message) {
+  if (message?.role !== "assistant" || message.running || message.provisional) return null;
+  const state = localActionReceiptState(message);
+  if (!state) return null;
+  const receipt = document.createElement("div");
+  receipt.className = `local-action-receipt ${state.status || state.outcome}`;
+  receipt.dataset.status = state.status || state.outcome;
+  receipt.setAttribute("role", "status");
+  receipt.setAttribute("aria-label", state.label);
+  receipt.textContent = state.label;
+  return receipt;
+}
+
+function terminalEnvelopeState(message) {
+  const status = String(message?.answerEnvelope?.status || "").trim().toLowerCase();
+  const states = {
+    bounded: {
+      status,
+      label: "Bounded · limits apply",
+      receiptLabel: "Bounded answer",
+      tone: "warning",
+      stage: "bounded",
+    },
+    blocked: {
+      status,
+      label: "Blocked · action needed",
+      receiptLabel: "Blocked",
+      tone: "warning",
+      stage: "blocked",
+    },
+    failed: {
+      status,
+      label: "Failed · retry available",
+      receiptLabel: "Failed",
+      tone: "error",
+      stage: "failed",
+    },
+  };
+  return states[status] || null;
+}
+
+function terminalRunState(message) {
+  const terminal = terminalEnvelopeState(message);
+  const evidence = evidenceReceiptState(message);
+  const localAction = localActionReceiptState(message);
+  if (localAction && ["invalid", "rolled-back", "failed"].includes(localAction.outcome)) {
+    return { ...localAction, label: localAction.runLabel };
+  }
+  if (terminal?.status === "blocked" && evidence?.status === "unverified") {
+    return { ...terminal, label: "Blocked · evidence needed", stage: "blocked-evidence-needed" };
+  }
+  if (terminal?.status === "bounded" && evidence?.status === "unverified") {
+    return { ...terminal, label: "Bounded · evidence needed", stage: "bounded-evidence-needed" };
+  }
+  if (terminal) return terminal;
+  if (evidence?.status === "unverified") {
+    return { status: "evidence-needed", label: evidence.label, tone: "warning", stage: "evidence-needed" };
+  }
+  if (localAction) return { ...localAction, label: localAction.runLabel };
+  return null;
+}
+
+function buildTerminalEnvelopeReceipt(message) {
+  if (message?.role !== "assistant" || message.running || message.provisional) return null;
+  const state = terminalEnvelopeState(message);
+  if (!state) return null;
+  const receipt = document.createElement("div");
+  receipt.className = `terminal-envelope-receipt ${state.status}`;
+  receipt.dataset.status = state.status;
+  receipt.setAttribute("role", "status");
+  receipt.setAttribute("aria-label", `Answer status: ${state.receiptLabel}`);
+  receipt.textContent = state.receiptLabel;
+  return receipt;
+}
+
+function evidenceReceiptState(message) {
+  const provenance = message?.sourceProvenance && typeof message.sourceProvenance === "object"
+    ? message.sourceProvenance
+    : {};
+  const ledger = Array.isArray(message?.evidenceLedger) ? message.evidenceLedger : [];
+  const verifiedCount = Number(provenance.verifiedReceiptCount || 0);
+  const receiptCount = Number(provenance.receiptCount || 0);
+  const unreceiptedUrls = Array.isArray(provenance.unreceiptedAnswerUrls)
+    ? provenance.unreceiptedAnswerUrls.filter(Boolean)
+    : [];
+  const evidenceRequired = Boolean(message?.evidencePolicy?.required)
+    || ledger.some((item) => item?.status === "open" && item?.sourceType !== "not-needed");
+  if (verifiedCount > 0 && verifiedCount >= receiptCount && provenance.status !== "partial") {
+    return {
+      label: provenance.mayClaimCited
+        ? `Sources checked · ${verifiedCount}`
+        : `Evidence checked · ${verifiedCount}`,
+      status: "verified",
+    };
+  }
+  if (verifiedCount > 0) {
+    return { label: `Evidence partially checked · ${verifiedCount}`, status: "partial" };
+  }
+  if (unreceiptedUrls.length) {
+    return {
+      label: unreceiptedUrls.length === 1
+        ? "Source not verified · link was not checked"
+        : `Sources not verified · ${unreceiptedUrls.length} links were not checked`,
+      status: "unverified",
+    };
+  }
+  if (evidenceRequired) {
+    return { label: "Evidence needed · no checked source", status: "unverified" };
+  }
+  return null;
+}
+
+function buildEvidenceReceipt(message) {
+  if (message?.role !== "assistant" || message.running || message.provisional) return null;
+  const state = evidenceReceiptState(message);
+  if (!state) return null;
+  const receipt = document.createElement("div");
+  receipt.className = `evidence-receipt ${state.status}`;
+  receipt.dataset.status = state.status;
+  receipt.setAttribute("role", "status");
+  receipt.setAttribute("aria-label", state.label);
+  receipt.textContent = state.label;
+  return receipt;
+}
+
 async function sendPrompt() {
+  if (attachmentIntakeBusy()) {
+    setRunState("Attachment upload still in progress", "warning", "attachment-uploading");
+    return;
+  }
   if (activeController) {
     await sendLiveSteer();
     return;
@@ -4222,6 +4967,12 @@ async function sendPrompt() {
   if (!thread || (!text && !attachments.length)) return;
   let editingIndex = -1;
   let editingMessage = null;
+  const retryOfSourceMessageId = composerIntent.kind === "retry"
+    ? String(composerIntent.messageId || "")
+    : "";
+  const retryOfAttachmentIds = composerIntent.kind === "retry" && Array.isArray(composerIntent.retryOfAttachmentIds)
+    ? composerIntent.retryOfAttachmentIds.slice(0, 8).map((id) => String(id || "").slice(0, 180)).filter(Boolean)
+    : [];
   if (composerIntent.kind === "edit" && composerIntent.messageId) {
     editingIndex = findMessageIndexById(thread, composerIntent.messageId);
     editingMessage = editingIndex >= 0 ? thread.messages[editingIndex] : null;
@@ -4248,7 +4999,10 @@ async function sendPrompt() {
     thread.messages = thread.messages.slice(0, editingIndex);
   }
   maybeSeedSessionCompassObjective(thread, text);
-  thread.messages.push({ id: crypto.randomUUID(), role: "user", text, attachments });
+  const sourceMessage = { id: crypto.randomUUID(), role: "user", text, attachments };
+  if (retryOfSourceMessageId) sourceMessage.retryOfSourceMessageId = retryOfSourceMessageId;
+  if (retryOfAttachmentIds.length) sourceMessage.retryOfAttachmentIds = retryOfAttachmentIds;
+  thread.messages.push(sourceMessage);
   if (isUntitledThread(thread)) {
     thread.title = (text || attachments[0]?.name || "Attached file").split(/\s+/).slice(0, 7).join(" ");
   }
@@ -4260,15 +5014,17 @@ async function sendPrompt() {
   renderAttachmentTray();
   render();
 
+  const runId = crypto.randomUUID();
   const pending = {
     id: crypto.randomUUID(),
+    runId,
+    sourceMessageId: sourceMessage.id,
     role: "assistant",
     text: "",
     running: true,
     thoughts: [],
   };
   thread.messages.push(pending);
-  const runId = crypto.randomUUID();
   activeRun = {
     id: runId,
     threadId: thread.id,
@@ -4299,7 +5055,8 @@ async function sendPrompt() {
         webSearch: thread.webSearch,
         sessionCompass: sessionCompassForThread(thread),
         runId,
-        messages: thread.messages.filter((message) => !message.running),
+        sourceMessageId: sourceMessage.id,
+        messages: serializeConversationMessages(thread.messages),
       }),
       signal: activeController.signal,
     });
@@ -4310,17 +5067,49 @@ async function sendPrompt() {
 
     await readStream(response.body, (event) => handleEvent(event, pending));
     if (!pending.text.trim()) pending.text = "No final message returned.";
-    if (isGenericLoadFailureText(pending.text) && isAeroCfdRecoveryPrompt(recoveryMessagesForThread(thread, pending))) {
+    const attemptedRecovery = isGenericLoadFailureText(pending.text);
+    let recoveredFromFailure = false;
+    if (attemptedRecovery) {
       setRunState("Working · recovering", "warning", "recovering");
-      await recoverWithEngineeringTool(thread, pending, new Error(pending.text));
+      recoveredFromFailure = await recoverRunFailure(thread, pending, new Error(pending.text));
     }
     applySessionCompassProgress(thread, pending);
+    if (pending.steeringIncomplete) {
+      pending.steeringFailed = true;
+      addThought(pending, "The run ended without applying every accepted steering revision.");
+    }
     pending.running = false;
-    setRunState("Complete", "ok", "complete");
+    // Publish the authoritative result atomically before announcing a terminal
+    // stage. refreshAdmin() runs in finally and may be slow; without this save
+    // and render, a completion observer (or reload) can still see the
+    // pre-result pending message in durable state.
+    saveState();
+    renderMessages();
+    const terminalState = terminalRunState(pending);
+    if (pending.steeringIncomplete) {
+      setRunState("Steering not applied", "error", "steer-incomplete");
+    } else if (recoveredFromFailure) {
+      setRunState("Recovered", "warning", "recovered");
+    } else if (attemptedRecovery) {
+      setRunState("Recovery unavailable", "warning", "recovery-unavailable");
+    } else if (terminalState) {
+      setRunState(terminalState.label, terminalState.tone, terminalState.stage);
+    } else if (pending.liveSteering?.status === "superseded-plan") {
+      setRunState("Complete · earlier plan replaced", "ok", "steer-complete");
+    } else if (Number(pending.liveSteering?.appliedThrough || 0) > 0) {
+      setRunState("Complete · steer applied", "ok", "steer-complete");
+    } else {
+      setRunState("Complete", "ok", "complete");
+    }
   } catch (error) {
     pending.running = false;
     if (error.name === "AbortError") {
-      pending.text = "Cancelled.\n\nThis is why: Tinman stopped the run before the final answer was delivered.";
+      if (pending.liveSteering) {
+        pending.liveSteering = { ...pending.liveSteering, status: "cancelled" };
+      }
+      pending.provisional = false;
+      resetAssistantResultMetadata(pending, { keepRoute: false });
+      pending.text = "Stopped. I saved the conversation, but no final answer was produced.";
       addThought(pending, "Run cancelled by Tinman.");
       setRunState("Cancelled", "warning", "cancelled");
       setRunning(false);
@@ -4328,18 +5117,27 @@ async function sendPrompt() {
       return;
     }
     appendLog("error", `Run stream failed: ${error.message}`);
+    pending.provisional = false;
+    resetAssistantResultMetadata(pending, { keepRoute: false });
     setRunState("Working · recovering", "warning", "recovering");
-    await recoverRunFailure(thread, pending, error);
-    setRunState("Recovered", "warning", "recovered");
+    const recoveredFromFailure = await recoverRunFailure(thread, pending, error);
+    setRunState(
+      recoveredFromFailure ? "Recovered" : "Recovery unavailable",
+      recoveredFromFailure ? "warning" : "error",
+      recoveredFromFailure ? "recovered" : "recovery-unavailable",
+    );
   } finally {
     stopActiveRunTiming(true);
     activeController = null;
     activeRun = null;
     thread.updatedAt = new Date().toISOString();
-    await refreshAdmin();
+    // Release the composer as soon as the authoritative run result is saved.
+    // Admin/receipt refresh is ancillary and may be slow under package-health
+    // load; it must not leave a terminal recovery looking busy or block input.
     setRunning(false);
     render();
     restoreComposerFocusAfterRun();
+    await refreshAdmin();
   }
 }
 
@@ -4362,7 +5160,7 @@ function deeperAnalysisRecoveryAdvice(kind, label, errorMessage = "") {
 
 async function runDeeperAnalysis(kind = "auto") {
   const thread = currentThread();
-  if (!thread || activeController) return;
+  if (!thread || activeController || attachmentIntakeBusy()) return;
   thread.cwd = els.cwdInput.value.trim() || config.cwd;
   const label = analysisKindLabel(kind);
   let text = els.promptInput.value.trim();
@@ -4381,7 +5179,7 @@ async function runDeeperAnalysis(kind = "auto") {
     autoSizeTextarea();
     renderAttachmentTray();
   }
-  const messages = thread.messages.filter((message) => !message.running);
+  const messages = serializeConversationMessages(thread.messages);
   if (!messages.length) {
     els.runState.textContent = "Attach or ask first";
     els.runState.className = "run-state warning";
@@ -4424,6 +5222,7 @@ async function runDeeperAnalysis(kind = "auto") {
     pending.roleStyle = payload.roleStyle || null;
     pending.interactionDirector = payload.interactionDirector || null;
     pending.evidenceLedger = Array.isArray(payload.evidenceLedger) ? payload.evidenceLedger : [];
+    applyEvidenceStatus(pending, payload);
     pending.evidenceClaimGate = payload.evidenceClaimGate || null;
     pending.expertiseConfidence = payload.expertiseConfidence || null;
     pending.responseComposer = payload.responseComposer || null;
@@ -4445,14 +5244,14 @@ async function runDeeperAnalysis(kind = "auto") {
   } catch (error) {
     pending.running = false;
     if (error.name === "AbortError") {
-      pending.text = `Cancelled.\n\nThis is why: Tinman stopped the ${label} analysis before it finished.`;
+      pending.text = `Cancelled. You stopped the ${label} analysis before it finished.`;
       pending.thoughts = [...(pending.thoughts || []), `${label} analysis cancelled by Tinman.`].slice(-8);
       setRunState("Analysis cancelled", "warning", "cancelled");
       setRunning(false);
       appendLog("warning", `${label} analysis cancelled`);
       return;
     }
-    pending.text = `The ${label} analysis did not finish.\n\nThis is why: ${error.message}\n\nYou should also consider: ${deeperAnalysisRecoveryAdvice(kind, label, error.message)}`;
+    pending.text = `The ${label} analysis did not finish.\n\n${error.message}\n\n${deeperAnalysisRecoveryAdvice(kind, label, error.message)}`;
     els.runState.textContent = "Analysis failed";
     els.runState.className = "run-state error";
     appendLog("error", `${label} analysis failed: ${error.message}`);
@@ -4880,6 +5679,26 @@ function handleEvent(event, pending) {
     return;
   }
 
+  if (event.type === "steering") {
+    const steering = mergeLiveSteeringReceipt(pending, event);
+    const status = steering.status;
+    if (status === "superseding-plan") {
+      setRunState("Steer received · replacing earlier plan", "warning", "steer-superseding");
+    } else if (status === "superseded-plan") {
+      setRunState("Steer applied · earlier plan replaced", "warning", "steer-applied");
+    } else if (status === "applied") {
+      setRunState("Steer applied · finalizing", "warning", "steer-applied");
+    } else if (status === "failed") {
+      pending.steeringIncomplete = true;
+      setRunState("Steering not applied", "error", "steer-incomplete");
+    }
+    addThought(pending, event.message || liveSteeringReceiptLabel(pending));
+    appendLog("event", `live steering status=${status || "unknown"}`);
+    renderMessages();
+    saveState();
+    return;
+  }
+
   if (event.type === "assistant_delta") {
     setRunState("Working · drafting answer", "warning", "drafting");
     if (!pending.provisional) pending.text = "";
@@ -4891,15 +5710,38 @@ function handleEvent(event, pending) {
 
   if (event.type === "assistant") {
     if (event.partial) {
-      setRunState("Working · drafting answer", "warning", "drafting");
+      setRunState("Working · reviewing draft", "warning", "reviewing-draft");
+      resetAssistantResultMetadata(pending, { keepRoute: !event.route });
+      if (event.route && typeof event.route === "object") pending.route = event.route;
       pending.provisional = true;
-      pending.text = event.text || pending.text || "";
+      pending.text = "";
+      if (activeRun?.pending === pending) {
+        activeRun.withheldPartial = true;
+        activeRun.withheldPartialChars = String(event.text || "").length;
+      }
+      addThought(pending, "A draft is being reviewed before it is shown.");
       renderMessages();
       return;
     }
     setRunState("Working · answer received", "warning", "answer-received");
+    if (event.liveSteering || event.steeringStatus || event.acceptedThrough != null || event.appliedThrough != null) {
+      const steering = mergeLiveSteeringReceipt(pending, event);
+      pending.steeringIncomplete = steering.status === "failed"
+        || steering.appliedThrough < steering.acceptedThrough;
+    }
+    resetAssistantResultMetadata(pending, { keepRoute: !event.route });
     pending.provisional = false;
     pending.text = event.text || "";
+    pending.structuredAnalyticalFacts = (
+      event.structuredAnalyticalFacts
+      && typeof event.structuredAnalyticalFacts === "object"
+    ) ? event.structuredAnalyticalFacts : null;
+    if (Object.prototype.hasOwnProperty.call(event, "localActionReceipts")) {
+      if (!clearLocalActionReceiptsForIncompleteSteering(pending)) {
+        applyLocalActionReceipts(pending, event.localActionReceipts, pending.runId || "");
+      }
+    }
+    if (event.route && typeof event.route === "object") pending.route = event.route;
     pending.displayMode = event.displayMode || { answerSurface: DEFAULT_ANSWER_SURFACE, showDiagnostics: false, showReceiptsWhenDone: false };
     if (event.recovery) pending.recovery = event.recovery;
     if (event.adminTopic) {
@@ -4910,11 +5752,17 @@ function handleEvent(event, pending) {
     pending.compositionStyle = event.compositionStyle || null;
     pending.interactionDirector = event.interactionDirector || null;
     pending.evidenceLedger = Array.isArray(event.evidenceLedger) ? event.evidenceLedger : [];
+    applyEvidenceStatus(pending, event);
     pending.evidenceClaimGate = event.evidenceClaimGate || null;
     pending.expertiseConfidence = event.expertiseConfidence || null;
     pending.responseComposer = event.responseComposer || null;
     pending.preSendReview = event.preSendReview || null;
     pending.feedbackGuidance = event.feedbackGuidance || null;
+    pending.feedbackTurnReceipt = (
+      event.feedbackTurnReceipt
+      && typeof event.feedbackTurnReceipt === "object"
+      && event.feedbackTurnReceipt.kind === "feedback-turn-receipt"
+    ) ? event.feedbackTurnReceipt : null;
     pending.workingProfile = event.workingProfile || event.route?.workingProfile || null;
     pending.sessionCompass = event.sessionCompass || event.route?.sessionCompass || null;
     pending.sessionCompassProgress = event.sessionCompassProgress || null;
@@ -4998,7 +5846,19 @@ function handleEvent(event, pending) {
   if (event.type === "done") {
     finishMonitorRun();
     pending.returnCode = event.returnCode;
-    setRunState("Finalizing", "warning", "finalizing");
+    if (event.steeringStatus || event.acceptedThrough != null || event.appliedThrough != null) {
+      const steering = mergeLiveSteeringReceipt(pending, event);
+      pending.steeringIncomplete = steering.status === "failed"
+        || steering.appliedThrough < steering.acceptedThrough;
+    }
+    clearLocalActionReceiptsForIncompleteSteering(pending);
+    if (pending.steeringIncomplete) {
+      setRunState("Steering not applied", "error", "steer-incomplete");
+    } else if (Number(pending.liveSteering?.appliedThrough || 0) > 0) {
+      setRunState("Finalizing · steer applied", "warning", "finalizing-steered");
+    } else {
+      setRunState("Finalizing", "warning", "finalizing");
+    }
     appendLog("event", `run finished code=${event.returnCode}`);
     return;
   }
@@ -5035,13 +5895,284 @@ function findMessageIndexById(thread, id) {
   return (thread.messages || []).findIndex((message) => message.id === id);
 }
 
+function isRetryableAssistantMessage(message) {
+  if (message?.role !== "assistant" || message?.running) return false;
+  return message.interrupted === true || ["interrupted", "unavailable"].includes(message.recoveryState);
+}
+
+function localActionRetryEligible(message) {
+  if (
+    message?.role !== "assistant"
+    || message.running
+    || message.provisional
+    || message.steeringIncomplete
+    || message.localActionReceiptError
+  ) return false;
+  const sidecar = message.localActionReceipts;
+  const runId = String(message.runId || "");
+  if (!runId || !sidecar || sidecar.runId !== runId) return false;
+  const validated = validateLocalActionReceipts(sidecar, runId);
+  if (validated.error || !validated.receipt) return false;
+  const receipt = validated.receipt;
+  if (receipt.proofVerified && ["applied", "verified-noop"].includes(receipt.outcome)) return false;
+  if (receipt.outcome === "rolled-back") {
+    return receipt.completed === false && receipt.proofVerified === true && !receipt.proofIssue;
+  }
+  if (
+    receipt.outcome === "failed"
+    && receipt.completed === false
+    && receipt.proofVerified === false
+    && receipt.proofIssue === "server-reported-failure"
+  ) return true;
+  const returnCodePresent = message.returnCode !== null && message.returnCode !== undefined;
+  const returnCode = Number(message.returnCode);
+  const terminalFailed = (returnCodePresent && Number.isFinite(returnCode) && returnCode !== 0)
+    || String(message.answerEnvelope?.status || "").trim().toLowerCase() === "failed";
+  return terminalFailed && receipt.proofVerified === false;
+}
+
+function localActionRetryConcurrent() {
+  return Boolean(activeController || activeRun || activeLocalActionRetry) || attachmentIntakeBusy();
+}
+
+function normalizeLocalActionRetryAttachment(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const id = String(value.id || "").slice(0, 180);
+  const name = String(value.name || "").slice(0, 255);
+  const path = String(value.path || "").slice(0, 4096);
+  const source = String(value.source || "").slice(0, 80);
+  const type = String(value.type || value.contentType || "application/octet-stream").slice(0, 180);
+  const size = Number(value.size || 0);
+  if (!id || !name || !path || !Number.isFinite(size) || size < 0) return null;
+  if (!["native-local-path", "uploaded-copy"].includes(source)) return null;
+  return {
+    id,
+    name,
+    size,
+    type,
+    path,
+    source,
+    copied: source === "native-local-path" ? false : value.copied !== false,
+  };
+}
+
+function normalizeLocalActionRetryAttachments(values) {
+  if (!Array.isArray(values)) return null;
+  const seen = new Set();
+  const normalized = [];
+  for (const value of values) {
+    const attachment = normalizeLocalActionRetryAttachment(value);
+    if (!attachment) return null;
+    const identity = attachmentIdentity(attachment);
+    if (seen.has(identity)) return null;
+    seen.add(identity);
+    normalized.push(attachment);
+  }
+  return normalized;
+}
+
+function renewLocalActionRetryAttachments(attachments) {
+  return {
+    attachments: (attachments || []).map((attachment) => ({
+      id: crypto.randomUUID(),
+      name: attachment.name,
+      size: attachment.size,
+      type: attachment.type,
+      path: attachment.path,
+      source: attachment.source,
+      copied: attachment.copied,
+    })),
+    retryOfAttachmentIds: (attachments || []).map((attachment) => attachment.id),
+  };
+}
+
+function localActionRetryPlan(thread, assistantMessage) {
+  if (!localActionRetryEligible(assistantMessage)) {
+    return { eligible: false, ready: false, refusal: "" };
+  }
+  const sourceMessageId = String(assistantMessage.sourceMessageId || "");
+  const source = sourceMessageId ? findMessageById(thread, sourceMessageId) : null;
+  const sourceIndex = source ? findMessageIndexById(thread, sourceMessageId) : -1;
+  const assistantIndex = findMessageIndexById(thread, assistantMessage.id);
+  if (!source || source.role !== "user" || source.steering || sourceIndex < 0 || assistantIndex <= sourceIndex) {
+    return { eligible: true, ready: false, refusal: "original-unavailable" };
+  }
+  const interveningSteer = thread.messages.slice(sourceIndex + 1, assistantIndex).some(
+    (message) => message?.role === "user" && message.steering === true,
+  );
+  const steering = assistantMessage.liveSteering || {};
+  if (
+    interveningSteer
+    || Number(steering.acceptedThrough || 0) > 0
+    || Number(steering.appliedThrough || 0) > 0
+    || (assistantMessage.steeringNotes || []).length
+  ) {
+    return { eligible: true, ready: false, refusal: "effective-intent-unavailable" };
+  }
+  const text = String(source.text || "");
+  const rawAttachments = source.attachments == null ? [] : source.attachments;
+  if (!Array.isArray(rawAttachments)) {
+    return { eligible: true, ready: false, refusal: "attachments-unavailable" };
+  }
+  const attachments = normalizeLocalActionRetryAttachments(rawAttachments);
+  if (!attachments || attachments.length !== rawAttachments.length) {
+    return { eligible: true, ready: false, refusal: "attachments-unavailable" };
+  }
+  if (!text.trim() && !attachments.length) {
+    return { eligible: true, ready: false, refusal: "original-unavailable" };
+  }
+  return {
+    eligible: true,
+    ready: true,
+    refusal: "",
+    sourceId: source.id,
+    text,
+    attachments,
+  };
+}
+
+async function localActionRetryAttachmentsAvailable(attachments) {
+  const checks = await Promise.all((attachments || []).map(async (attachment) => {
+    try {
+      const response = await fetch("/api/files/open", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: attachment.path, mode: "reveal", dryRun: true }),
+      });
+      const result = await response.json();
+      return response.ok && result?.ok === true && result?.dryRun === true && Boolean(result?.path);
+    } catch (_error) {
+      return false;
+    }
+  }));
+  return checks.every(Boolean);
+}
+
+function localActionRetryRefusalLabel(reason) {
+  const labels = {
+    "original-unavailable": "Retry not started · original request unavailable",
+    "attachments-unavailable": "Retry not started · saved attachment unavailable",
+    "effective-intent-unavailable": "Retry not started · applied steering cannot be replayed exactly",
+    "composer-busy": "Retry not started · finish the current edit or steer first",
+    "run-active": "Retry unavailable · another run or attachment check is active",
+    "task-changed": "Retry not started · active task changed during verification",
+  };
+  return labels[String(reason || "")] || "";
+}
+
+function refuseLocalActionRetry(message, reason) {
+  const label = localActionRetryRefusalLabel(reason);
+  if (!message || !label) return;
+  message.localActionRetryRefusal = reason;
+  saveState();
+  renderMessages();
+  setRunState(label, "error", "local-action-retry-refused");
+  appendLog("warning", label);
+}
+
+function retrySourceMessage(thread, assistantMessage) {
+  const index = findMessageIndexById(thread, assistantMessage?.id);
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const candidate = thread.messages[cursor];
+    if (candidate?.role === "user" && !candidate.steering) return candidate;
+  }
+  return null;
+}
+
+async function retryAssistantMessage(messageId) {
+  const thread = currentThread();
+  if (!thread) return;
+  const message = findMessageById(thread, messageId);
+  if (localActionRetryEligible(message)) {
+    if (localActionRetryConcurrent()) {
+      refuseLocalActionRetry(message, "run-active");
+      return;
+    }
+    const plan = localActionRetryPlan(thread, message);
+    if (!plan.ready) {
+      refuseLocalActionRetry(message, plan.refusal || "original-unavailable");
+      return;
+    }
+    if (composerIntent.kind || els.promptInput.value.trim() || pendingAttachments.length) {
+      refuseLocalActionRetry(message, "composer-busy");
+      return;
+    }
+    const retryToken = { threadId: thread.id, messageId: message.id };
+    activeLocalActionRetry = retryToken;
+    renderMessages();
+    setRunState("Checking saved attachments", "warning", "local-action-retry-checking");
+    const attachmentsAvailable = await localActionRetryAttachmentsAvailable(plan.attachments);
+    const current = currentThread();
+    const currentMessage = current?.id === retryToken.threadId
+      ? findMessageById(current, retryToken.messageId)
+      : null;
+    const currentPlan = currentMessage ? localActionRetryPlan(current, currentMessage) : null;
+    const ownershipCurrent = activeLocalActionRetry === retryToken
+      && current?.id === thread.id
+      && currentMessage === message
+      && !activeController
+      && !activeRun
+      && !attachmentIntakeBusy();
+    if (!ownershipCurrent || !currentPlan?.ready || currentPlan.sourceId !== plan.sourceId) {
+      if (activeLocalActionRetry === retryToken) activeLocalActionRetry = null;
+      refuseLocalActionRetry(currentMessage || message, "task-changed");
+      return;
+    }
+    if (!attachmentsAvailable) {
+      activeLocalActionRetry = null;
+      refuseLocalActionRetry(message, "attachments-unavailable");
+      return;
+    }
+    if (composerIntent.kind || els.promptInput.value.trim() || pendingAttachments.length) {
+      activeLocalActionRetry = null;
+      refuseLocalActionRetry(message, "composer-busy");
+      return;
+    }
+    message.localActionRetryRefusal = "";
+    activeLocalActionRetry = null;
+    const renewed = renewLocalActionRetryAttachments(currentPlan.attachments);
+    pendingAttachments = renewed.attachments;
+    composerIntent = {
+      kind: "retry",
+      messageId: currentPlan.sourceId,
+      retryOfAttachmentIds: renewed.retryOfAttachmentIds,
+      attachmentsSeeded: true,
+    };
+    setComposerText(currentPlan.text);
+    renderAttachmentTray();
+    setRunState("Retrying local action", "warning", "retrying-local-action");
+    appendLog("event", "retrying the unsuccessful local action from its original request and attachments");
+    sendPrompt();
+    return;
+  }
+  if (!isRetryableAssistantMessage(message)) return;
+  const source = retrySourceMessage(thread, message);
+  if (!source) return;
+  pendingAttachments = normalizeAttachmentList(source.attachments || []);
+  composerIntent = { kind: "edit", messageId: source.id, attachmentsSeeded: true };
+  setComposerText(source.text || "");
+  renderAttachmentTray();
+  setRunState("Retrying saved question", "warning", "retrying");
+  appendLog("event", "retrying the saved question with its original attachments");
+  sendPrompt();
+}
+
 function setComposerText(text) {
   els.promptInput.value = text;
   autoSizeTextarea();
   els.promptInput.focus();
 }
 
+function resetComposerLineage() {
+  pendingAttachments = [];
+  composerIntent = { kind: "", messageId: "" };
+  els.promptInput.value = "";
+  autoSizeTextarea();
+  renderAttachmentTray();
+}
+
 function startEditMessage(messageId) {
+  if (attachmentIntakeBusy()) return;
   const thread = currentThread();
   const index = findMessageIndexById(thread, messageId);
   const message = index >= 0 ? thread.messages[index] : null;
@@ -5055,9 +6186,11 @@ function startEditMessage(messageId) {
 }
 
 function startSteerMessage(messageId) {
+  if (attachmentIntakeBusy()) return;
   const thread = currentThread();
   const message = findMessageById(thread, messageId);
   if (!message || message.role !== "assistant") return;
+  resetComposerLineage();
   composerIntent = { kind: "steer", messageId };
   setComposerText("Steer the previous answer this way: ");
   els.runState.textContent = "Steer ready";
@@ -5076,39 +6209,13 @@ function latestUserPromptForMessage(thread, message) {
   return "";
 }
 
-function defaultFixNoteForMessage(thread, message) {
-  if (isServerCrashRecoveryMessage(message)) {
-    return serverCrashRepairNote(message);
-  }
-  const prompt = latestUserPromptForMessage(thread, message).toLowerCase();
-  const answer = String(message?.text || "").toLowerCase();
-  const notes = [];
-
-  if (/runtime\/load failure|load failed|no final message returned|local worker returned|recovery plan/i.test(answer)) {
-    notes.push("Do not replace a normal answer request with a generic runtime recovery block. If a primary draft exists, return it and briefly say review/polish was skipped.");
-  }
-  if (/file was found|saved, or uploaded|upload, restart, or change a live printer/i.test(answer) && !/save|upload|restart|file|folder|directory|macro|config/.test(prompt)) {
-    notes.push("Do not use file/upload/live-printer recovery language for a knowledge or research question.");
-  }
-  if (/fibreseek|fiberseek|fibreseeker|fiberseeker|hotted|hotend|toolhead|continuous fiber|continuous fibre/.test(prompt)) {
-    notes.push("For public printer hardware questions, infer obvious typos such as hotted->hotend, use public/spec research when web is enabled, and answer the engineering question directly.");
-  }
-  if (/(find|source|buy|purchase|get).{0,120}(for sale|in stock|available|price|seller|vendor)|where (can|do) i (buy|get|find)|where to buy/.test(prompt)) {
-    notes.push("Treat product sourcing as current-web evidence work: find exact seller/source links, verify exact-match wording, and mention price/stock/shipping only when a source proves it.");
-  }
-  if (!notes.length) {
-    notes.push("Answer the actual question directly, explain why, and include what Tinman should consider or verify next.");
-  }
-  return notes.join(" ");
-}
-
 async function sendMessageFeedback(messageId, rating, feedbackCategory = "") {
   const thread = currentThread();
   const message = findMessageById(thread, messageId);
   if (!thread || !message || message.feedback === "saving") return;
 
   const category = rating === "fix" ? String(feedbackCategory || "") : "";
-  const note = rating === "fix" && !category ? defaultFixNoteForMessage(thread, message) : "";
+  const note = "";
 
   const previousFeedback = message.feedback;
   message.feedback = "saving";
@@ -5124,7 +6231,10 @@ async function sendMessageFeedback(messageId, rating, feedbackCategory = "") {
         feedbackCategory: category,
         prompt: latestUserPromptForMessage(thread, message),
         answer: message.text || "",
-        messages: thread.messages.filter((item) => !item.running).slice(-8),
+        messages: serializeConversationMessages(thread.messages.filter((item) => !item.running)).slice(-8),
+        runId: message.runId || "",
+        sourceMessageId: message.sourceMessageId || "",
+        feedbackTurnReceipt: message.feedbackTurnReceipt || {},
         cwd: thread.cwd || config.cwd,
         webSearch: thread.webSearch || config.webSearch,
         route: message.route || {},
@@ -5166,26 +6276,19 @@ async function sendMessageFeedback(messageId, rating, feedbackCategory = "") {
     if (payload.interactionRegression) appendLog("status", `Interaction regression saved: ${payload.interactionRegression.name || payload.interactionRegression.id}`);
     appendLog("event", rating === "fix" ? "quality lesson saved" : "positive answer feedback saved");
     if (rating === "fix" && isGenericLoadFailureText(message.text)) {
-      const scopedMessages = recoveryMessagesForThread(thread, message);
-      if (isAeroCfdRecoveryPrompt(scopedMessages)) {
-        els.runState.textContent = "Recovering";
-        els.runState.className = "run-state warning";
-        message.running = true;
-        addThought(message, "Fix this triggered the dedicated Aero/CFD recovery path.");
-        renderMessages();
-        const recovered = await recoverWithEngineeringTool(thread, message, new Error(message.text || "load failed"), scopedMessages);
-        message.running = false;
-        if (recovered) {
-          message.feedback = "fix";
-          message.feedbackSelfHealing = message.feedbackSelfHealing || { recovered: true };
-          els.runState.textContent = "Recovered";
-          els.runState.className = "run-state ok";
-          appendLog("event", "Fix this replaced the failed answer with Aero/CFD recovery output");
-        } else {
-          els.runState.textContent = "Lesson saved";
-          els.runState.className = "run-state warning";
-        }
-      }
+      els.runState.textContent = "Recovering";
+      els.runState.className = "run-state warning";
+      message.running = true;
+      addThought(message, "Fix this requested a fresh server-owned recovery pass.");
+      renderMessages();
+      const recovered = await recoverRunFailure(thread, message, new Error(message.text || "load failed"));
+      message.running = false;
+      els.runState.textContent = recovered ? "Recovered" : "Lesson saved";
+      els.runState.className = recovered ? "run-state ok" : "run-state warning";
+      appendLog(
+        recovered ? "event" : "warning",
+        recovered ? "Fix this replaced the failed answer through shared recovery" : "Fix this saved the lesson; recovery remains unavailable"
+      );
     }
     await refreshAdmin();
   } catch (error) {
@@ -5410,6 +6513,14 @@ function formatSeconds(ms) {
   return `${(Math.max(0, ms) / 1000).toFixed(1)}s`;
 }
 
+function formatElapsedCompact(ms) {
+  const seconds = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+  if (seconds < 60) return `${seconds}s elapsed`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder ? `${minutes}m ${remainder}s elapsed` : `${minutes}m elapsed`;
+}
+
 function passSummary() {
   const durations = { ...monitor.passDurations };
   if (monitor.activeStage && monitor.activeStage !== "idle") {
@@ -5506,26 +6617,30 @@ function handleGlobalKeyboardShortcuts(event) {
     focusTarget(els.logOutput);
     return;
   }
-  if (key === "n" && !activeController) {
+  if (key === "n" && !activeController && !attachmentIntakeBusy()) {
     event.preventDefault();
     els.newThreadButton.click();
   }
 }
 
 els.newThreadButton.addEventListener("click", () => {
-  if (activeController) return;
+  if (activeController || attachmentIntakeBusy()) return;
+  resetComposerLineage();
   createThread();
   state.sidebarView = "chats";
   render();
+  setRunState("Prompt ready", "warning", "prompt-ready");
   els.promptInput.focus();
 });
 
 if (els.mobileNewThreadButton) {
   els.mobileNewThreadButton.addEventListener("click", () => {
-    if (activeController) return;
+    if (activeController || attachmentIntakeBusy()) return;
+    resetComposerLineage();
     createThread();
     state.sidebarView = "chats";
     render();
+    setRunState("Prompt ready", "warning", "prompt-ready");
     els.promptInput.focus();
   });
 }
@@ -5565,11 +6680,13 @@ els.testsNavButton.addEventListener("click", () => {
 });
 
 els.clearThreadsButton.addEventListener("click", () => {
-  if (activeController) return;
+  if (activeController || attachmentIntakeBusy()) return;
   if (!window.confirm("Clear all chats?")) return;
+  resetComposerLineage();
   state.threads = [];
   createThread();
   render();
+  setRunState("Prompt ready", "warning", "prompt-ready");
 });
 
 els.clearLogButton.addEventListener("click", () => {
@@ -5590,8 +6707,9 @@ els.copyButton.addEventListener("click", async () => {
 
 els.conversation.addEventListener("click", (event) => {
   const promptStarter = event.target.closest("[data-prompt-starter]");
-  if (promptStarter && !activeController) {
+  if (promptStarter && !activeController && !attachmentIntakeBusy()) {
     event.preventDefault();
+    resetComposerLineage();
     setComposerText(promptStarter.dataset.promptStarter || "");
     setRunState("Prompt ready", "warning", "prompt-ready");
     return;
@@ -5603,15 +6721,21 @@ els.conversation.addEventListener("click", (event) => {
     return;
   }
   const editButton = event.target.closest("[data-edit-message-id]");
-  if (editButton && !activeController) {
+  if (editButton && !activeController && !attachmentIntakeBusy()) {
     event.preventDefault();
     startEditMessage(editButton.dataset.editMessageId);
     return;
   }
   const steerButton = event.target.closest("[data-steer-message-id]");
-  if (steerButton && !activeController) {
+  if (steerButton && !activeController && !attachmentIntakeBusy()) {
     event.preventDefault();
     startSteerMessage(steerButton.dataset.steerMessageId);
+    return;
+  }
+  const retryButton = event.target.closest("[data-retry-message-id]");
+  if (retryButton) {
+    event.preventDefault();
+    retryAssistantMessage(retryButton.dataset.retryMessageId);
     return;
   }
   const crashRepairButton = event.target.closest("[data-crash-repair-id]");
@@ -5734,15 +6858,11 @@ els.webAccessToggle.addEventListener("click", () => {
 });
 
 els.attachButton.addEventListener("click", async () => {
-  if (activeController) return;
+  if (activeController || attachmentIntakeBusy()) return;
   if (nativeFilePickerAvailable()) {
-    try {
-      const files = await openNativeFilePicker();
-      await handleNativeFiles(files);
-      return;
-    } catch (error) {
-      appendLog("warning", `Native file picker failed: ${error.message}; using browser picker`);
-    }
+    const handled = await handleNativeFilePickerIntake();
+    if (handled) return;
+    appendLog("warning", "Using browser attachment picker fallback");
   }
   els.fileInput.click();
 });
@@ -5754,13 +6874,13 @@ els.fileInput.addEventListener("change", async () => {
 
 els.attachmentTray.addEventListener("click", (event) => {
   const button = event.target.closest("[data-attachment-id]");
-  if (!button || activeController) return;
+  if (!button || activeController || attachmentIntakeBusy()) return;
   pendingAttachments = pendingAttachments.filter((attachment) => attachment.id !== button.dataset.attachmentId);
   renderAttachmentTray();
 });
 
 els.composerWrap.addEventListener("dragover", (event) => {
-  if (activeController) return;
+  if (activeController || attachmentIntakeBusy()) return;
   if (event.dataTransfer?.types?.includes("Files")) {
     event.preventDefault();
     els.composerWrap.classList.add("drop-active");
@@ -5772,7 +6892,7 @@ els.composerWrap.addEventListener("dragleave", () => {
 });
 
 els.composerWrap.addEventListener("drop", async (event) => {
-  if (activeController) return;
+  if (activeController || attachmentIntakeBusy()) return;
   const files = event.dataTransfer?.files;
   if (files?.length) {
     event.preventDefault();
@@ -5782,7 +6902,7 @@ els.composerWrap.addEventListener("drop", async (event) => {
 });
 
 els.promptInput.addEventListener("paste", async (event) => {
-  if (activeController) return;
+  if (activeController || attachmentIntakeBusy()) return;
   const files = event.clipboardData?.files;
   if (files?.length) {
     event.preventDefault();

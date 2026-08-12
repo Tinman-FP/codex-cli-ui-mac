@@ -164,7 +164,7 @@ def audit(root):
                 'if ((event.metaKey || event.ctrlKey) && event.key === "Enter")',
                 'if (key === "c")',
                 'if (key === "l")',
-                'if (key === "n" && !activeController)',
+                'if (key === "n" && !activeController && !attachmentIntakeBusy())',
             )
         ),
         "global shortcuts cover send, chat focus, log focus, and new chat",

@@ -29,6 +29,12 @@ def audit(root):
     app_text = read_text(root / "app.js")
     index_text = read_text(root / "index.html")
     server_text = read_text(root / "server.py")
+    native_text = read_text(root / "native" / "CodexCLIUI.m")
+    styles_text = read_text(root / "styles.css")
+    browser_smoke_text = read_text(root / "tools" / "app_ui_browser_smoke.py")
+    cached_satisfaction_ui_text = read_text(root / "tools" / "p179_cached_satisfaction_ui_contract.mjs")
+    local_action_retry_ui_text = read_text(root / "tools" / "p180_local_action_retry_ui_contract.mjs")
+    feedback_turn_receipt_ui_text = read_text(root / "tools" / "p193_feedback_turn_receipt_ui_contract.mjs")
     checks = []
 
     add_check(
@@ -55,7 +61,9 @@ def audit(root):
                 "async function sendLiveSteer()",
                 'await sendLiveSteer();',
                 'fetch("/api/run/steer"',
-                "runId: activeRun.id",
+                "const runId = activeRun.id;",
+                "payload.accepted !== true",
+                "payload.runId !== runId",
                 "Tinman steering queued",
                 "Steering note accepted by the active run.",
                 "Steering note could not reach the worker",
@@ -63,6 +71,316 @@ def audit(root):
         )
         and contains_all(server_text, ("/api/run/steer", "add_live_steering", "wait_for_live_steering_notes")),
         "UI posts live steering to the active run and surfaces accepted/failed receipts",
+    )
+    add_check(
+        checks,
+        "intent-changing-live-steer-browser-regression",
+        contains_all(
+            browser_smoke_text,
+            (
+                "When I say Could you, I mean do you have the capability.",
+                "intent-changing-steer-correlates-active-run",
+                "intent-changing-steer-preserves-exact-meaning",
+                "intent-changing-steer-saved-and-acknowledged",
+                "intent-changing-steer-terminal-application-visible",
+                "intent-changing-steer-stale-draft-withheld",
+                'run_payload.get("runId") == steer_payload.get("runId")',
+                'steer_payload.get("text") == intent_correction',
+                'intent_snapshot.get("savedPendingSteeringNotes", [])[-1:] == [intent_correction]',
+                'terminal_steering.get("receiptStatus") == "superseded-plan"',
+            ),
+        ),
+        "browser regression preserves an intent correction across identity, saved state, application proof, and stale-draft replacement",
+    )
+    add_check(
+        checks,
+        "live-steering-application-visibility-contract",
+        contains_all(
+            app_text,
+            (
+                "function mergeLiveSteeringReceipt(pending, value = {})",
+                "function liveSteeringReceiptLabel(message)",
+                "function buildLiveSteeringReceipt(message)",
+                'if (event.type === "steering")',
+                'setRunState("Steer received · replacing earlier plan"',
+                'setRunState("Steering not applied"',
+                'setRunState("Complete · earlier plan replaced"',
+                'pending.liveSteering?.status === "superseded-plan"',
+                'if (status === "cancelled") return "Steering stopped with the run";',
+            ),
+        )
+        and contains_all(
+            styles_text,
+            (
+                ".steering-receipt {",
+                ".steering-receipt.error {",
+            ),
+        ),
+        "accepted steering, plan replacement, terminal application, and revision mismatch have persistent visible and accessible states",
+    )
+    add_check(
+        checks,
+        "truthful-source-provenance-visibility-contract",
+        contains_all(
+            app_text,
+            (
+                "function applyEvidenceStatus(message, payload = {})",
+                "payload.answerEnvelope?.evidence_provenance",
+                "function evidenceReceiptState(message)",
+                "function buildEvidenceReceipt(message)",
+                "Source not verified · link was not checked",
+                "Evidence needed · no checked source",
+                "function terminalRunState(message)",
+                'status: "evidence-needed"',
+            ),
+        )
+        and contains_all(
+            styles_text,
+            (
+                ".evidence-receipt {",
+                ".evidence-receipt.verified {",
+            ),
+        )
+        and contains_all(
+            browser_smoke_text,
+            (
+                "unverified-source-receipt-visible",
+                "unverified-source-status-and-task-state-truthful",
+                "verifiedReceiptCount",
+                "unreceiptedAnswerUrls",
+            ),
+        ),
+        "required evidence and unreceipted answer URLs remain visible, accessible, and persisted instead of collapsing into generic completion",
+    )
+    add_check(
+        checks,
+        "typed-local-action-receipt-visibility-contract",
+        contains_all(
+            app_text,
+            (
+                "function validateLocalActionReceipts(value, expectedRunId)",
+                'return fail("run-lineage-mismatch")',
+                'fail("sidecar-proof-inconsistent")',
+                "function applyLocalActionReceipts(message, value, expectedRunId)",
+                "function localActionReceiptState(message)",
+                "function buildLocalActionReceipt(message)",
+                'Object.prototype.hasOwnProperty.call(event, "localActionReceipts")',
+                'applyLocalActionReceipts(pending, event.localActionReceipts, pending.runId || "")',
+                'label: "Local change applied · controller proof verified"',
+                'label: "No change needed · requested state verified"',
+                'label: "Local change rolled back · restoration verified"',
+                'label: "Server reported local change applied · proof incomplete"',
+                'label: "Server reported local change failed · completion not claimed"',
+                'label: "Local action status unavailable · receipt rejected"',
+            ),
+        )
+        and contains_all(
+            styles_text,
+            (
+                ".local-action-receipt {",
+                ".local-action-receipt.rolled-back {",
+                ".local-action-receipt.reported {",
+                ".local-action-receipt.failed,",
+                ".local-action-receipt.invalid {",
+            ),
+        )
+        and contains_all(
+            browser_smoke_text,
+            (
+                "local-action-applied-receipt-visible-and-persisted",
+                "local-action-stale-receipt-fails-closed",
+                "local-action-forged-proof-never-renders-verified",
+                'savedLocalActionOutcome',
+                'localActionReceiptError',
+            ),
+        ),
+        "run-bound controller receipts render and persist explicit applied/no-op/rollback/failure state while stale or inconsistent packets fail closed",
+    )
+    add_check(
+        checks,
+        "cached-satisfaction-steering-cancel-truth-contract",
+        contains_all(
+            app_text,
+            (
+                "function clearLocalActionReceiptsForIncompleteSteering(message)",
+                'if (!message?.steeringIncomplete) return false;',
+                'if (message?.steeringIncomplete) return null;',
+                'if (!clearLocalActionReceiptsForIncompleteSteering(pending))',
+                "clearLocalActionReceiptsForIncompleteSteering(pending);",
+                'resetAssistantResultMetadata(pending, { keepRoute: false });',
+            ),
+        )
+        and contains_all(
+            cached_satisfaction_ui_text,
+            (
+                "ordinary-p178-noop-remains-verified",
+                "unapplied-steer-clears-cached-sidecar",
+                "renderer-defensively-suppresses-unapplied-steer",
+                "completed-steering-does-not-clear-valid-noop",
+                "cache-diagnostics-do-not-enter-sidecar-state",
+            ),
+        )
+        and contains_all(
+            browser_smoke_text,
+            (
+                "cache-candidate-cancel-has-no-terminal-receipt",
+                "unapplied-steer-suppresses-adversarial-cached-receipt",
+                "new-intent-final-does-not-revive-stale-cache-receipt",
+            ),
+        ),
+        "cache diagnostics remain non-terminal while cancellation and unapplied steering suppress stale local-action completion receipts",
+    )
+    add_check(
+        checks,
+        "truthful-local-action-retry-contract",
+        contains_all(
+            app_text,
+            (
+                "function localActionRetryEligible(message)",
+                "function revalidateSavedLocalActionReceipts(savedState)",
+                "const savedReceiptRevalidation = revalidateSavedLocalActionReceipts(state);",
+                "function localActionRetryPlan(thread, assistantMessage)",
+                "function normalizeLocalActionRetryAttachment(value)",
+                "function renewLocalActionRetryAttachments(attachments)",
+                "async function localActionRetryAttachmentsAvailable(attachments)",
+                'body: JSON.stringify({ path: attachment.path, mode: "reveal", dryRun: true })',
+                'sourceMessageId: sourceMessage.id',
+                'retryOfSourceMessageId = composerIntent.kind === "retry"',
+                'composerIntent = {\n      kind: "retry"',
+                'retry.textContent = localActionRetry ? "Retry action" : "Try again"',
+                'retry.setAttribute("aria-disabled", "true")',
+                'refusal: "effective-intent-unavailable"',
+                'refuseLocalActionRetry(message, "run-active")',
+            ),
+        )
+        and contains_all(
+            styles_text,
+            (
+                '.feedback-button[aria-disabled="true"] {',
+                "cursor: not-allowed;",
+            ),
+        )
+        and contains_all(
+            local_action_retry_ui_text,
+            (
+                "failed-run-bound-receipt-is-eligible",
+                "proof-incomplete-receipt-with-independent-failure-is-eligible",
+                "forged-success-is-suppressed",
+                "attachment-id-is-renewed-with-old-id-only-as-provenance",
+                "intervening-steer-refuses-stale-replay",
+                "attachment-availability-uses-dry-run-reveal",
+            ),
+        )
+        and contains_all(
+            browser_smoke_text,
+            (
+                "local-action-retry-replays-exact-prompt-attachments-with-fresh-lineage",
+                "local-action-retry-success-forgery-and-concurrency-suppressed",
+                "local-action-retry-keyboard-accessible-and-persistent",
+                "local-action-retry-missing-evidence-refuses-visibly",
+                "local-action-retry-applied-steer-refuses-stale-intent",
+            ),
+        ),
+        "terminal unsuccessful run-bound local actions expose one explicit resend with fresh lineage, bounded attachments, dry-run availability checks, and fail-closed recovery",
+    )
+    add_check(
+        checks,
+        "hash-bound-feedback-turn-receipt-p193",
+        contains_all(
+            app_text,
+            (
+                "if (message?.id) serialized.messageId",
+                "serialized.feedbackTurnReceipt = message.feedbackTurnReceipt",
+                "sourceMessageId: sourceMessage.id",
+                "pending.feedbackTurnReceipt = (",
+                'const note = "";',
+                "feedbackTurnReceipt: message.feedbackTurnReceipt || {}",
+            ),
+        )
+        and "function defaultFixNoteForMessage" not in app_text
+        and contains_all(
+            feedback_turn_receipt_ui_text,
+            (
+                "assistant-serialization-preserves-issued-receipt",
+                "feedback-round-trips-exact-lineage",
+                "bare-fix-does-not-synthesize-a-note",
+                "receipt-is-hidden-metadata-not-rendered-copy",
+            ),
+        ),
+        "feedback round-trips an invisible run/source/request/answer/task receipt and bare Fix never invents correction prose",
+    )
+    add_check(
+        checks,
+        "typed-answer-envelope-terminal-state-contract",
+        contains_all(
+            app_text,
+            (
+                "function terminalEnvelopeState(message)",
+                'message?.answerEnvelope?.status',
+                'label: "Bounded · limits apply"',
+                'label: "Blocked · action needed"',
+                'label: "Failed · retry available"',
+                "function buildTerminalEnvelopeReceipt(message)",
+                'receipt.setAttribute("aria-label", `Answer status: ${state.receiptLabel}`)',
+                'label: "Bounded · evidence needed"',
+                'setRunState(terminalState.label, terminalState.tone, terminalState.stage)',
+            ),
+        )
+        and contains_all(
+            styles_text,
+            (
+                ".terminal-envelope-receipt {",
+                ".terminal-envelope-receipt.blocked,",
+                ".terminal-envelope-receipt.failed {",
+            ),
+        )
+        and contains_all(
+            browser_smoke_text,
+            (
+                '"status": "bounded"',
+                '"typed-envelope-blocked-failed-remain-distinct"',
+                'savedEnvelopeStatus',
+                '"Bounded · evidence needed"',
+                '"Blocked · action needed"',
+                '"Failed · retry available"',
+            ),
+        ),
+        "typed bounded, blocked, and failed envelopes drive distinct persistent and accessible terminal states without inference from return code or evidence-ledger shape",
+    )
+    add_check(
+        checks,
+        "cross-domain-result-lineage-isolation-contract",
+        contains_all(
+            app_text,
+            (
+                "function serializeConversationMessage(message)",
+                "function serializeConversationMessages(messages)",
+                "messages: serializeConversationMessages(thread.messages)",
+                "function resetComposerLineage()",
+                "if (thread.id !== state.activeThreadId) resetComposerLineage();",
+                "function resetAssistantResultMetadata(message, options = {})",
+                "resetAssistantResultMetadata(pending, { keepRoute: !event.route })",
+                'setRunState("Working · reviewing draft", "warning", "reviewing-draft")',
+                "activeRun.withheldPartial = true",
+                'addThought(pending, "A draft is being reviewed before it is shown.")',
+                'if (event.route && typeof event.route === "object") pending.route = event.route;',
+                'message?.role !== "assistant" || message.running || message.provisional',
+            ),
+        )
+        and "pending.text = event.text || pending.text || \"\";" not in app_text
+        and contains_all(
+            browser_smoke_text,
+            (
+                '"task-switch-clears-edit-attachment-lineage"',
+                '"partial-assistant-withheld-from-dom-and-storage"',
+                '"partial-assistant-reload-cannot-become-terminal-answer"',
+                '"cross-domain-followup-transport-is-semantic-only"',
+                '"cross-domain-final-result-owns-only-current-receipts"',
+                "UNSAFE_PARTIAL_DOMAIN_DRAFT_MUST_NOT_RENDER",
+                "forbidden_result_keys",
+            ),
+        ),
+        "task switches clear composer lineage, run transport carries only semantic history, partial drafts stay outside visible/saved state, and authoritative new-domain results replace prior receipts",
     )
     add_check(
         checks,
@@ -124,14 +442,101 @@ def audit(root):
             (
                 "window.webkit.messageHandlers.codexOpenFiles.postMessage",
                 "function attachmentFromNativeFile(file)",
+                'thread?.historyProjectId || ""',
+                "const workspace = String(els.cwdInput?.value || thread?.cwd || config.cwd || \"\").trim();",
+                'async function handleNativeFilePickerIntake(timeoutMs = 120000)',
+                'const intake = beginAttachmentIntake("Choosing files", "attachment-choosing")',
+                "const files = await openNativeFilePicker(intake, timeoutMs);",
+                "await handleNativeFiles(files, intake);",
+                "async function handleNativeFiles(files, intake)",
+                "const staged = normalizeAttachmentList(selected.map(attachmentFromNativeFile));",
+                "if (!attachmentIntakeOriginCurrent(intake))",
+                "pendingAttachments = mergeAttachmentLists(pendingAttachments, staged);",
+                '"Attachment selection cancelled"',
+                '"Attachment picker failed · retry available"',
                 'source: "native-local-path"',
                 "copied: false",
                 "copied: source === \"native-local-path\" ? false : attachment.copied !== false",
                 "Use the native + button so Codex can reference the local path instead of uploading a copy.",
             ),
         )
+        and contains_all(
+            browser_smoke_text,
+            (
+                '"native-picker-callback-is-origin-bound-and-local-path-only"',
+                'window.codexReceiveNativeFiles({',
+                '"success-committed-once"',
+                '"stale-origin-rejected"',
+                '"cancel-status-distinct"',
+                '"error-status-truthful"',
+                '"timeout-late-callback-ignored"',
+                '"native-path-never-uploaded"',
+            ),
+        )
         and contains_all(server_text, ("/api/files/attach", '"source": "native-local-path"')),
-        "native app plus-button attachments preserve local absolute paths instead of forcing large browser uploads",
+        "native plus-button intake is origin-bound and atomically preserves absolute non-copied local paths without browser upload",
+    )
+    add_check(
+        checks,
+        "atomic-browser-attachment-intake-contract",
+        contains_all(
+            app_text,
+            (
+                "let activeAttachmentIntake = null;",
+                "function attachmentIntakeLineageKey()",
+                "function attachmentIntakeOriginCurrent(intake)",
+                "function renderAttachmentIntakeControls()",
+                'function beginAttachmentIntake(text = "Attaching files", stage = "attachment-uploading")',
+                "function finishAttachmentIntake(intake, text, tone, stage)",
+                'setRunState(text, "warning", stage)',
+                "const uploaded = [];",
+                "if (!attachmentIntakeOriginCurrent(intake))",
+                "pendingAttachments = mergeAttachmentLists(pendingAttachments, uploaded);",
+                'setRunState("Attachment upload still in progress", "warning", "attachment-uploading")',
+                '"Attachment failed · retry available", "error", "attachment-failed"',
+                "if (activeController || attachmentIntakeBusy()) return;",
+            ),
+        )
+        and contains_all(
+            browser_smoke_text,
+            (
+                'page.route("**/api/files/upload", hold_attachment_upload)',
+                '"attachment-upload-completes-before-send-and-stays-on-origin-turn"',
+                '"held-send-disabled": bool(blocked_attachment_intake.get("sendDisabled"))',
+                '"held-origin-thread-unchanged": blocked_attachment_intake.get("activeThreadId")',
+                '"payload-one-attachment": len(committed_attachments) == 1',
+                '"completed-pending-attachments-empty": completed_attachment_intake.get("pendingCount") == 0',
+                '"failed-status-stage": failed_attachment_intake.get("statusStage") == "attachment-failed"',
+                'checks[-1]["predicateEvidence"] = attachment_predicates',
+                'checks[-1]["failedPredicates"] = attachment_failed_predicates',
+                'checks[-1]["snapshots"] = attachment_snapshots',
+            ),
+        ),
+        "browser attachment intake is origin-bound and atomic across held upload, send, task changes, exact-once commit, tray cleanup, and failure recovery",
+    )
+    add_check(
+        checks,
+        "native-local-service-auto-reconnect",
+        contains_all(
+            native_text,
+            (
+                "reconnectMonitorActive",
+                "applicationPageLoadPending",
+                "beginReconnectMonitoring",
+                "scheduleReconnectAttempt",
+                "loadReconnectPage",
+                "didFailProvisionalNavigation",
+                "didFailNavigation",
+                "This window will reconnect automatically when it is ready.",
+                "NSURLRequestReloadIgnoringLocalCacheData",
+                "ephemeralSessionConfiguration",
+                "forHTTPHeaderField:@\"Connection\"",
+                "status >= 200 && status < 300",
+                "self.applicationPageLoadPending && [self isLocalServiceURL:webView.URL]",
+            ),
+        )
+        and "Try restarting the app" not in native_text,
+        "native wrapper recovers from startup and localhost navigation failures without requiring a manual relaunch",
     )
     add_check(
         checks,
@@ -169,6 +574,31 @@ def audit(root):
     )
     add_check(
         checks,
+        "clickable-external-source-contract",
+        contains_all(
+            app_text,
+            (
+                "const WEB_URL_INLINE_PATTERN",
+                "function splitWebUrlToken(value)",
+                "function buildExternalLink(url, label = \"\")",
+                "function appendTextWithDetectedLinks(parent, text)",
+                'anchor.target = "_blank"',
+                'anchor.rel = "noopener noreferrer"',
+                'anchor.title = "Open in browser"',
+            ),
+        )
+        and contains_all(
+            native_text,
+            (
+                "WKNavigationTypeLinkActivated",
+                "[[NSWorkspace sharedWorkspace] openURL:url]",
+                "WKNavigationActionPolicyCancel",
+            ),
+        ),
+        "plain and Markdown HTTP(S) source URLs render as safe links and the native app opens them in the browser",
+    )
+    add_check(
+        checks,
         "core-controls-present",
         contains_all(
             index_text,
@@ -184,6 +614,63 @@ def audit(root):
     )
     add_check(
         checks,
+        "calm-conversation-presentation-contract",
+        contains_all(
+            app_text,
+            (
+                "thoughts.open = false;",
+                "formatElapsedCompact(elapsedMs)",
+                'els.runState.dataset.elapsedLabel = formatElapsedCompact(elapsedMs);',
+                'anchor.dataset.externalSource = "true";',
+            ),
+        )
+        and 'class="thread-heading"' in index_text
+        and contains_all(
+            styles_text,
+            (
+                '.run-state[data-elapsed-label]::after',
+                '.answer-text .external-source-link::after',
+                '.app-shell.rail-compact .monitor-panel',
+                '.app-shell,\n  .app-shell.log-collapsed,\n  .app-shell.rail-compact {',
+                '-webkit-line-clamp: 2;',
+            ),
+        ),
+        "work notes stay collapsed, honest elapsed time is visible, links read as links, the compact rail stays quiet, and phone titles get two lines",
+    )
+    add_check(
+        checks,
+        "saved-task-first-paint-contract",
+        contains_all(
+            app_text,
+            (
+                "let configReady = false;",
+                "renderSavedTaskShellBeforeConfig();",
+                "function renderSavedTaskShellBeforeConfig()",
+                'els.appShell.dataset.bootState = "restored";',
+                'els.appShell.dataset.bootState = "ready";',
+                'els.appShell.setAttribute("aria-busy", "false");',
+                'heading.textContent = "Loading local inventory…";',
+            ),
+        )
+        and contains_all(
+            index_text,
+            (
+                'id="appShell" data-boot-state="loading" aria-busy="true"',
+                'id="bootStatus" role="status" aria-live="polite"',
+                "Loading saved workspace…",
+            ),
+        )
+        and contains_all(
+            styles_text,
+            (
+                '.app-shell[data-boot-state="loading"] > :not(.boot-status)',
+                '.app-shell[data-boot-state="loading"] > .boot-status',
+            ),
+        ),
+        "saved chats render synchronously before config hydration while first-time startup shows an honest loading state instead of a fake empty task",
+    )
+    add_check(
+        checks,
         "genuine-run-progress-contract",
         "workingIntroForPrompt" not in app_text
         and "I’m on it, Tinman." not in app_text
@@ -191,6 +678,70 @@ def audit(root):
         and app_text.count('role: "assistant",\n    text: "",\n    running: true') >= 2
         and 'message.text || (message.thoughts?.length ? "" : "Working...")' in app_text,
         "pending assistant messages use a neutral working state until genuine server progress or answer text arrives",
+    )
+    add_check(
+        checks,
+        "server-owned-assistant-prose-contract",
+        'renderMarkdown(container, text);' in app_text
+        and "conversationalAssistantText" not in app_text
+        and '.replace(/(^|\\n)This is why:/' not in app_text
+        and '.replace(/(^|\\n)You should also consider:/' not in app_text,
+        "the browser preserves server-authored assistant prose instead of replacing stock phrases at render time",
+    )
+    add_check(
+        checks,
+        "shared-server-recovery-contract",
+        contains_all(
+            app_text,
+            (
+                "async function recoverRunFailure(thread, pending, error)",
+                'fetch("/api/recover"',
+                "Fix this requested a fresh server-owned recovery pass.",
+                "recoverRunFailure(thread, message",
+                "Use Send again to retry from this saved conversation.",
+            ),
+        )
+        and "function isAeroCfdRecoveryPrompt" not in app_text
+        and "function recoverWithEngineeringTool" not in app_text
+        and "autoRecoverStaleAeroFailures" not in app_text,
+        "normal runs and Fix this share server-owned recovery without browser keyword routing or domain-specific auto-retries",
+    )
+    add_check(
+        checks,
+        "truthful-actionable-run-recovery-contract",
+        contains_all(
+            app_text,
+            (
+                'message.recoveryState = "interrupted";',
+                'pending.recoveryState = "recovered";',
+                'pending.recoveryState = "unavailable";',
+                'recoveredFromFailure ? "Recovered" : "Recovery unavailable"',
+                "function isRetryableAssistantMessage(message)",
+                "function retrySourceMessage(thread, assistantMessage)",
+                "async function retryAssistantMessage(messageId)",
+                "retrying the saved question with its original attachments",
+                "retry.dataset.retryMessageId = message.id;",
+                'retry.textContent = localActionRetry ? "Retry action" : "Try again";',
+            ),
+        )
+        and ".feedback-button.recovery" in styles_text,
+        "interrupted and unrecovered runs expose one-click exact-question retry while browser fallback is not mislabeled as recovered",
+    )
+    add_check(
+        checks,
+        "admin-refresh-single-flight-reload-safety",
+        contains_all(
+            app_text,
+            (
+                "let adminRefreshPromise = null;",
+                "if (adminRefreshPromise) return adminRefreshPromise;",
+                "adminRefreshPromise = (async () => {",
+                "return adminRefreshPromise.finally(() => {",
+                "adminRefreshPromise = null;",
+            ),
+        )
+        and "Join the boot-time admin refresh before seeding storage" in browser_smoke_text,
+        "boot, navigation, and reload preparation join one admin refresh so an older callback cannot overwrite newer persisted task state",
     )
     add_check(
         checks,
@@ -370,7 +921,7 @@ def audit(root):
             (
                 '"suite": "expertise-confidence-p5"',
                 '"current-source-is-grounded"',
-                '"explicit-inference-is-bounded"',
+                '"explicit-inference-without-source-needs-evidence"',
                 '"unsupported-current-claim-needs-evidence"',
             ),
         ),
@@ -955,6 +1506,7 @@ def audit(root):
         contains_all(
             server_text,
             (
+                "def capitalize_prose_line_starts(text):",
                 "def soften_conversational_scaffold(text, messages=None):",
                 "def conversational_scaffold_variety_p27_report(",
                 "def conversational_scaffold_variety_p27_synthetic_check():",
@@ -962,6 +1514,7 @@ def audit(root):
                 'This is why|Why|Reasoning|Evidence',
                 'You should also consider|Consider|Caveats?',
                 "apply_response_composer(coached, composer, messages=messages)",
+                '"response:standalone-knowledge-primary-boundary"',
             ),
         )
         and contains_all(
@@ -970,10 +1523,11 @@ def audit(root):
                 '"suite": "conversational-scaffold-variety-p27"',
                 '"repeated-softened-scaffold-varies"',
                 '"fresh-conversation-keeps-clear-defaults"',
+                '"python-fence-preserves-executable-syntax"',
                 '"It handles UV and heat better outdoors."',
             ),
         ),
-        "conversational answers remove repeated reason/caveat scaffolds while preserving the technical explanation and practical boundary",
+            "visible answers remove repeated legacy wrappers across response modes while preserving technical explanations, practical boundaries, headings, and fenced code",
     )
     interaction_director_fixture = root / "tests" / "interaction_director_p1_cases.json"
     interaction_director_text = interaction_director_fixture.read_text(encoding="utf-8") if interaction_director_fixture.exists() else ""

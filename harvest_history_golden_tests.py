@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import import_codex_history
+from golden_test_contract import normalize_golden_test_presentation, semantic_required_terms
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -1577,6 +1578,12 @@ def normalize_terms(terms, limit=8):
         if len(clean) >= limit:
             break
     return clean
+
+
+def normalize_required_terms(terms, limit=8):
+    """Keep answer-substance slots free of presentation-only labels."""
+
+    return semantic_required_terms(terms, limit=limit)
 
 
 def is_wix_email_login_recovery_prompt(text):
@@ -6830,7 +6837,7 @@ def required_terms_for_prompt(text, project_id=""):
     local_wix_url_plan = "wix" in lower and any(term in lower for term in ("branding of the urls", "brand the urls", "branding urls", "url branding"))
     if (("web" in lower and not local_website_design and not local_wix_url_plan) or "price" in lower or "availability" in lower):
         required.append("http")
-    return list(dict.fromkeys(required))[:6]
+    return normalize_required_terms(required, limit=6)
 
 
 def golden_test_from_prompt(prompt, source):
@@ -6867,7 +6874,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Codex"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "preference"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "preference"], limit=8)
         test["requiredContractProof"] = ["direct answer", "why/caveat shape"]
         test["anyTerms"] = normalize_terms(["Codex", "Red Codex", "Red"], limit=6)
         test["requiresSource"] = False
@@ -6881,7 +6888,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["No internal memory upgrade"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "unified memory", "AI"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "unified memory", "AI"], limit=8)
         test["requiredContractProof"] = ["local hardware profile", "unified memory", "no internal memory upgrade", "AI performance"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -6895,7 +6902,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Customer Login", "Pilot Login"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "https://www.tinneyaviation.com/"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "https://www.tinneyaviation.com/"], limit=8)
         test["requiredContractProof"] = ["https://www.tinneyaviation.com/", "Customer Login", "Pilot Login", "Flight Ops Tracker", "role-based"]
         test["requiresSource"] = True
         test["webSearch"] = "live"
@@ -6908,7 +6915,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["deactivate"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "deactivate", ".venv"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "deactivate", ".venv"], limit=8)
         test["requiredContractProof"] = ["deactivate", "(.venv)", "new shell fallback"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -6920,7 +6927,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractKind"] = "Embedded/Linux image port"
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = False
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "RatOS", "Pi 5", "candidate"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "RatOS", "Pi 5", "candidate"], limit=8)
         test["requiredContractProof"] = ["source image", "storage", "Pi 5 builder", "candidate image", "boot-tested"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -6932,7 +6939,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "locally first"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "GitHub", "attribution", "privacy", "package health"], limit=10)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "GitHub", "attribution", "privacy", "package health"], limit=10)
         test["requiredContractProof"] = ["local staging", "redact secrets", "attribution", "package health", "push approval"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -6945,7 +6952,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Flight Ops"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "aircraft type", "time owed", "admin"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "aircraft type", "time owed", "admin"], limit=8)
         test["requiredContractProof"] = ["aircraft type", "time owed", "admin edit", "existing credits", "verification"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -6957,7 +6964,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["B", "Crack"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "crack", "scratch", "gouge"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "crack", "scratch", "gouge"], limit=8)
         test["requiredContractProof"] = ["B. Crack", "opening or split", "scratch", "gouge"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -6970,7 +6977,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
         test["requiredContractProof"] = ["Flight Ops", "feature", "UI/data surface", "verification"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -6983,7 +6990,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Codex"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "slicer", "filament", "dropdown"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "slicer", "filament", "dropdown"], limit=8)
         test["requiredContractProof"] = ["Codex vendor/manufacturer", "filament preset library", "dropdown", "installed app visibility"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -6996,7 +7003,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["no", "Usually no", "Mainsail"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Mainsail", "SSH"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Mainsail", "SSH"], limit=8)
         test["requiredContractProof"] = ["Mainsail", "Linux SSH", "password not exposed", "reset or SSH key"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7009,7 +7016,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "idle"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "restart", "Pi"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "restart", "Pi"], limit=8)
         test["requiredContractProof"] = ["idle", "heaters", "Moonraker", "Klipper", "UI"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7022,7 +7029,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "state-aware"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "heat soak", "recent history", "stability"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "heat soak", "recent history", "stability"], limit=8)
         test["requiredContractProof"] = ["bed/chamber targets", "60-second mesh loop", "mesh delta", "completion threshold", "Klipper macro/status basis"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7035,7 +7042,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "curated"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "GitHub", "redaction", "package health"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "GitHub", "redaction", "package health"], limit=8)
         test["requiredContractProof"] = ["curated public repository", "redaction", "attribution", "package health", "push approval"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7047,7 +7054,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "SSH"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "SSH", "logs", "target"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "SSH", "logs", "target"], limit=8)
         test["requiredContractProof"] = ["SSH", "logs", "target host", "read-only", "not guessing"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7060,7 +7067,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Prusa"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Prusa", "API key", "SSH"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Prusa", "API key", "SSH"], limit=8)
         test["requiredContractProof"] = ["Prusa", "API key", "SSH", "credential", "redacted or local storage"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7073,7 +7080,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "need"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "image", "file"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "image", "file"], limit=8)
         test["requiredContractProof"] = ["actual image file", "edited image", "source path", "visual check"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7086,7 +7093,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Prusa"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Prusa", "Klipper"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Prusa", "Klipper"], limit=8)
         test["requiredContractProof"] = ["Prusa", "Klipper", "community conversions", "board/pin map", "rollback"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7099,7 +7106,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Prusa Core One"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Prusa", "profile", "calibration", "https://"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Prusa", "profile", "calibration", "https://"], limit=8)
         test["requiredContractProof"] = ["Prusa Core One", "Core One L HF", "official Prusa profile", "calibration"]
         test["requiresSource"] = True
         test["webSearch"] = "live"
@@ -7112,7 +7119,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Flight Ops"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "customers", "users", "database"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "customers", "users", "database"], limit=8)
         test["requiredContractProof"] = ["customers", "users", "database backup", "customer-to-user link", "Users page query"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7125,7 +7132,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["promo", "volatile"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "promo", "supplier"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "promo", "supplier"], limit=8)
         test["requiredContractProof"] = ["promo code", "volatile", "supplier site", "newsletter", "sales quote"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7138,7 +7145,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["not expose", "Tailscale"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Tailscale", "auth"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Tailscale", "auth"], limit=8)
         test["requiredContractProof"] = ["Tailscale", "credentials", "tailscale status", "auth flow", "auth key"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7151,7 +7158,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "spreadsheet"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "landscape", "green", "yellow", "red"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "landscape", "green", "yellow", "red"], limit=8)
         test["requiredContractProof"] = ["landscape", "one page", "green/yellow/red", "report date", "print preview"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7164,7 +7171,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "maintenance reserve"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "title page", "fixed cost"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "title page", "fixed cost"], limit=8)
         test["requiredContractProof"] = ["maintenance reserve", "title page", "total fixed cost", "report-only", "PDF verification"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7177,7 +7184,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["recommendation", "Cosmos"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "firmware", "rollback"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "firmware", "rollback"], limit=8)
         test["requiredContractProof"] = ["Centauri Carbon", "Cosmos", "release notes", "backup", "rollback"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7190,7 +7197,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Sovol"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Sovol", "mainline Klipper", "backup"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Sovol", "mainline Klipper", "backup"], limit=8)
         test["requiredContractProof"] = ["Sovol", "mainline Klipper", "backup", "MCU/pin map", "rollback"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7203,7 +7210,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "RFID"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "RFID", "macro"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "RFID", "macro"], limit=8)
         test["requiredContractProof"] = ["box macros", "RFID", "receiver/service", "read-only", "Klipper restart caveat"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7216,7 +7223,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["log", "Z-offset"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Nozzle not hot enough", "probe"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Nozzle not hot enough", "probe"], limit=8)
         test["requiredContractProof"] = ["probe more than ten times", "Nozzle not hot enough", "Z-offset", "converge", "do not rerun blindly"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7229,7 +7236,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Rat Rig"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "CoreXY", "T0", "T1"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "CoreXY", "T0", "T1"], limit=8)
         test["requiredContractProof"] = ["Rat Rig", "CoreXY", "X/Y sign", "T0/T1", "upper/lower"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7242,7 +7249,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["80 C", "45 C"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "PETG-CF", "SV08 Max"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "PETG-CF", "SV08 Max"], limit=8)
         test["requiredContractProof"] = ["80 C bed", "45 C chamber", "PETG-CF", "SV08 Max", "profile verification"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7255,7 +7262,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Excel"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "PDF", "formulas", "Hobbs"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "PDF", "formulas", "Hobbs"], limit=8)
         test["requiredContractProof"] = ["PDF values", "Excel workbook", "formulas", "remaining", "Hobbs"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7268,7 +7275,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "chamber heaters"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "belt frequency", "chamber heaters", "inop"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "belt frequency", "chamber heaters", "inop"], limit=8)
         test["requiredContractProof"] = ["Rat Rig", "belt frequency", "chamber heaters inop", "do not use", "interpret data"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7281,7 +7288,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "CANCEL_PRINT"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "CANCEL_PRINT", "printer"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "CANCEL_PRINT", "printer"], limit=8)
         test["requiredContractProof"] = ["CANCEL_PRINT", "target printer", "live-machine", "heaters", "Moonraker"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7294,7 +7301,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "dual Z probe"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Klipper", "credits", "GitHub"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Klipper", "credits", "GitHub"], limit=8)
         test["requiredContractProof"] = ["dual Z probe", "credits", "changes and advantages", "local diff", "push approval"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7307,7 +7314,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Qidi", "Moonraker"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Qidi Plus 4", "Moonraker", "VPN"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Qidi Plus 4", "Moonraker", "VPN"], limit=8)
         test["requiredContractProof"] = ["Qidi Plus 4", "Moonraker", "VPN", "nozzle actual/target", "exact blocker"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7320,7 +7327,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Qidi", "Beacon"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Qidi", "Beacon", "bed mesh", "idle"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Qidi", "Beacon", "bed mesh", "idle"], limit=8)
         test["requiredContractProof"] = ["Qidi", "Beacon", "bed mesh", "idle", "saved mesh or exact blocker"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7333,7 +7340,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Orca Codex", "host mapping"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Orca Codex", "Snapmaker", "Qidi Plus 4", "restart"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Orca Codex", "Snapmaker", "Qidi Plus 4", "restart"], limit=8)
         test["requiredContractProof"] = ["Orca Codex", "host mapping", "Snapmaker", "Qidi Plus 4", "survive restart"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7346,7 +7353,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "input shaper"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Qidi", "input shaper", "backup"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Qidi", "input shaper", "backup"], limit=8)
         test["requiredContractProof"] = ["Qidi profiles", "input shaper", "backup", "acceleration", "validation"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7359,7 +7366,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "filament"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "GitHub", "profiles", "push approval"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "GitHub", "profiles", "push approval"], limit=8)
         test["requiredContractProof"] = ["filament profiles", "process profiles", "profile linter", "installed-app visibility", "push approval"]
         test["requiresSource"] = True
         test["webSearch"] = "disabled"
@@ -7372,7 +7379,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Qidi"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "40 percent", "0.4", "config"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "40 percent", "0.4", "config"], limit=8)
         test["requiredContractProof"] = ["Qidi", "chamber heater", "40 percent", "max_power: 0.4", "read-only config"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7385,7 +7392,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "video"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "YouTube", "transcript", "source"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "YouTube", "transcript", "source"], limit=8)
         test["requiredContractProof"] = ["YouTube", "video ID or URL", "transcript", "source URL", "metadata"]
         test["requiresSource"] = True
         test["webSearch"] = "live"
@@ -7398,7 +7405,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Codex CLI UI"]
-        test["requiredTerms"] = normalize_terms(["sidebar", "chat bar", "attachments", "clickable outputs", "steer", "verify"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["sidebar", "chat bar", "attachments", "clickable outputs", "steer", "verify"], limit=8)
         test["requiredContractProof"] = ["standalone macOS app", "sidebar/projects/chats", "chat bar controls", "attachments", "clickable outputs", "steer", "verification gates"]
         test["requiresSource"] = True
         test["webSearch"] = "disabled"
@@ -7411,7 +7418,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Next", "Klipper"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Klipper", "Beacon", "source URL"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Klipper", "Beacon", "source URL"], limit=8)
         test["requiredContractProof"] = ["Klipper", "Beacon", "new issue", "discussion", "fork", "logs/config", "source URL"]
         test["requiresSource"] = True
         test["webSearch"] = "live"
@@ -7424,7 +7431,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "restart"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Orca Codex", "PAKV", "filament"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Orca Codex", "PAKV", "filament"], limit=8)
         test["requiredContractProof"] = ["Orca Codex", "PAKV", "restart or refresh", "filament preset visibility"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7437,7 +7444,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "GitHub"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "GitHub", "account", "https://"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "GitHub", "account", "https://"], limit=8)
         test["requiredContractProof"] = ["GitHub account", "publish repository", "source URL"]
         test["requiresSource"] = True
         test["webSearch"] = "live"
@@ -7450,7 +7457,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Not unless", "Klipper"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Rat Rig", "Klipper"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Rat Rig", "Klipper"], limit=8)
         test["requiredContractProof"] = ["Rat Rig", "Klipper", "local app/profile versus live printer config", "verification path"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7463,7 +7470,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "bottom"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "upper-left", "bottom", "printer"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "upper-left", "bottom", "printer"], limit=8)
         test["requiredContractProof"] = ["upper-left printer selection box", "bottom printer box", "preserve layout", "UI cleanup"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7476,7 +7483,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["PPA-CF", "PCTG-CF"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Qidi Plus 4", "hot-end mount", "PPA-CF", "PCTG-CF"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Qidi Plus 4", "hot-end mount", "PPA-CF", "PCTG-CF"], limit=8)
         test["requiredContractProof"] = ["PPA-CF", "PCTG-CF", "hot-end mount", "heat resistance", "creep", "drying", "metal insert"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7489,7 +7496,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "website"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "preview", "rollback", "migration", "http"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "preview", "rollback", "migration", "http"], limit=8)
         test["requiredContractProof"] = ["current website", "backup", "staging", "preview URL", "rollback", "migration"]
         test["requiresSource"] = True
         test["webSearch"] = "disabled"
@@ -7502,7 +7509,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "filament"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "TinmanCC", "TinmanCC2", "switch_pin", "Moonraker"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "TinmanCC", "TinmanCC2", "switch_pin", "Moonraker"], limit=8)
         test["requiredContractProof"] = ["TinmanCC", "TinmanCC2", "filament_detected", "QUERY_FILAMENT_SENSOR", "switch_pin", "read-only", "Moonraker"]
         test["requiresSource"] = True
         test["webSearch"] = "disabled"
@@ -7515,7 +7522,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["True"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "aircraft", "water", "corrosion"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "aircraft", "water", "corrosion"], limit=8)
         test["requiredContractProof"] = ["True", "aircraft", "water", "drain", "corrosion", "freezing"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7528,7 +7535,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Flight Ops"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Flight Ops Tracker", "organized"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Flight Ops Tracker", "organized"], limit=8)
         test["requiredContractProof"] = ["Flight Ops Tracker", "organized", "project", "repo", "production", "smoke tests"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7541,7 +7548,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "rounding the exhaust"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "exit area", "blade clearance"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "exit area", "blade clearance"], limit=8)
         test["requiredContractProof"] = ["rounding the exhaust", "propeller", "exit area", "blade clearance", "CFD or test"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7565,7 +7572,7 @@ def golden_test_from_prompt(prompt, source):
             test["contextDependent"] = False
             test["directAnswer"] = True
             test["directTerms"] = ["Yes", "still working"]
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "checkpoint", "next"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "checkpoint", "next"], limit=8)
             test["anyTerms"] = []
             test["requiresSource"] = False
             test["webSearch"] = "disabled"
@@ -7586,7 +7593,7 @@ def golden_test_from_prompt(prompt, source):
             test["contextDependent"] = False
             test["directAnswer"] = True
             test["directTerms"] = ["I can turn it off", "what `it` refers to"]
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "safe", "target"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "safe", "target"], limit=8)
             test["anyTerms"] = []
             test["requiresSource"] = False
             test["webSearch"] = "disabled"
@@ -7599,7 +7606,7 @@ def golden_test_from_prompt(prompt, source):
             test["contextDependent"] = False
             test["directAnswer"] = True
             test["directTerms"] = ["I can restart it", "exact target"]
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "idle", "target"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "idle", "target"], limit=8)
             test["anyTerms"] = []
             test["requiresSource"] = False
             test["webSearch"] = "disabled"
@@ -7613,7 +7620,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Wix", "Keychain"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Mail", "Keychain", "https://www.wix.com/forgot-password"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Mail", "Keychain", "https://www.wix.com/forgot-password"], limit=8)
         test["requiredContractProof"] = ["Wix", "Mail/Spotlight", "Keychain", "https://www.wix.com/forgot-password", "raw passwords"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -7625,7 +7632,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Wix", "raw passwords"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Keychain", "Safari Passwords", "Chrome Password Manager", "https://www.wix.com/forgot-password"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Keychain", "Safari Passwords", "Chrome Password Manager", "https://www.wix.com/forgot-password"], limit=8)
         test["requiredContractProof"] = ["Wix", "Keychain", "Safari Passwords", "Chrome Password Manager", "https://www.wix.com/forgot-password", "raw passwords"]
         test["forbiddenTerms"] = normalize_terms(["paste your password", "I logged in", "I accessed the website", "here is your password"], limit=8)
         test["anyTerms"] = []
@@ -7638,7 +7645,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractKind"] = "Orca humidity display workaround"
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "humidity", "temperature-style", "heater logic"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "humidity", "temperature-style", "heater logic"], limit=8)
         test["requiredContractProof"] = ["humidity", "temperature-style field", "read-only", "heater logic boundary"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7648,7 +7655,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractKind"] = "Chamber-disabled bed/nozzle test"
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "idle", "bed/nozzle", "chamber heaters disabled", "SET_HEATER_TEMPERATURE"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "idle", "bed/nozzle", "chamber heaters disabled", "SET_HEATER_TEMPERATURE"], limit=8)
         test["requiredContractProof"] = ["idle", "bed/nozzle", "chamber heaters disabled", "SET_HEATER_TEMPERATURE or UI"]
         test["forbiddenTerms"] = normalize_terms(["objects/query?heater_bed,target", "read-only query endpoint"], limit=8)
         test["requiresSource"] = False
@@ -7659,7 +7666,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractKind"] = "GitHub issue status needs evidence"
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "current", "GitHub", "workflow"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "current", "GitHub", "workflow"], limit=8)
         test["requiredContractProof"] = ["GitHub issue", "current repo/workflow evidence", "do not claim fixed from memory"]
         test["forbiddenTerms"] = normalize_terms(["was merged", "commit `", "pull the latest code"], limit=8)
         test["requiresSource"] = False
@@ -7670,7 +7677,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractKind"] = "Klipper printer.cfg proceed gate"
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "printer.cfg", "backup", "Klipper"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "printer.cfg", "backup", "Klipper"], limit=8)
         test["requiredContractProof"] = ["printer.cfg", "backup", "Klipper restart/config check", "idle"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7680,7 +7687,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractKind"] = "Sense resistor install boundary"
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "sense resistor", "board revision", "schematic"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "sense resistor", "board revision", "schematic"], limit=8)
         test["requiredContractProof"] = ["sense resistor", "board revision", "schematic/BOM", "do not solder blindly"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7690,7 +7697,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractKind"] = "Local API key boundary"
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "local", "Ollama", "external service"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "local", "Ollama", "external service"], limit=8)
         test["requiredContractProof"] = ["local Ollama", "API key", "external service", "Keychain or environment"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7700,7 +7707,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractKind"] = "Invar 2020 extrusion source boundary"
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Invar", "2020 extrusion", "source-backed"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Invar", "2020 extrusion", "source-backed"], limit=8)
         test["requiredContractProof"] = ["Invar", "2020 extrusion", "custom or source-backed", "Rat Rig gantry"]
         test["forbiddenTerms"] = normalize_terms(["McMaster", "Sutherland", "standard lengths are"], limit=8)
         test["requiresSource"] = False
@@ -7711,7 +7718,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractKind"] = "Centauri filament/nozzle telemetry boundary"
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Centauri Carbon", "filament", "nozzle size"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Centauri Carbon", "filament", "nozzle size"], limit=8)
         test["requiredContractProof"] = ["Centauri Carbon", "filament", "nozzle size", "profile or API"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7721,7 +7728,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractKind"] = "EBB42 dual PT1000 boundary"
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "EBB42", "PT1000", "one external thermistor"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "EBB42", "PT1000", "one external thermistor"], limit=8)
         test["requiredContractProof"] = ["EBB42 Gen 2", "PT1000", "one external thermistor interface", "second input/expansion"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7732,7 +7739,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractKind"] = "Qidi Box RFID spool-speed feasibility"
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Qidi Box", "RFID", "RPM"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Qidi Box", "RFID", "RPM"], limit=8)
         test["requiredContractProof"] = ["Qidi Box", "RFID", "RPM", "spool speed", "validation"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -7742,7 +7749,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractKind"] = "Klipper X/Y hold-current motion diagnostic"
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "X/Y", "hold_current", "endstop", "STEPPER_BUZZ"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "X/Y", "hold_current", "endstop", "STEPPER_BUZZ"], limit=8)
         test["requiredContractProof"] = ["X/Y motor mapping", "endstop/homing direction", "run_current/hold_current", "safe jog or STEPPER_BUZZ"]
         test["forbiddenTerms"] = normalize_terms(["linear-regression", "market data", "LuxAlgo", "Medium posts", "stock-market"], limit=8)
         test["requiresSource"] = False
@@ -7754,7 +7761,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["contextDependent"] = True
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "mapping", "context"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "mapping", "context"], limit=8)
         test["requiredContractProof"] = ["not enough context", "mapping domain ambiguity", "specific mapping evidence request"]
         test["forbiddenTerms"] = normalize_terms(["GIS", "parcel", "county assessor", "public web", "accuracy metrics"], limit=8)
         test["requiresSource"] = False
@@ -7766,7 +7773,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractKind"] = "Program restart context"
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "restart", "program", "config"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "restart", "program", "config"], limit=8)
         test["requiredContractProof"] = ["code/config/tools changed", "exact program", "hard refresh versus restart", "safe before restart"]
         test["forbiddenTerms"] = normalize_terms(["real-world load", "fit", "environment before committing"], limit=8)
         test["requiresSource"] = False
@@ -7796,7 +7803,7 @@ def golden_test_from_prompt(prompt, source):
             test["expectedContractGate"] = "pass"
             test["directAnswer"] = True
             test["contextDependent"] = False
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
             test["requiredContractProof"] = proof_terms
             test["anyTerms"] = []
             test["requiresSource"] = False
@@ -7819,7 +7826,7 @@ def golden_test_from_prompt(prompt, source):
             test["expectedContractGate"] = "pass"
             test["directAnswer"] = True
             test["contextDependent"] = False
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
             test["requiredContractProof"] = proof_terms
             test["anyTerms"] = []
             test["requiresSource"] = False
@@ -7847,7 +7854,7 @@ def golden_test_from_prompt(prompt, source):
             test["expectedContractGate"] = "pass"
             test["directAnswer"] = True
             test["contextDependent"] = False
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
             test["requiredContractProof"] = proof_terms
             test["anyTerms"] = []
             test["requiresSource"] = False
@@ -7875,7 +7882,7 @@ def golden_test_from_prompt(prompt, source):
             test["expectedContractGate"] = "pass"
             test["directAnswer"] = True
             test["contextDependent"] = False
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
             test["requiredContractProof"] = proof_terms
             test["anyTerms"] = []
             test["requiresSource"] = False
@@ -7900,7 +7907,7 @@ def golden_test_from_prompt(prompt, source):
             test["expectedContractGate"] = "pass"
             test["directAnswer"] = True
             test["contextDependent"] = False
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
             test["requiredContractProof"] = proof_terms
             test["anyTerms"] = []
             test["requiresSource"] = False
@@ -7919,7 +7926,7 @@ def golden_test_from_prompt(prompt, source):
             test["expectedContractGate"] = "pass"
             test["directAnswer"] = True
             test["contextDependent"] = False
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
             test["requiredContractProof"] = proof_terms
             test["anyTerms"] = []
             test["requiresSource"] = False
@@ -7943,7 +7950,7 @@ def golden_test_from_prompt(prompt, source):
             test["directAnswer"] = True
             test["directTerms"] = []
             test["contextDependent"] = False
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
             test["requiredContractProof"] = proof_terms
             test["anyTerms"] = []
             test["requiresSource"] = False
@@ -7970,7 +7977,7 @@ def golden_test_from_prompt(prompt, source):
             test["directAnswer"] = True
             test["directTerms"] = []
             test["contextDependent"] = False
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
             test["requiredContractProof"] = proof_terms
             test["anyTerms"] = []
             test["requiresSource"] = False
@@ -7996,7 +8003,7 @@ def golden_test_from_prompt(prompt, source):
             test["directAnswer"] = True
             test["directTerms"] = []
             test["contextDependent"] = False
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
             test["requiredContractProof"] = proof_terms
             test["anyTerms"] = []
             test["requiresSource"] = False
@@ -8026,7 +8033,7 @@ def golden_test_from_prompt(prompt, source):
             test["directAnswer"] = True
             test["directTerms"] = []
             test["contextDependent"] = False
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
             test["requiredContractProof"] = proof_terms
             test["anyTerms"] = []
             test["requiresSource"] = False
@@ -8053,7 +8060,7 @@ def golden_test_from_prompt(prompt, source):
             test["directAnswer"] = True
             test["directTerms"] = []
             test["contextDependent"] = False
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
             test["requiredContractProof"] = proof_terms
             test["anyTerms"] = []
             test["requiresSource"] = False
@@ -8081,7 +8088,7 @@ def golden_test_from_prompt(prompt, source):
             test["directAnswer"] = True
             test["directTerms"] = []
             test["contextDependent"] = False
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
             test["requiredContractProof"] = proof_terms
             test["anyTerms"] = []
             test["requiresSource"] = False
@@ -8106,7 +8113,7 @@ def golden_test_from_prompt(prompt, source):
             test["directAnswer"] = True
             test["directTerms"] = []
             test["contextDependent"] = False
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
             test["requiredContractProof"] = proof_terms
             test["anyTerms"] = []
             test["requiresSource"] = False
@@ -8133,7 +8140,7 @@ def golden_test_from_prompt(prompt, source):
             test["directAnswer"] = True
             test["directTerms"] = []
             test["contextDependent"] = False
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
             test["requiredContractProof"] = proof_terms
             test["anyTerms"] = []
             test["requiresSource"] = False
@@ -8169,7 +8176,7 @@ def golden_test_from_prompt(prompt, source):
             test["directAnswer"] = True
             test["directTerms"] = []
             test["contextDependent"] = False
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
             test["requiredContractProof"] = proof_terms
             test["anyTerms"] = []
             test["requiresSource"] = False
@@ -8198,7 +8205,7 @@ def golden_test_from_prompt(prompt, source):
             test["directAnswer"] = True
             test["directTerms"] = []
             test["contextDependent"] = False
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
             test["requiredContractProof"] = proof_terms
             test["anyTerms"] = []
             test["requiresSource"] = False
@@ -8247,7 +8254,7 @@ def golden_test_from_prompt(prompt, source):
             test["directAnswer"] = True
             test["directTerms"] = []
             test["contextDependent"] = False
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
             test["requiredContractProof"] = proof_terms
             test["anyTerms"] = []
             test["requiresSource"] = False
@@ -8262,7 +8269,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "vendor", "profile"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "filament"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "filament"], limit=8)
         test["requiredContractProof"] = ["vendor profile path", "app visibility gate"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8276,7 +8283,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["No", "Klipper", "integer"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Klipper"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Klipper"], limit=8)
         test["requiredContractProof"] = ["Klipper", "driver_SGTHRS", "integer", "0 through 255"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8290,7 +8297,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["profile", "filament"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "filament"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "filament"], limit=8)
         test["requiredContractProof"] = ["profile source or explicit fallback", "why/caveat", "no CAD/status template"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8304,7 +8311,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "FreeCAD", "visible"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "command-line", "tool inventory", "STEP"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "command-line", "tool inventory", "STEP"], limit=8)
         test["requiredContractProof"] = ["FreeCAD app/binary visibility", "tool inventory refresh", "STEP open/export smoke test"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8316,7 +8323,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["do not use", "9 mm", "cutting ram"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "belt", "tooth", "leadscrew"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "belt", "tooth", "leadscrew"], limit=8)
         test["requiredContractProof"] = ["do not ram toolhead", "belt/tooth/drivetrain risk", "constrained cutter/press alternative"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8328,7 +8335,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "local tool inventory", "commands"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "apps", "inventory", "refresh"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "apps", "inventory", "refresh"], limit=8)
         test["requiredContractProof"] = ["commands=", "apps=", "Python modules", "Homebrew", "Ollama models", "Inventory files", "refresh"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8340,7 +8347,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["actual document", "compliance"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "actual document", "compliance", "evidence"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "actual document", "compliance", "evidence"], limit=8)
         test["requiredContractProof"] = ["actual document", "compliance table or gap list", "current evidence", "no guessed compliance"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8352,7 +8359,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["No", "loaded-filament test"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "runout", "loaded-filament", "safety"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "runout", "loaded-filament", "safety"], limit=8)
         test["requiredContractProof"] = ["no filament loaded", "runout", "loaded-filament test", "safety caveat"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8364,7 +8371,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["127.0.1.1", "LAN", "Moonraker"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "127.0.1.1", "LAN", "DHCP", "Moonraker"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "127.0.1.1", "LAN", "DHCP", "Moonraker"], limit=8)
         test["requiredContractProof"] = ["127.0.1.1", "LAN", "DHCP", "Moonraker"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8376,7 +8383,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["bounded", "inventory", "ARP"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "subnet", "inventory", "ARP", "Moonraker"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "subnet", "inventory", "ARP", "Moonraker"], limit=8)
         test["requiredContractProof"] = ["subnet", "inventory", "ARP", "service verification"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8389,7 +8396,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = [requested_ip, "device", "IP conflict", "DHCP reservation"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "IP", "device", "DHCP"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "IP", "device", "DHCP"], limit=8)
         test["requiredContractProof"] = ["requested IP", "device identity", "IP conflict", "DHCP reservation"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8401,7 +8408,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["SD card", "backup", "Wi-Fi"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "SD card", "backup", "DHCP", "hostname"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "SD card", "backup", "DHCP", "hostname"], limit=8)
         test["requiredContractProof"] = ["SD card", "backup", "Wi-Fi/DHCP/hostname", "do not reimage first"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8413,7 +8420,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["slot 3", "filament", "profile"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "slot 3", "filament", "profile", "verify"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "slot 3", "filament", "profile", "verify"], limit=8)
         test["requiredContractProof"] = ["slot 3", "filament/profile mapping", "job verification"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8425,7 +8432,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["100-200 TB", "curated", "ZFS"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "TB", "curated", "ZFS", "index"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "TB", "curated", "ZFS", "index"], limit=8)
         test["requiredContractProof"] = ["100-200 TB", "curated vault", "ZFS or redundancy", "index/search"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8437,7 +8444,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["device name", "old IP", "ARP", "mDNS"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "IP", "device"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "IP", "device"], limit=8)
         test["requiredContractProof"] = ["device name", "old IP", "ARP", "mDNS", "DHCP"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8449,7 +8456,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Orca logs", "generated G-code", "machine-limit"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "machine limits", "G-code", "firmware"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "machine limits", "G-code", "firmware"], limit=8)
         test["requiredContractProof"] = ["Orca logs/G-code", "machine limits", "firmware or custom G-code timing", "one-file comparison"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8461,7 +8468,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["FK275", "exact", "belt"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "profile", "dimensions", "materials"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "profile", "dimensions", "materials"], limit=8)
         test["requiredContractProof"] = ["FK275", "belt profile/rib count", "dimensions/materials", "datasheet or measured-profile workflow"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8473,7 +8480,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["fastest free wins", "model", "context"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "model", "context", "measure"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "model", "context", "measure"], limit=8)
         test["requiredContractProof"] = ["smaller or warm local model", "trim context", "direct/tool routing", "measure response time"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8485,7 +8492,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["active task", "last result", "proof"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "active task", "last result"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "active task", "last result"], limit=8)
         test["anyTerms"] = []
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -8496,7 +8503,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["macro", "real workflow", "dry run"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "trigger", "context"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "trigger", "context"], limit=8)
         test["requiredContractProof"] = ["macro name", "trigger point", "dry run"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8508,7 +8515,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["KMXL69", "SK_Speaker_Reference", "baffle"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "template", "baffle", "KMXL69"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "template", "baffle", "KMXL69"], limit=8)
         test["requiredContractProof"] = ["template gate", "baffle alignment", "source-template caveat"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8520,7 +8527,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["nozzle 245", "bed 105-110", "brim"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "ABS", "Rat Rig", "Orca", "fan"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "ABS", "Rat Rig", "Orca", "fan"], limit=8)
         test["requiredContractProof"] = ["nozzle 245 C", "bed 105-110 C", "10-20%", "6-10 mm brim"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8532,7 +8539,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["No", "external 5 V", "common ground"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "RGB", "5 V", "ground", "backfeed"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "RGB", "5 V", "ground", "backfeed"], limit=8)
         test["requiredContractProof"] = ["external 5 V", "common ground", "do not backfeed", "fuse/current check"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8544,7 +8551,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Recheck", "RGB", "Klipper"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "RGB", "Klipper", "SET_LED", "config", "idle"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "RGB", "Klipper", "SET_LED", "config", "idle"], limit=8)
         test["requiredContractProof"] = ["RGB/LED", "Klipper config or macro", "SET_LED or macro test", "no fake generated file"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8557,7 +8564,7 @@ def golden_test_from_prompt(prompt, source):
         test["directAnswer"] = True
         test["contextDependent"] = False
         test["directTerms"] = ["Yes", "bed-leveling", "bed-mesh"]
-        test["requiredTerms"] = normalize_terms(
+        test["requiredTerms"] = normalize_required_terms(
             ["This is why", "You should also consider", "SET_LED", "BED_MESH_CALIBRATE", "G28", "Z_TILT_ADJUST", "LED object names"],
             limit=8,
         )
@@ -8577,7 +8584,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "buffer/feeder", "print extruder"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "sensor", "timeout", "jam"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "sensor", "timeout", "jam"], limit=8)
         test["requiredContractProof"] = ["buffer/feeder side", "print extruder", "sensor", "timeout"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer filament-buffer bind compensation as a printer control-loop question, not as CAD artifact generation."
@@ -8587,7 +8594,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Fusion", "directory", "data/generated/cad"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Fusion", "directory"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Fusion", "directory"], limit=8)
         test["requiredContractProof"] = ["Fusion", "data/generated/cad", "parent directory"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8599,7 +8606,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["cannot confirm", "short", "meter"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "short", "meter", "power"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "short", "meter", "power"], limit=8)
         test["requiredContractProof"] = ["short", "meter or diagnostic reading", "power off or isolate"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8613,7 +8620,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["what value", "factor", "rerunning"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "value", "factor", "rerun"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "value", "factor", "rerun"], limit=8)
         test["requiredContractProof"] = ["value/command request"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8625,7 +8632,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["what `they` refers to", "correct orientation", "inverted", "smallest safe change"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "inverted", "they"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "inverted", "they"], limit=8)
         test["requiredContractProof"] = ["what `they` refers to", "correct orientation", "inverted", "smallest safe change"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8637,7 +8644,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["SPST", "series", "Hot/Line"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "SPST", "series", "3-way", "code"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "SPST", "series", "3-way", "code"], limit=8)
         test["requiredContractProof"] = ["SPST", "series", "Hot/Line", "3-way", "code"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8649,7 +8656,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["M191", "chamber", "M104"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "M191", "chamber", "M104"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "M191", "chamber", "M104"], limit=8)
         test["requiredContractProof"] = ["M191", "chamber", "M104", "PRINT_START"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer Orca M191 chamber-target handoff questions directly, not with unrelated completion-time metrics."
@@ -8663,7 +8670,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["50 C", "chamber-temperature path", "M141", "M191", "PRINT_START CHAMBER_TEMP=50"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "50", "chamber", "M191"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "50", "chamber", "M191"], limit=8)
         test["requiredContractProof"] = ["50 C", "chamber", "M141", "M191", "PRINT_START CHAMBER_TEMP=50"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer heat-soak chamber target changes as printer/slicer chamber handoff work, not generic chat."
@@ -8678,7 +8685,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Beacon Contact", "adaptive", "Checked"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Beacon Contact", "adaptive", "Moonraker"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Beacon Contact", "adaptive", "Moonraker"], limit=8)
         test["requiredContractProof"] = ["local config", "Beacon Contact", "adaptive mesh", "live verification"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8690,7 +8697,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Klipper", "SET_FAN_SPEED", "SET_PIN"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "idle", "config", "verified"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "idle", "config", "verified"], limit=8)
         test["requiredContractProof"] = ["idle check", "Klipper config/object lookup", "verified SET_FAN_SPEED or SET_PIN path", "no guessed M106/M701"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -8708,7 +8715,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "chamber temperature", "print"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "thermal stability", "bed mesh", "Z offset"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "thermal stability", "bed mesh", "Z offset"], limit=8)
         test["requiredContractProof"] = ["chamber temperature you intend to print at", "thermal stability", "final homing/Z check", "bed mesh", "PLA"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer heat-soak print-temperature follow-ups as printer thermal-stability guidance, not Codex personality controls."
@@ -8719,7 +8726,7 @@ def golden_test_from_prompt(prompt, source):
         test["directAnswer"] = True
         test["contextDependent"] = False
         test["directTerms"] = ["Yes", "45 C", "100 C", "180 C"]
-        test["requiredTerms"] = normalize_terms(
+        test["requiredTerms"] = normalize_required_terms(
             ["This is why", "You should also consider", "45 C", "100 C", "180 C", "G28", "Z_TILT_ADJUST", "BED_MESH_CALIBRATE"],
             limit=8,
         )
@@ -8736,7 +8743,7 @@ def golden_test_from_prompt(prompt, source):
         test["directAnswer"] = True
         test["contextDependent"] = False
         test["directTerms"] = ["Yes", "idle", "heated enough"]
-        test["requiredTerms"] = normalize_terms(
+        test["requiredTerms"] = normalize_required_terms(
             ["This is why", "You should also consider", "idle", "unload temperature", "target printer", "M702"],
             limit=8,
         )
@@ -8753,7 +8760,7 @@ def golden_test_from_prompt(prompt, source):
         test["directAnswer"] = True
         test["contextDependent"] = False
         test["directTerms"] = ["Probably not fully correct", "BTT SFS 2.0", "Klipper"]
-        test["requiredTerms"] = normalize_terms(
+        test["requiredTerms"] = normalize_required_terms(
             ["This is why", "You should also consider", "BTT SFS 2.0", "filament_motion_sensor", "switch_pin", "detection_length"],
             limit=8,
         )
@@ -8779,7 +8786,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Machine Start", "heater", "M140"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Machine Start", "heater", "M140"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Machine Start", "heater", "M140"], limit=8)
         test["requiredContractProof"] = ["Machine Start", "heater", "M140/M190/M104/M109", "dry preview"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer Orca Machine Start before-heater questions directly, not as a hard config edit without a profile path."
@@ -8789,7 +8796,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["I would not assume", "installed app"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "installed app", "profile store", "package health", "UI-visible"], limit=10)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "installed app", "profile store", "package health", "UI-visible"], limit=10)
         test["requiredContractProof"] = ["installed app path/app bundle", "source/build receipt", "profile-store comparison", "package health or UI-visible check"]
         test["forbiddenTerms"] = normalize_terms(BASE_FORBIDDEN_TERMS + ["80% stall", "bad mesh", "source URL"], limit=16)
         test["requiresSource"] = False
@@ -8801,7 +8808,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "profile"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "profile", "backup", "visibility", "changed"], limit=10)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "profile", "backup", "visibility", "changed"], limit=10)
         test["requiredContractProof"] = ["profile-store backup", "target profile/layer", "changed keys or explicit edit boundary", "lint/visibility verification"]
         test["forbiddenTerms"] = normalize_terms(BASE_FORBIDDEN_TERMS + ["Filament profile:", "Machine profile:", "Process profile:"], limit=16)
         test["requiresSource"] = False
@@ -8813,7 +8820,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "MakersVPN"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "MakersVPN", "reboot", "Tailscale"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "MakersVPN", "reboot", "Tailscale"], limit=8)
         test["requiredContractProof"] = ["MakersVPN", "reboot", "Tailscale", "route verification"]
         test["forbiddenTerms"] = normalize_terms(BASE_FORBIDDEN_TERMS + ["I do not have access", "I don't have access", "you can check it yourself"], limit=16)
         test["requiresSource"] = False
@@ -8825,7 +8832,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["I did not rename", "Bluetooth", "Bose"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Bluetooth", "requested name", "Tinman Bose"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Bluetooth", "requested name", "Tinman Bose"], limit=8)
         test["requiredContractProof"] = ["Bluetooth device state", "requested name", "safe rename path or blocker"]
         test["forbiddenTerms"] = sorted(set(test.get("forbiddenTerms", []) + ["staged local artifact", "local Ollama answer", "this mac via bluetooth"]))
         test["requiresSource"] = False
@@ -8837,7 +8844,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Best visual reference", "carriage"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "hotend", "mount", "carriage", "http"], limit=10)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "hotend", "mount", "carriage", "http"], limit=10)
         test["requiredContractProof"] = ["hotend mount", "carriage", "source URL", "CAD caveat"]
         test["forbiddenTerms"] = normalize_terms(BASE_FORBIDDEN_TERMS + ["Printer status", "Moonraker", "nozzle temp"], limit=16)
         test["requiresSource"] = False
@@ -8849,7 +8856,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "upward"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "upward", "flat", "CAD"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "upward", "flat", "CAD"], limit=8)
         test["requiredContractProof"] = ["upward riser/elbow", "flat CAD comparison", "smooth S-bend or elbow"]
         test["forbiddenTerms"] = normalize_terms(BASE_FORBIDDEN_TERMS + ["source URL", "OpenSCAD", "Fusion 360 script"], limit=16)
         test["requiresSource"] = False
@@ -8862,7 +8869,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Orca", "M191", "PRINT_START"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "M191", "M141", "PRINT_START", "http"], limit=10)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "M191", "M141", "PRINT_START", "http"], limit=10)
         test["requiredContractProof"] = ["M191", "M141", "PRINT_START", "source URL"]
         test["forbiddenTerms"] = normalize_terms(BASE_FORBIDDEN_TERMS + ["Codex CLI UI", "run failed", "Load failed"], limit=16)
         test["requiresSource"] = True
@@ -8874,7 +8881,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "target printer"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Klipper", "idle", "standby"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Klipper", "idle", "standby"], limit=8)
         test["requiredContractProof"] = ["target printer", "idle/standby", "Klipper restart"]
         test["forbiddenTerms"] = normalize_terms(BASE_FORBIDDEN_TERMS + ["I restarted", "done restarting"], limit=16)
         test["requiresSource"] = False
@@ -8886,7 +8893,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Bambu X1C", "Moonraker"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Bambu X1C", "configured", "physical"], limit=10)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Bambu X1C", "configured", "physical"], limit=10)
         test["requiredContractProof"] = ["Bambu X1C", "Moonraker boundary", "configured vs physical nozzle"]
         test["forbiddenTerms"] = normalize_terms(BASE_FORBIDDEN_TERMS + ["I checked the configured Rat Rig", "Qidi Plus 4 Moonraker"], limit=16)
         test["requiresSource"] = False
@@ -8898,7 +8905,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["192.0.2.27", "Rat Rig"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "192.0.2.27", "Rat Rig"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "192.0.2.27", "Rat Rig"], limit=8)
         test["requiredContractProof"] = ["192.0.2.27", "Rat Rig", "Moonraker/SSH caveat"]
         test["forbiddenTerms"] = normalize_terms(BASE_FORBIDDEN_TERMS + ["source URL", "OctoPrint"], limit=16)
         test["requiresSource"] = False
@@ -8911,7 +8918,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["screenshot", "Chrome"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "screenshot", "Chrome", "permission"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "screenshot", "Chrome", "permission"], limit=8)
         test["requiredContractProof"] = ["screenshot file proof", "Chrome/page scope", "permission blocker boundary"]
         test["forbiddenTerms"] = normalize_terms(BASE_FORBIDDEN_TERMS + ["Source:", "http"], limit=16)
         test["requiresSource"] = False
@@ -8923,7 +8930,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["FibreSeeker", "calculations"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "calculation", "paper", "FibreSeeker", "http"], limit=10)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "calculation", "paper", "FibreSeeker", "http"], limit=10)
         test["requiredContractProof"] = ["FibreSeeker", "calculation/model diff", "source URLs"]
         test["forbiddenTerms"] = normalize_terms(BASE_FORBIDDEN_TERMS + ["Codex CLI UI"], limit=16)
         test["requiresSource"] = True
@@ -8935,7 +8942,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["GitHub push", "paused"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "GitHub", "current price", "http"], limit=10)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "GitHub", "current price", "http"], limit=10)
         test["requiredContractProof"] = ["GitHub push paused", "current price source URLs", "testing clearance"]
         test["requiresSource"] = True
         test["webSearch"] = "live"
@@ -8946,7 +8953,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "humidity"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "target printer", "sensor"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "target printer", "sensor"], limit=8)
         test["requiredContractProof"] = ["target printer", "humidity sensor object", "Moonraker/telemetry path"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -8957,7 +8964,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Do not", "width sensor"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "tangle", "runout", "config"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "tangle", "runout", "config"], limit=8)
         test["requiredContractProof"] = ["width versus tangle/runout", "manual/config proof", "sensor object name"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -8968,7 +8975,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["filament-management", "Qidi Box"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "drying", "RFID", "feed"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "drying", "RFID", "feed"], limit=8)
         test["requiredContractProof"] = ["filament-management", "drying/RFID/feed", "exact model caveat"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -8979,7 +8986,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Core One L"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Core One L", "machine", "process", "filament", "GitHub", "visibility"], limit=12)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Core One L", "machine", "process", "filament", "GitHub", "visibility"], limit=12)
         test["requiredContractProof"] = ["Core One L", "machine/process/filament separation", "import/visibility verification", "README/attribution/privacy", "no GitHub push without approval"]
         test["forbiddenTerms"] = normalize_terms(BASE_FORBIDDEN_TERMS + ["source URL", "cleanup path"], limit=16)
         test["requiresSource"] = False
@@ -8991,7 +8998,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "machine"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Qidi", "Sovol", "manifest", "privacy", "attribution", "GitHub"], limit=12)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Qidi", "Sovol", "manifest", "privacy", "attribution", "GitHub"], limit=12)
         test["requiredContractProof"] = ["machine-family folders", "Qidi/Sovol examples", "profile manifest or README", "privacy/attribution scrub", "local package before GitHub push"]
         test["forbiddenTerms"] = normalize_terms(BASE_FORBIDDEN_TERMS + ["tree/main/orca/qidi-x-plus-4", "packages/qidi-x-plus-4.zip"], limit=16)
         test["requiresSource"] = False
@@ -9004,7 +9011,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = [target_name, "profile", "host mapping"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "profile", "host", "UI"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "profile", "host", "UI"], limit=8)
         test["requiredContractProof"] = ["profile-store backup", "target printer name", "host mapping", "UI-visible check"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9021,7 +9028,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["yes", "Open Centauri", "Klipper"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Open Centauri", "Klipper", "Moonraker"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Open Centauri", "Klipper", "Moonraker"], limit=8)
         test["requiredContractProof"] = ["Open Centauri", "Device tab", "Klipper", "Moonraker"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer Open Centauri Orca Device-tab control questions as firmware/API capability analysis, not as a hard code/config artifact."
@@ -9031,7 +9038,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["OpenVSP", "XFOIL", "SU2", "QBlade"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "OpenVSP", "XFOIL", "SU2", "QBlade", "smoke test"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "OpenVSP", "XFOIL", "SU2", "QBlade", "smoke test"], limit=8)
         test["requiredContractProof"] = ["OpenVSP", "XFOIL", "SU2", "QBlade", "smoke test"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9043,7 +9050,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["SID", "annual inspection", "history"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "SID", "annual inspection", "history"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "SID", "annual inspection", "history"], limit=8)
         test["requiredContractProof"] = ["SID", "annual inspection", "history", "UI"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9059,7 +9066,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["C. Linen", "This is why", "You should also consider"]
-        test["requiredTerms"] = normalize_terms(["C. Linen", "Seyboth", "Maule", "approved"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["C. Linen", "Seyboth", "Maule", "approved"], limit=8)
         test["requiredContractProof"] = ["C. Linen", "Seyboth", "Maule", "approved fabric system procedure"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer aviation maintenance quiz prompts directly and avoid routing them to CAD artifacts."
@@ -9069,7 +9076,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["script path", "python3", "bash"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "script path", "python3", "bash"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "script path", "python3", "bash"], limit=8)
         test["requiredContractProof"] = ["script path", "python3", "bash", "README"]
         test["anyTerms"] = []
         test["goal"] = "Context-only script follow-up: explain path/interpreter requirements and do not claim a script ran without the target file."
@@ -9083,7 +9090,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["STEP", "file"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "local", "path"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "local", "path"], limit=8)
         test["requiredContractProof"] = ["STEP/STP path or no-match blocker", "local search scope", "existing-file boundary"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: STEP path lookups should report existing local file paths without being treated as generated CAD artifacts."
@@ -9093,7 +9100,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["GRBL", "UGS", ".nc"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Fusion", "GRBL", "UGS"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Fusion", "GRBL", "UGS"], limit=8)
         test["requiredContractProof"] = ["GRBL post", "UGS output file", "M6/units/WCS caveat"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: Fusion-to-UGS questions should answer the GRBL post/output path, not slicer filament or outdoor-material advice."
@@ -9103,7 +9110,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Tinman's CNC Lab", "branding", "verify"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Tinman's CNC Lab", "branding"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Tinman's CNC Lab", "branding"], limit=8)
         test["requiredContractProof"] = ["Tinman's CNC Lab", "branding source", "launch/screenshot verification"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9114,7 +9121,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Klipper", "Jinja", "split"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Klipper", "Jinja", "timeout"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Klipper", "Jinja", "timeout"], limit=8)
         test["requiredContractProof"] = ["Klipper/Jinja/queue/host/UI limits", "increase caveat", "diagnostic path", "motion/heater safety caveat"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: macro-limit questions should be diagnostic and safety-aware, not blocked by fake artifact requirements."
@@ -9136,7 +9143,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["C", "mineral streaks", "not accompanied by decay"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "compression failure", "splits"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "compression failure", "splits"], limit=8)
         test["requiredContractProof"] = ["mineral streaks", "not accompanied by decay", "compression failure", "splits", "approved data"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9148,7 +9155,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["C", "Government Printing Office Online Catalog"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "National Aeronautical Charting Office", "Office of Management and Budget"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "National Aeronautical Charting Office", "Office of Management and Budget"], limit=8)
         test["requiredContractProof"] = ["C. Government Printing Office Online Catalog", "not charting office", "not OMB"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9162,12 +9169,12 @@ def golden_test_from_prompt(prompt, source):
         test["directAnswer"] = True
         if "kit" in lower or "for sale" in lower:
             test["directTerms"] = ["Yes", "ATS 4260-18", "Lycoming"]
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "ATS 4260-18", "aviation", "generic M18", "Lycoming"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "ATS 4260-18", "aviation", "generic M18", "Lycoming"], limit=8)
             test["requiredContractProof"] = ["ATS 4260-18", "aviation kit", "generic M18 rejection", "manual/A&P-IA caveat"]
             test["goal"] = "Real chat-history regression: answer Lycoming spark-plug Heli-Coil kit follow-ups with the aviation kit lane and generic-kit rejection, not hobby-helicopter clarification."
         else:
             test["directTerms"] = ["18 mm", ".010", "P/N 64596-1"]
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "18 mm", ".010", "P/N 64596-1", "manual"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "18 mm", ".010", "P/N 64596-1", "manual"], limit=8)
             test["requiredContractProof"] = ["18 mm", ".010 in. oversize", "P/N 64596-1", "manual/A&P-IA caveat"]
             test["goal"] = "Real chat-history regression: answer Lycoming spark-plug Heli-Coil tooling questions with approved-tooling caution, not generic drill/tap guesses."
         test["anyTerms"] = []
@@ -9179,7 +9186,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["C. It must be removed", "This is why", "You should also consider"]
-        test["requiredTerms"] = normalize_terms(["C. It must be removed", "corrosion", "service limits"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["C. It must be removed", "corrosion", "service limits"], limit=8)
         test["requiredContractProof"] = ["C. It must be removed", "corrosion must be removed", "service limits"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9191,7 +9198,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["True", "0.0625", "mechanical tools"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "0.0625", "mechanical tools", "service limits"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "0.0625", "mechanical tools", "service limits"], limit=8)
         test["requiredContractProof"] = ["True", "0.0625 inch", "mechanical tools", "service limits"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9203,7 +9210,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["RAPIDS", "ID Card Office Online", "Robins AFB", "verify"]
-        test["requiredTerms"] = normalize_terms(["RAPIDS", "Robins"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["RAPIDS", "Robins"], limit=8)
         test["requiredContractProof"] = ["RAPIDS", "ID Card Office Online", "Robins AFB", "verify"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9215,7 +9222,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["mesh file", "scale", "Fusion"]
-        test["requiredTerms"] = normalize_terms(["mesh", "scale", "Fusion"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["mesh", "scale", "Fusion"], limit=8)
         test["requiredContractProof"] = ["mesh file/path blocker", "scale correction", "known dimension validation"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9233,7 +9240,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["tooth pitch", "valley depth", "profile"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "GT2", "2.0 mm pitch", "profile drawing"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "GT2", "2.0 mm pitch", "profile drawing"], limit=8)
         test["requiredContractProof"] = ["tooth pitch", "profile", "GT2", "2.0 mm pitch", "profile drawing"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer tooth pitch/valley-depth questions quickly with profile-dependent dimensional guidance instead of a slow generic clarification."
@@ -9243,7 +9250,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["second rear rail", "gantry/carriage flex", "mass"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "stiffness", "alignment"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "stiffness", "alignment"], limit=8)
         test["requiredContractProof"] = ["stiffness benefit", "mass/alignment caveat"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer Sovol SV08 Max second-rail gantry questions as mechanical design tradeoffs, not generic CAD references."
@@ -9253,7 +9260,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["TinManX", "last 36 hours", "task log"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "36 hours", "completed", "blocked"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "36 hours", "completed", "blocked"], limit=8)
         test["requiredContractProof"] = ["36-hour window", "completed duration divided by completed task count", "blocked/running task caveat"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9265,7 +9272,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["TinManX", "completion date", "on track"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "TinManX", "package health", "conditional"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "TinManX", "package health", "conditional"], limit=8)
         test["requiredContractProof"] = ["schedule", "project or milestone", "status context request", "why/caveat shape"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9282,7 +9289,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Good morning", "specific project", "schedule", "guess"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "project", "schedule"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "project", "schedule"], limit=8)
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer schedule/status greetings warmly, but ask for the project or milestone before claiming schedule status."
     if (
@@ -9294,7 +9301,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "world-class", "workflow", "regression"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "slicer", "workflow", "gaps"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "slicer", "workflow", "gaps"], limit=8)
         test["anyTerms"] = []
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -9311,7 +9318,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["TinmanX Arc", "test print", "preview"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "test print", "preview", "rerun"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "test print", "preview", "rerun"], limit=8)
         test["requiredContractProof"] = ["TinmanX Arc", "test print", "preview", "rerun"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9328,7 +9335,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["marine", "6x9", "amplifier"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "https://", "RMS", "acoustic"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "https://", "RMS", "acoustic"], limit=8)
         test["requiredContractProof"] = ["speaker/amp recommendation", "source URL", "required acoustic inputs", "model/validation caveat"]
         test["anyTerms"] = []
         test["requiresSource"] = True
@@ -9356,7 +9363,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["RocketSlicer-to-Orca", "FibreSeeker 3", "https://"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "capability", "continuous-fiber", "source"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "capability", "continuous-fiber", "source"], limit=8)
         test["anyTerms"] = []
         test["minAnalyticalScore"] = 90
         test["goal"] = "Real chat-history regression: answer FibreSeeker/RocketSlicer-to-Orca integration prompts with source-backed migration architecture, not a narrow preview-only answer."
@@ -9370,7 +9377,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Orca warning", "acceleration", "machine limits"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "process", "printer profile", "safe"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "process", "printer profile", "safe"], limit=8)
         test["anyTerms"] = []
         test["minAnalyticalScore"] = 90
         test["goal"] = "Real chat-history regression: explain Orca acceleration-limit warnings as process-vs-machine profile mismatch, not generic printer specs."
@@ -9402,7 +9409,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["5 V", "12 A"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "60 W", "IP30"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "60 W", "IP30"], limit=8)
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: extract electrical/design constraints from pasted LED-strip specs without requiring CAD artifacts."
     if (
@@ -9415,7 +9422,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["solid green", "non-green status", "slowly pulse", "nonblocking state machine"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "green", "pulse", "brightness", "1 meter"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "green", "pulse", "brightness", "1 meter"], limit=8)
         test["requiredContractProof"] = ["solid green", "non-green pulse", "nonblocking state machine", "LED length/brightness config"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9432,7 +9439,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["estimated Strength Lens", "not guaranteed"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "orientation", "load direction"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "orientation", "load direction"], limit=8)
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer slicer strength-visualization questions as estimated orientation/load/material guidance, not CAD artifacts."
     if is_output_gate_comparison_context_prompt(prompt):
@@ -9441,7 +9448,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["actual output", "same gates", "deliverable"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "same gates", "deliverable", "proof"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "same gates", "deliverable", "proof"], limit=8)
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: explain how to compare Codex CLI UI output against the same gates without inventing completion."
     if is_speed_setting_timeline_prompt(prompt):
@@ -9450,7 +9457,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "routine answers", "tool waits"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "routine answers", "tool waits", "balanced"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "routine answers", "tool waits", "balanced"], limit=8)
         test["anyTerms"] = []
         test["requiresSource"] = False
         test["goal"] = "Real chat-history regression: answer Codex speed-setting timeline questions as local product guidance, not source-backed research."
@@ -9460,7 +9467,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["low-wind", "VAWT", "Fusion 360"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "3 mph", "48 V", "300 x 300 x 245"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "3 mph", "48 V", "300 x 300 x 245"], limit=8)
         test["requiredContractProof"] = ["labeled STEP/CAD/report path or explicit blocker", "3.0 mph / 48 V generator feasibility math", "validation/refinement limits"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9471,7 +9478,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Stock + Shoulder", "tool", "holder"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Stock + Shoulder", "2D Contour", "Heights"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Stock + Shoulder", "2D Contour", "Heights"], limit=8)
         test["anyTerms"] = []
         test["requiresSource"] = False
         test["goal"] = "Real chat-history regression: answer Fusion CAM Stock + Shoulder warnings as a local Manufacture troubleshooting path, not source-backed research."
@@ -9481,7 +9488,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Pi 5 16GB", "KAMRUI", "printer/Linux appliance"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Pi 4", "Pi 5", "KAMRUI", "maintenance"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Pi 4", "Pi 5", "KAMRUI", "maintenance"], limit=8)
         test["requiredContractProof"] = ["clear recommendation", "why/caveat shape", "hardware tradeoff"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9492,7 +9499,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["progress notes", "tool actions", "not hidden chain-of-thought"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "progress notes", "chain-of-thought", "warm", "Friendliness"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "progress notes", "chain-of-thought", "warm", "Friendliness"], limit=8)
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: explain visible progress notes, hidden chain-of-thought boundaries, and warmer response style clearly and directly."
     if any(term in lower for term in ("anything else", "anything more", "what else")) and any(term in lower for term in ("clean up", "cleanup", "cleaned up")) and any(term in lower for term in ("nice to have", "nice-to-have", "nice to haves", "nice-to-haves", "continuing", "continue")):
@@ -9501,7 +9508,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "cleanup", "nice-to-have"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "checkpoint", "regression", "package health"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "checkpoint", "regression", "package health"], limit=8)
         test["requiredContractProof"] = ["cleanup gate", "checkpoint", "regression/package health", "nice-to-have boundary"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer cleanup-before-nice-to-have prompts as a fast Codex CLI UI gate decision instead of timing out through generic chat."
@@ -9511,7 +9518,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["My recommendation", "active project queue"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "queue", "verification gate", "risk boundary"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "queue", "verification gate", "risk boundary"], limit=8)
         test["requiredContractProof"] = ["queue", "verification gate", "risk boundary"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9524,7 +9531,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Fusion 360", "Orca Slicer"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "test bank", "golden", "verification"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "test bank", "golden", "verification"], limit=8)
         test["requiredContractProof"] = ["Fusion 360", "Orca Slicer", "test bank", "golden", "verification"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9537,7 +9544,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "real-world regression cases", "Codex CLI UI"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "test bank", "golden", "/api/run", "package health"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "test bank", "golden", "/api/run", "package health"], limit=8)
         test["requiredContractProof"] = [
             "3D printing/CNC/energy/aero/CFD/engineering/aviation domains",
             "test bank",
@@ -9567,7 +9574,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "standalone macOS desktop app", "Codex CLI UI"]
-        test["requiredTerms"] = normalize_terms(["sidebar", "chat bar", "attachments", "clickable outputs", "steer", "verify"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["sidebar", "chat bar", "attachments", "clickable outputs", "steer", "verify"], limit=8)
         test["requiredContractProof"] = ["standalone macOS app", "sidebar/projects/chats", "chat bar controls", "verification gates"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer Codex CLI UI creation requests as standalone-app architecture with workflow controls and verification gates, not a missing-artifact failure."
@@ -9582,7 +9589,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "same physical bed area", "X/Y offset"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "height map", "compare", "validation"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "height map", "compare", "validation"], limit=8)
         test["requiredContractProof"] = ["same physical bed area", "height map comparison", "X/Y offset", "validation before saving"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer Beacon XY verification as same-area scan comparison and offset validation, not a timeout."
@@ -9592,7 +9599,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["keep moving", "active plan", "pause"]
-        test["requiredTerms"] = normalize_terms(["task", "verify", "pause"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["task", "verify", "pause"], limit=8)
         test["requiredContractProof"] = ["continue active plan", "pause/safety conditions"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer Discord-breakthrough follow-ups by verifying the shared context and continuing the active plan unless safety or goal changes require a pause."
@@ -9606,7 +9613,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["per-user", "Google Calendar", "multiple"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "pilot", "admin", "customer", "permissions", "https://developers.google.com/calendar"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "pilot", "admin", "customer", "permissions", "https://developers.google.com/calendar"], limit=8)
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer Flight Ops Google Calendar export/sync feature requests directly with role, multi-calendar, and permission boundaries."
     if "porkbun" in lower and "passkey" in lower and any(term in lower for term in ("check", "make sure", "nothing more", "on my side")):
@@ -9615,7 +9622,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["passkey", "user-assisted", "domains active", "renewals"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Porkbun", "passkey"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Porkbun", "passkey"], limit=8)
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: handle Porkbun/passkey account checks as user-assisted login with account-health review, never passkey-secret handling."
     if re.fullmatch(r"(?:let'?s|lets)\s+get\s+it\s+all\s+cleaned\s+up[.!? ]*", lower.strip()):
@@ -9631,7 +9638,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["I need the item"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "file path", "printer IP", "repo path"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "file path", "printer IP", "repo path"], limit=8)
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer contextless full-location follow-ups with a fast target request instead of a slow model path."
     if (
@@ -9643,7 +9650,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Paste or attach", "preserving", "delimiter"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "context"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "context"], limit=8)
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: handle single-row reformat requests as layout-only preservation, asking for the missing question list when needed."
     if len(lower.strip()) < 140 and "clean boot" in lower and any(term in lower for term in ("next step", "what's next", "whats next")):
@@ -9652,7 +9659,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["which machine"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "cleanly", "machine"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "cleanly", "machine"], limit=8)
         test["anyTerms"] = []
         test["goal"] = "Context-only clean-boot follow-up: ask which machine/service and restore/setup step should continue instead of inventing a Codex-improvement task."
     if any(term in lower for term in ("start clean every time", "starts clean every time", "startup clean", "start clean")) and any(term in lower for term in ("fix this", "can we fix", "every time")):
@@ -9661,7 +9668,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = False
         test["directTerms"] = []
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "startup", "log", "restart", "health check"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "startup", "log", "restart", "health check"], limit=8)
         test["requiredContractProof"] = ["target context requirement", "clean-start verification loop"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer contextless clean-start fixes with a target request and startup diagnostic loop instead of stale project-specific contracts."
@@ -9675,7 +9682,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["continue", "active plan"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "continue", "pause", "verify"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "continue", "pause", "verify"], limit=8)
         test["requiredContractProof"] = ["continue active plan", "pause/safety conditions"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer next-task continuation prompts as active-plan autonomy with verification and pause/safety gates."
@@ -9686,10 +9693,10 @@ def golden_test_from_prompt(prompt, source):
         test["directAnswer"] = True
         if is_named_heartbeat_task_queue_prompt(prompt):
             test["directTerms"] = ["15-minute", "3-hour", "active plan"]
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "15-minute", "3-hour", "Wave Overhangs", "Strength Modeling Visualizer"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "15-minute", "3-hour", "Wave Overhangs", "Strength Modeling Visualizer"], limit=8)
         else:
             test["directTerms"] = ["continue", "active plan"]
-            test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "active project", "continue", "pause", "verify"], limit=8)
+            test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "active project", "continue", "pause", "verify"], limit=8)
         test["requiredContractProof"] = ["safe-work plan", "approval queue", "risk/safety boundary"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer heartbeat/autonomy cleanup queues as a safe-work plan with approval queue and risk boundary."
@@ -9700,7 +9707,7 @@ def golden_test_from_prompt(prompt, source):
         test["directAnswer"] = True
         test["contextDependent"] = False
         test["directTerms"] = ["15-minute", "12-hour", "caffeinate"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "15-minute", "12-hour", "caffeinate"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "15-minute", "12-hour", "caffeinate"], limit=8)
         test["requiredContractProof"] = ["safe-work plan", "approval queue", "risk/safety boundary"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9714,7 +9721,7 @@ def golden_test_from_prompt(prompt, source):
         test["directAnswer"] = True
         test["contextDependent"] = False
         test["directTerms"] = ["I cannot prove", "5-minute heartbeat", "automation id"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "automation id", "average task completion time", "10-15 minutes"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "automation id", "average task completion time", "10-15 minutes"], limit=8)
         test["requiredContractProof"] = ["automation id", "interval tuning", "task duration"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9728,7 +9735,7 @@ def golden_test_from_prompt(prompt, source):
         test["directAnswer"] = True
         test["contextDependent"] = False
         test["directTerms"] = ["I need the test file", "test name"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "pytest", "test_file.py::test_name", "runner"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "pytest", "test_file.py::test_name", "runner"], limit=8)
         test["requiredContractProof"] = ["test name/path request", "pytest pattern"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9745,7 +9752,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["boathouse design package", "engineering-grade", "official"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "survey", "Lake Tobesofkee", "Georgia", "PE", "permit"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "survey", "Lake Tobesofkee", "Georgia", "PE", "permit"], limit=8)
         test["requiredContractProof"] = ["boathouse design package", "survey/parcel or site plan", "Lake Tobesofkee/Macon-Bibb verification", "Georgia PE or local authority review"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9756,7 +9763,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Probably not", "ViVD"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "exact ViVD model", "target machine"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "exact ViVD model", "target machine"], limit=8)
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: give a useful provisional recommendation for unclear ViVD/device path comparisons instead of a cold clarification or slow model path."
     if any(term in lower for term in ("flight tracker", "flightops", "flight ops")) and any(term in lower for term in ("start", "launch", "run", "open")):
@@ -9765,7 +9772,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Flightops_Tracker", "uvicorn", "127.0.0.1:8000"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "deploy_production_pi.sh", "health"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "deploy_production_pi.sh", "health"], limit=8)
         test["anyTerms"] = []
         test["requiredContractProof"] = ["Flightops_Tracker path", "uvicorn", "health/login check"]
         test["goal"] = "Real chat-history regression: answer Flight Ops Tracker startup reminders with the local app command and production Pi boundary, not UGS/CNC setup."
@@ -9788,7 +9795,7 @@ def golden_test_from_prompt(prompt, source):
         test["directAnswer"] = True
         test["contextDependent"] = False
         test["directTerms"] = ["Not from that description alone", "image/video frame", "position feedback"]
-        test["requiredTerms"] = normalize_terms(
+        test["requiredTerms"] = normalize_required_terms(
             ["This is why", "You should also consider", "camera", "position", "single-axis"],
             limit=8,
         )
@@ -9804,7 +9811,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Apus", "M3 countersunk", "separate"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Apus", "M3 countersunk", "flush", "Dragon", "separate"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Apus", "M3 countersunk", "flush", "Dragon", "separate"], limit=8)
         test["requiredContractProof"] = ["Apus source CAD/drawing boundary", "M3 countersunk flush bottom", "separate Dragon collar/piece"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9822,7 +9829,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Fan 4", "PD14", "chamber2_fan"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Fan 4", "PD14", "chamber2_fan", "config"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Fan 4", "PD14", "chamber2_fan", "config"], limit=8)
         test["requiredContractProof"] = ["Fan 4 or requested fan", "PD14 or requested pin", "config verification caveat"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9834,7 +9841,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["backup", "vcgencmd", "electronics-bay"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "backup", "known-good", "vcgencmd", "electronics-bay", "Moonraker"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "backup", "known-good", "vcgencmd", "electronics-bay", "Moonraker"], limit=8)
         test["requiredContractProof"] = ["backup", "known-good image or reflash method", "vcgencmd or thermal_zone0", "electronics-bay proxy caveat", "no invented updater"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9846,7 +9853,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Max EZ", "192.0.2.107"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Moonraker", "ping", "192.0.2.107"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Moonraker", "ping", "192.0.2.107"], limit=8)
         test["requiredContractProof"] = ["192.0.2.107", "Moonraker", "ping"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9874,7 +9881,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["slicer workspace/plate-state bug", "not a CAD model problem"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "object-to-plate", "fit-to-view", "scene refresh", "add plate"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "object-to-plate", "fit-to-view", "scene refresh", "add plate"], limit=8)
         test["requiredContractProof"] = ["slicer workspace/plate-state", "object-to-plate assignment", "scene refresh or fit-to-view", "add-plate test"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -9886,7 +9893,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["do not feed", "split-phase", "3-phase"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "three-phase", "manual"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "three-phase", "manual"], limit=8)
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
         test["goal"] = "Real chat-history regression: answer inverter three-phase-input compatibility directly, not as a turbine or generator-model rerun."
@@ -9899,7 +9906,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["3 mph", "7 mph", "15 mph"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "torque", "rpm"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "torque", "rpm"], limit=8)
         test["requiresSource"] = False
         test["goal"] = "Real chat-history regression: answer wind-turbine RPM/torque follow-ups with first-order RPM estimates and the added-rotor torque/RPM tradeoff, not source-url research blocking."
     if (
@@ -9911,7 +9918,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "all directions", "opposite direction"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "0", "45", "90", "180", "worst-case"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "0", "45", "90", "180", "worst-case"], limit=8)
         test["requiredContractProof"] = ["all directions", "opposite direction", "0/45/90/135/180 degree cases", "worst-case direction"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -9926,7 +9933,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["rotor", "torque", "active CAD"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "drag", "startup torque", "RPM", "generator"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "drag", "startup torque", "RPM", "generator"], limit=8)
         test["requiredContractProof"] = ["rotor tradeoff", "system/geometry or result-path blocker", "why/caveat shape"]
         test["goal"] = "Real chat-history regression: answer added-rotor wind-turbine follow-ups as engineering tradeoffs with a CAD/result-path blocker, not fake retest claims."
     if is_outdoor_continuous_fiber_fan_material_prompt(prompt):
@@ -9941,7 +9948,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Not automatically", "fiber path is visible", "Rocket Slicer"]
-        test["requiredTerms"] = normalize_terms(["same layer", "G-code", "sidecar", "origin"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["same layer", "G-code", "sidecar", "origin"], limit=8)
         test["requiredContractProof"] = ["Rocket emitted path", "same layer/origin", "G-code/sidecar validation"]
         test["goal"] = "Real chat-history regression: distinguish visible continuous-fiber preview from verified Rocket-matched fiber placement."
     if is_cad_repair_before_return_prompt(prompt):
@@ -9949,7 +9956,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "CAD", "repair"]
-        test["requiredTerms"] = normalize_terms(["repaired geometry", "exact blocker", "validation"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["repaired geometry", "exact blocker", "validation"], limit=8)
         test["requiredContractProof"] = ["repaired geometry", "exact blocker", "validation report"]
         test["goal"] = "Real chat-history regression: answer CAD repair-before-return expectations as a policy and proof gate, not a generic runtime blocker."
     if is_inserted_filament_switch_state_prompt(prompt):
@@ -9958,7 +9965,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["present", "true", "live sensor state"]
-        test["requiredTerms"] = normalize_terms(["filament_detected", "pin", "inversion"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["filament_detected", "pin", "inversion"], limit=8)
         test["requiredContractProof"] = ["present/true state", "filament_detected", "pin/inversion check"]
         test["goal"] = "Real chat-history regression: answer filament-switch state checks with the expected live sensor proof instead of timing out or telling Tinman to check it himself."
     if is_orca_codex_vs_tinmanx_strategy_prompt(prompt):
@@ -9967,7 +9974,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Modify Orca Codex first", "faster", "TinManX"]
-        test["requiredTerms"] = normalize_terms(["supports", "Strength Lens", "FibreSeeker", "verification"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["supports", "Strength Lens", "FibreSeeker", "verification"], limit=8)
         test["requiredContractProof"] = ["Orca Codex recommendation", "supports/strength/FibreSeeker scope", "migration verification gates"]
         test["goal"] = "Real chat-history regression: answer Orca Codex versus TinManX build-strategy questions with a clear recommendation, not wrong-build shortcut repair."
     if is_orca_codex_wrong_build_prompt(prompt):
@@ -9976,7 +9983,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Orca Codex", "TinmanX", "launcher"]
-        test["requiredTerms"] = normalize_terms(["this is why", "verify", "profile", "path"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "verify", "profile", "path"], limit=8)
         test["anyTerms"] = []
         test["requiredContractProof"] = ["OrcaSlicer Codex target", "TinmanX exclusion", "verification gates"]
         test["goal"] = "Real chat-history regression: answer Orca Codex wrong-build/launcher alignment questions instead of applying the broader Orca-vs-TinManX strategy test."
@@ -9986,7 +9993,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Next step", "slicer-ready"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "package health", "profile", "slice", "preview", "G-code"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "package health", "profile", "slice", "preview", "G-code"], limit=8)
         test["requiredContractProof"] = ["package health", "profiles visible", "slice test", "G-code or preview"]
         test["anyTerms"] = []
         test.pop("contextDependent", None)
@@ -9997,7 +10004,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "shared Orca profile/config", "active app"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "archive", "aliases", "verify"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "archive", "aliases", "verify"], limit=8)
         test["requiredContractProof"] = ["shared profile/config", "archive", "active app", "aliases", "JSON/profile scan"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer Orca/TinManX parsing-error repair requests with archive-first local profile/config/log checks instead of a generic housekeeping contract."
@@ -10007,7 +10014,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["PPS-CF", "$", "kg"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "$", "kg", "current"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "$", "kg", "current"], limit=8)
         test["requiredContractProof"] = ["price range", "current-price caveat", "material-class caveat"]
         test["goal"] = "Real chat-history regression: answer engineering-filament cost questions with a useful ballpark and live-price caveat instead of timing out or requiring stale unrelated terms."
     if "snapmaker" in lower and "u1" in lower and any(term in lower for term in ("0.6 nozzle", "0.6mm nozzle", "0.6-mm nozzle", "0.6 mm nozzle")) and any(term in lower for term in ("machine profile", "printer profile", "profile")):
@@ -10016,7 +10023,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Snapmaker U1", "0.6 nozzle", "not verified"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Orca", "installed profile", "visible"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Orca", "installed profile", "visible"], limit=8)
         test["requiredContractProof"] = ["Snapmaker U1", "0.6 nozzle", "installed profile store", "Orca/TinManX UI visibility"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer missing Snapmaker U1 0.6 Orca profile visibility as an installed-profile verification task, not white-paper or live-printer status."
@@ -10026,7 +10033,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["CC1", "CAD", "source"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "5-15 mm", "measured", "housing"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "5-15 mm", "measured", "housing"], limit=8)
         test["requiredContractProof"] = ["source path or blocker", "fallback model plan"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer CC1 runout-housing CAD-source requests as a source lookup/fallback-model task, not mechanical FEA."
@@ -10036,7 +10043,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["responsible program", "symptom", "process"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "logs", "file", "network"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "logs", "file", "network"], limit=8)
         test["requiredContractProof"] = ["symptom or target context", "process/log checks", "proof before naming program"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10048,7 +10055,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["M2", "unified memory", "local AI"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "CAD", "slicer", "GPU"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "CAD", "slicer", "GPU"], limit=8)
         test["requiredContractProof"] = ["M2", "unified memory", "local AI/CAD/CFD/slicer workload", "upgrade direction"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10060,7 +10067,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["read-only", "Mac security sweep"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Gatekeeper", "FileVault"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Gatekeeper", "FileVault"], limit=8)
         test["requiredContractProof"] = ["macOS", "Gatekeeper", "FileVault", "firewall", "SIP"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10072,7 +10079,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["WF-2960", "CUPS"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "black-only", "color cartridge"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "black-only", "color cartridge"], limit=8)
         test["requiredContractProof"] = ["WF-2960", "CUPS or IPP or ARP", "black-only", "empty color cartridge caveat"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10084,7 +10091,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["CAD", "candidate"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "source", "verification"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "source", "verification"], limit=8)
         test["requiredContractProof"] = ["source CAD URL/path or explicit search blocker", "CAD model criteria", "verification boundary"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10096,7 +10103,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["M5", "45-degree", "90-degree", "barbed"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "push", "source"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "push", "source"], limit=8)
         test["requiredContractProof"] = ["source CAD URL/path or explicit search blocker", "M5 fitting criteria", "generated-candidate fallback boundary"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10108,7 +10115,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["STL", "STEP", "OpenSCAD"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "FreeCAD", "verification"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "FreeCAD", "verification"], limit=8)
         test["requiredContractProof"] = ["OpenSCAD/STL", "STEP/FreeCAD", "verification"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10120,7 +10127,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "PETG-CF", "part cooling"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "20-40", "layer bonding"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "20-40", "layer bonding"], limit=8)
         test["requiredContractProof"] = ["PETG-CF", "20-40 percent", "layer bonding", "bridges/overhangs"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10132,7 +10139,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["simulator", "package", "acceptance gate"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "pass/fail report", "hardware"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "pass/fail report", "hardware"], limit=8)
         test["requiredContractProof"] = ["simulator", "package", "acceptance gate", "pass/fail report", "hardware proof boundary"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10144,7 +10151,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Stay on", "15.x", "Tahoe"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "preflight", "toolchain"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "preflight", "toolchain"], limit=8)
         test["requiredContractProof"] = ["15.x installed", "26.x Tahoe-only", "preflight"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10156,7 +10163,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Probably", "active design", "goal"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "compare", "options"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "compare", "options"], limit=8)
         test["requiredContractProof"] = ["active design", "goal", "compare 2-3 design options"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10168,7 +10175,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "file picker", "drag-and-drop"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "attachment", "run payload"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "attachment", "run payload"], limit=8)
         test["requiredContractProof"] = ["file picker", "attachment path", "verification path"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10185,7 +10192,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "local upload", "GitHub"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "100-file", "git remote", "privacy", "batch"], limit=10)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "100-file", "git remote", "privacy", "batch"], limit=10)
         test["requiredContractProof"] = ["100-file upload limit", "local upload records", "git remote/target repo", "privacy/package checks"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10201,7 +10208,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "curated local history"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "sanitize", "project", "source vault", "golden tests"], limit=10)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "sanitize", "project", "source vault", "golden tests"], limit=10)
         test["requiredContractProof"] = ["local Codex sessions", "sanitize secrets", "project summaries/source vault", "golden tests", "verification questions"]
         test["forbiddenTerms"] = sorted(set(test.get("forbiddenTerms", []) + ["codex-cli sessions export", "codex-cli sessions import"]))
         test["anyTerms"] = []
@@ -10215,7 +10222,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["I need", "project", "simulator"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "project", "simulator"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "project", "simulator"], limit=8)
         test["anyTerms"] = []
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -10227,7 +10234,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["Understood", "pause"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "mechanical inspection", "resume"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "mechanical inspection", "resume"], limit=8)
         test["requiredContractProof"] = ["pause acknowledgment", "resume condition"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10240,7 +10247,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["Terminate", "stopping point"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "terminate", "stopping point", "safe"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "terminate", "stopping point", "safe"], limit=8)
         test["requiredContractProof"] = ["terminate acknowledged", "stopping point", "safe idle or saved state"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10253,7 +10260,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["target", "driver"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "driver", "Moonraker", "read-only"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "driver", "Moonraker", "read-only"], limit=8)
         test["requiredContractProof"] = ["target device request", "driver ambiguity", "read-only status path"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10266,7 +10273,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["target printer", "pump", "MCU"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "pump", "MCU", "Moonraker", "read-only"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "pump", "MCU", "Moonraker", "read-only"], limit=8)
         test["requiredContractProof"] = ["target printer request", "pump object/data path", "MCU temperature status path"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10279,7 +10286,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["80 C", "PET-CF"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "80 C", "PET-CF", "PEI"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "80 C", "PET-CF", "PEI"], limit=8)
         test["requiredContractProof"] = ["80 C", "70-75 C tune range", "PET-CF not PETG-CF"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10292,7 +10299,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["coupon", "80 C"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "coupon", "80 C", "slow-cool"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "coupon", "80 C", "slow-cool"], limit=8)
         test["requiredContractProof"] = ["not mandatory", "coupon", "80 C", "slow-cool"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10305,7 +10312,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["wlan1", "Moonraker"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "wlan1", "Moonraker", "association"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "wlan1", "Moonraker", "association"], limit=8)
         test["requiredContractProof"] = ["wlan1", "association or priority", "Moonraker verification"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10318,7 +10325,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "USB Wi-Fi dongle"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "lsusb", "ip link", "default route", "Moonraker"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "lsusb", "ip link", "default route", "Moonraker"], limit=8)
         test["requiredContractProof"] = ["USB Wi-Fi dongle", "lsusb", "ip link or iw dev", "default route or metric", "Moonraker/SSH verification"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10332,7 +10339,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["local printer inventory", "Qidi"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Qidi Plus 4", "Qidi Max EZ", "local printer inventory", "UI"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Qidi Plus 4", "Qidi Max EZ", "local printer inventory", "UI"], limit=8)
         test["requiredContractProof"] = ["local inventory", "Qidi Plus 4", "Qidi Max EZ", "database or UI", "backup or stale/collision handling"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10346,7 +10353,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["current saved printer IP list", "Qidi"]
-        test["requiredTerms"] = normalize_terms(["current saved printer IP list", "Qidi Plus 4", "Qidi Max EZ", "saved inventory", "live reachability"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["current saved printer IP list", "Qidi Plus 4", "Qidi Max EZ", "saved inventory", "live reachability"], limit=8)
         test["requiredContractProof"] = ["saved printer IP list", "Qidi or printer names", "live status caveat"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10360,7 +10367,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["Rat Rig", "macro"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Klipper", "printer.cfg", "validation"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Klipper", "printer.cfg", "validation"], limit=8)
         test["requiredContractProof"] = ["Rat Rig config folder", "macro filename/body or blocker", "printer.cfg include", "Klipper config validation"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10374,7 +10381,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Qidi"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "load", "unload", "max_extrude_only_velocity", "backup"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "load", "unload", "max_extrude_only_velocity", "backup"], limit=8)
         test["requiredContractProof"] = ["load/unload macro variables", "max_extrude_only_velocity or clamp", "backup", "Klipper config validation"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10388,7 +10395,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Qidi camera"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "FPS", "camera service", "10-15 FPS", "UI verification"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "FPS", "camera service", "10-15 FPS", "UI verification"], limit=8)
         test["requiredContractProof"] = ["camera service/config", "FPS or stream endpoint", "10-15 FPS target", "restart camera service", "UI verification"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10402,7 +10409,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["Max EZ", "profile"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Max EZ", "profile", "acceleration"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Max EZ", "profile", "acceleration"], limit=8)
         test["requiredContractProof"] = ["Max EZ", "0.4/0.8/1.0 or acceleration", "profile visibility or validation"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10415,7 +10422,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["fixed 5-minute", "adaptive"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "adaptive", "PRINT_START", "5-minute"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "adaptive", "PRINT_START", "5-minute"], limit=8)
         test["requiredContractProof"] = ["fixed 5-minute soak", "adaptive stability checks", "PRINT_START or macro proof"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10428,7 +10435,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["router audit", "backup"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "router", "backup", "read-only"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "router", "backup", "read-only"], limit=8)
         test["requiredContractProof"] = ["router backup/export", "read-only inventory", "before/after verification"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10441,7 +10448,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "permission", "router"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "passwords", "backup", "supervised"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "passwords", "backup", "supervised"], limit=8)
         test["requiredContractProof"] = ["supervised local session", "read-only config export", "no pasted passwords", "backup/rollback"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10455,7 +10462,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "SSH"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "SSH", "backup", "rollback"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "SSH", "backup", "rollback"], limit=8)
         test["requiredContractProof"] = ["SSH access", "read-only inventory", "backup/rollback", "feature gap list"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10468,7 +10475,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["not assume", "Max EZ"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Max EZ", "PRINT_START", "adaptive"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Max EZ", "PRINT_START", "adaptive"], limit=8)
         test["requiredContractProof"] = [".145 Qidi caveat", "Max EZ active config", "adaptive stability checks"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10481,7 +10488,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["probably", "toolhead"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "toolhead", "filament_switch_sensor", "pinout"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "toolhead", "filament_switch_sensor", "pinout"], limit=8)
         test["requiredContractProof"] = ["toolhead board pinout", "spare input", "filament_switch_sensor", "sensor-state test"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10494,7 +10501,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["Orca", "Save this"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Orca", "save", "filament"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Orca", "save", "filament"], limit=8)
         test["requiredContractProof"] = ["Orca", "visual evidence", "Save this"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10507,7 +10514,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["Do not assume", "HE0"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "HE0", "Klipper", "output_pin"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "HE0", "Klipper", "output_pin"], limit=8)
         test["requiredContractProof"] = ["board schematic/pin map", "Klipper config", "output_pin or light macro"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10520,7 +10527,7 @@ def golden_test_from_prompt(prompt, source):
         test["contextDependent"] = False
         test["directAnswer"] = True
         test["directTerms"] = ["layer shift", "mechanical"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "belt", "pulley", "acceleration"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "belt", "pulley", "acceleration"], limit=8)
         test["requiredContractProof"] = ["process judgment", "X-axis checks", "speed-step plan"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10537,7 +10544,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["log", "profile", "filament"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "log", "profile", "spool"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "log", "profile", "spool"], limit=8)
         test["requiredContractProof"] = ["local log/profile evidence", "active filament profile path", "last-spool uncertainty boundary"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10549,7 +10556,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["linear bearing", "carbon fiber tube", "active CAD"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "load", "clearance", "alignment"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "load", "clearance", "alignment"], limit=8)
         test["requiredContractProof"] = ["linear bearing", "carbon fiber tube", "load path/clearance", "active CAD"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer carbon-tube linear-bearing relocation follow-ups with mechanical tradeoffs and an active-CAD boundary, not a timeout."
@@ -10559,7 +10566,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["at least one", "both CC machines", "immediate pause"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "timer", "verify"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "timer", "verify"], limit=8)
         test["requiredContractProof"] = ["history uncertainty boundary", "immediate-pause path", "verify both configs"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: recall Centauri Carbon filament-runout protocol changes without overclaiming both machines."
@@ -10574,7 +10581,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["estimated Strength Lens", "not guaranteed"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "orientation", "load direction", "material"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "orientation", "load direction", "material"], limit=8)
         test["requiredContractProof"] = ["estimated Strength Lens concept", "orientation/load/material caveat", "preview/report behavior"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer slicer strength-slider questions as estimated material/orientation guidance, not printer runout or fake lab strength."
@@ -10584,7 +10591,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["IP", "access code", "local inventory"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "verified", "local", "missing"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "verified", "local", "missing"], limit=8)
         test["requiredContractProof"] = ["H2D or Bambu target", "IP/access code", "local inventory/config source or missing-record boundary"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10596,7 +10603,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Orca/TinManX profile-sync audit", "Bambu Studio", "X1C", "H2D"]
-        test["requiredTerms"] = normalize_terms(["machine", "process", "filament", "backup", "verify"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["machine", "process", "filament", "backup", "verify"], limit=8)
         test["requiredContractProof"] = ["Bambu Studio", "X1C", "H2D", "machine/process/filament", "backup/verification"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: answer Bambu Studio to Orca/TinManX profile-sync requests as a field-by-field audit with backup and installed-app verification."
@@ -10606,7 +10613,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["M5 x 0.8", "4 mm", "5225K923"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "https://www.mcmaster.com", "body", "height", "wrench"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "https://www.mcmaster.com", "body", "height", "wrench"], limit=8)
         test["anyTerms"] = []
         test["requiredContractProof"] = ["M5", "4 mm", "McMaster source/search path", "body diameter or height"]
         test["goal"] = "Real chat-history regression: answer compact McMaster fitting searches by preserving M5 thread, 4 mm tube OD, source/search path, and toolhead packaging constraints."
@@ -10616,7 +10623,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Amazon", "delta", "listing"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Source to check", "delta"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Source to check", "delta"], limit=8)
         test["requiredContractProof"] = ["Amazon source link or ASIN", "delta criteria", "fetch/blocker boundary"]
         test["anyTerms"] = []
         test["goal"] = "Real chat-history regression: Amazon link follow-ups should compare the listing delta against the current shortlist without fake current-price/spec claims."
@@ -10626,7 +10633,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["do not pick specific", "RPM", "torque"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "motor", "battery", "controller"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "motor", "battery", "controller"], limit=8)
         test["requiredContractProof"] = ["matched powertrain system", "RPM/torque/load/runtime inputs", "sourced shortlist boundary"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10637,7 +10644,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Blow cool air", "MCU", "exhaust path"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "drivers", "exhaust"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "drivers", "exhaust"], limit=8)
         test["requiredContractProof"] = ["blow onto MCU/drivers", "exhaust path", "temperature/dust/wire caveat"]
         test["goal"] = "Real chat-history regression: answer controller-fan airflow direction directly instead of timing out on a generic model path."
     if is_core_one_l_calibration_prompt(prompt):
@@ -10646,7 +10653,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Core One L calibrations", "idle", "profile"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "temperature tower", "pressure advance", "first-layer"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "temperature tower", "pressure advance", "first-layer"], limit=8)
         test["requiredContractProof"] = ["ordered calibration sequence", "idle/reachable safety gate", "profile/print validation"]
         test["goal"] = "Real chat-history regression: answer Core One L calibration-run requests with a safe ordered calibration plan, not a CAD-repair or CAD-reference contract."
     if is_tailscale_ssh_definition_prompt(prompt):
@@ -10655,7 +10662,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["No", "Tailscale", "SSH"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "remote shell"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "remote shell"], limit=8)
         test["requiredContractProof"] = ["Tailscale is VPN/overlay", "SSH is remote shell protocol", "can carry SSH"]
         test["goal"] = "Real chat-history regression: explain that Tailscale is not SSH but can carry or provide SSH access."
     if is_rocket_slicer_machine_data_prompt(prompt):
@@ -10664,7 +10671,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Rocket", "machine data", "G-code header"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "G-code header", "differential harness"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "G-code header", "differential harness"], limit=8)
         test["requiredContractProof"] = ["Rocket profiles/export", "G-code header", "differential harness"]
         test["goal"] = "Real chat-history regression: answer Rocket Slicer machine-data pull requests with local profile/export/G-code evidence, not a FibreSeek tool-map audit."
     if "rocket" in lower and any(term in lower for term in ("backend", "limitations", "output", "will output", "what rocket will output")) and any(term in lower for term in ("last recommendation", "recommendation", "going with", "cause any issues", "cause issues")):
@@ -10673,7 +10680,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Rocket", "G-code", "machine-limit"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "dry-run", "compare"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "dry-run", "compare"], limit=8)
         test["anyTerms"] = []
         test["requiredContractProof"] = ["G-code", "machine-limit", "dry-run"]
         test["goal"] = "Real chat-history regression: answer Rocket backend-output compatibility follow-ups with G-code and machine-limit validation, not generic source-backed research."
@@ -10683,7 +10690,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["selected filament", "chamber", "profile"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "enable", "setpoint"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "enable", "setpoint"], limit=8)
         test["anyTerms"] = []
         test["requiredContractProof"] = ["selected filament", "chamber profile key", "verification path"]
         test["goal"] = "Real chat-history regression: explain Orca active chamber behavior by selected filament instead of demanding profile-pack artifacts."
@@ -10693,7 +10700,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Christian Bible", "Hebrew Scripture", "New Testament"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "Tanakh", "translation"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "Tanakh", "translation"], limit=8)
         test["anyTerms"] = []
         test["requiredContractProof"] = ["Christian Bible", "Hebrew Scripture", "New Testament"]
         test["goal"] = "Real chat-history regression: answer KJV versus Hebrew Scripture comparisons directly by canon, translation, order, and New-Testament scope."
@@ -10703,7 +10710,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["TinManX", "wave overhangs", "ready"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "preview", "G-code", "test print"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "preview", "G-code", "test print"], limit=8)
         test["anyTerms"] = []
         test["requiredContractProof"] = ["readiness gates", "preview/G-code validation", "test model"]
         test["requiresSource"] = False
@@ -10715,7 +10722,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["wave-overhang generator", "preview", "G-code"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "wave-overhang generator", "preview", "G-code", "test print"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "wave-overhang generator", "preview", "G-code", "test print"], limit=8)
         test["anyTerms"] = []
         test["requiredContractProof"] = ["generator workflow", "preview/G-code validation", "test model"]
         test["requiresSource"] = False
@@ -10727,7 +10734,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Andersons", "Kaiser LaSO", "experimental"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "WaveOverhangs", "test"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "WaveOverhangs", "test"], limit=8)
         test["anyTerms"] = []
         test["requiredContractProof"] = ["Andersons default", "Kaiser LaSO", "preview or test print"]
         test["goal"] = "Real chat-history regression: answer Andersons versus Kaiser LaSO as an Orca/WaveOverhangs slicer algorithm comparison, not a generic algorithm timeout."
@@ -10737,7 +10744,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["zoom in", "zoom out", "reset-to-fit"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "previewScale", "clamp"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "previewScale", "clamp"], limit=8)
         test["requiredContractProof"] = ["zoom in", "zoom out", "reset-to-fit", "previewScale or scale clamp"]
         test["goal"] = "Real chat-history regression: answer preview zoom-control requests as a concrete Codex CLI UI feature instead of stale missing-context metadata."
     if is_slotted_turbine_hub_modular_design_prompt(prompt):
@@ -10746,7 +10753,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["one-piece rotor hub", "separate blades", "300 mm"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "positive", "overspeed", "ASA-CF"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "positive", "overspeed", "ASA-CF"], limit=8)
         test["requiredContractProof"] = ["one-piece hub", "separate blades", "300 mm build volume", "positive retention", "overspeed or stress caveat"]
         test["goal"] = "Real chat-history regression: answer slotted modular turbine-hub design ideas directly with build-volume and mechanical-retention reasoning instead of timing out on the generic route."
     if is_rotor_material_mass_prompt(prompt):
@@ -10755,7 +10762,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["ASA-CF", "infill", "mass"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "ASA-CF", "infill", "startup torque", "validate"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "ASA-CF", "infill", "startup torque", "validate"], limit=8)
         test["requiredContractProof"] = ["ASA-CF stiffness", "infill/mass", "startup torque or inertia", "stress/balance/overspeed validation"]
         test["goal"] = "Real chat-history regression: answer rotor material/infill/mass follow-ups as an engineering tradeoff instead of a CAD file-format reference."
     if is_eject_until_box_sensor_unloaded_prompt(prompt):
@@ -10765,7 +10772,7 @@ def golden_test_from_prompt(prompt, source):
         test["directAnswer"] = True
         test["contextDependent"] = False
         test["directTerms"] = ["Yes", "controlled unload", "sensor"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "unloaded", "jam", "idle"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "unloaded", "jam", "idle"], limit=8)
         test["anyTerms"] = []
         test["requiredContractProof"] = ["controlled unload", "sensor/empty check", "jam safety caveat"]
         test["forbiddenTerms"] = sorted(set(test.get("forbiddenTerms", []) + ["diskutil", "exact mounted volume", "the disk"]))
@@ -10777,7 +10784,7 @@ def golden_test_from_prompt(prompt, source):
         test["directAnswer"] = True
         test["contextDependent"] = False
         test["directTerms"] = ["eject", "exact mounted volume", "device"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "volume", "device", "diskutil"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "volume", "device", "diskutil"], limit=8)
         test["anyTerms"] = []
         test["requiredContractProof"] = ["target volume/device", "diskutil path"]
         test["goal"] = "Real chat-history regression: handle disk eject requests as a safe target-context prompt instead of generic missing-context wording."
@@ -10788,7 +10795,7 @@ def golden_test_from_prompt(prompt, source):
         test["directAnswer"] = True
         test["contextDependent"] = False
         test["directTerms"] = ["motion-system testing", "target printer", "idle"]
-        test["requiredTerms"] = normalize_terms(
+        test["requiredTerms"] = normalize_required_terms(
             ["This is why", "You should also consider", "motion-system", "target printer", "idle", "small movement"],
             limit=8,
         )
@@ -10808,7 +10815,7 @@ def golden_test_from_prompt(prompt, source):
         test["directAnswer"] = True
         test["contextDependent"] = False
         test["directTerms"] = ["Good", "bed-mesh deviation", "first layer"]
-        test["requiredTerms"] = normalize_terms(
+        test["requiredTerms"] = normalize_required_terms(
             ["This is why", "You should also consider", "good", "bed-mesh", "0.20-0.30 mm", "first layer"],
             limit=8,
         )
@@ -10824,7 +10831,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "PT6", "ITT"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "icing", "torque", "Ng", "AFM"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "icing", "torque", "Ng", "AFM"], limit=8)
         test["requiredContractProof"] = ["PT6", "ITT", "icing", "torque or Ng", "POH or AFM caveat"]
         test["goal"] = "Real chat-history regression: answer PT6/King Air icing and ITT questions as aviation diagnostics, not stale embedded/RatOS work."
     if is_codex_personality_settings_prompt(prompt):
@@ -10833,7 +10840,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Humor", "Friendliness"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "persist", "safety"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "persist", "safety"], limit=8)
         test["requiredContractProof"] = ["Humor", "Friendliness", "persist", "safety-critical cap"]
         test["goal"] = "Real chat-history regression: answer personality-control requests directly without requiring fake file/action artifacts."
     if is_cm4_vs_pi5_prompt(prompt):
@@ -10842,7 +10849,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["CM4", "Pi 5", "printer-host"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "eMMC", "heat", "bench"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "eMMC", "heat", "bench"], limit=8)
         test["requiredContractProof"] = ["CM4", "Pi 5", "eMMC or carrier", "bench boot/proven image"]
         test["goal"] = "Real chat-history regression: answer CM4-versus-Pi5 printer-host follow-ups directly instead of timing out on a local model path."
     if is_cm4_ram_size_prompt(prompt):
@@ -10851,7 +10858,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["4 GB", "CM4", "sweet spot"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "2 GB", "8 GB", "eMMC"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "2 GB", "8 GB", "eMMC"], limit=8)
         test["requiredContractProof"] = ["4 GB sweet spot", "2 GB light workload", "8 GB heavy extras", "eMMC/reliability caveat"]
         test["goal"] = "Real chat-history regression: answer CM4 RAM sizing directly for printer-host workloads instead of taking a slow generic model path."
     if is_dot147_beacon_offset_update_prompt(prompt):
@@ -10860,7 +10867,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = [".147", "Beacon offset", "config check"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "backup", "idle", "klippy.log"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "backup", "idle", "klippy.log"], limit=8)
         test["requiredContractProof"] = [".147 target", "Beacon offset values", "backup/diff", "config check", "idle/reachable safety gate"]
         test["goal"] = "Real chat-history regression: handle .147 Beacon offset update requests as safe live-printer config changes instead of timing out."
     if is_coolant_printed_fittings_prompt(prompt):
@@ -10869,7 +10876,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["distilled water", "PETG", "pressure-test"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "glycol", "PLA", "pressure-test"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "glycol", "PLA", "pressure-test"], limit=8)
         test["requiredContractProof"] = ["coolant recommendation", "printed fitting material recommendation", "pressure/high-temperature caveat"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10881,7 +10888,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Fusion", "Loft", "Combine", "hollow"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "Loft", "Combine", "hollow"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "Loft", "Combine", "hollow"], limit=8)
         test["anyTerms"] = []
         test["requiredContractProof"] = ["Fusion workflow", "connector body", "Combine Join", "hollow tube caveat"]
         test["goal"] = "Real chat-history regression: preserve CAD follow-up context for Fusion perpendicular tube work instead of flattening it into generic capability."
@@ -10891,7 +10898,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Combine", "Cut", "Split Body"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "Fusion", "Keep Tools"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "Fusion", "Keep Tools"], limit=8)
         test["anyTerms"] = []
         test["requiredContractProof"] = ["Fusion subtract workflow", "complex-geometry fallback", "validation/check step"]
         test["goal"] = "Real chat-history regression: answer complex Fusion solid-removal questions directly with the right CAD workflow instead of routing as generic."
@@ -10901,7 +10908,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "source files", "Fusion 360 script"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "folder path", "component", ".f3d"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "folder path", "component", ".f3d"], limit=8)
         test["anyTerms"] = []
         test["requiredContractProof"] = ["source files or folder path", "Fusion 360 Python script", "component import/rebuild plan", ".f3d/.f3z boundary"]
         test["goal"] = "Real chat-history regression: for Fusion scripts over unspecified designs, state the missing source-files/folder blocker instead of inventing geometry."
@@ -10911,7 +10918,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Fusion 360-ready", ".f3d", ".f3z"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "script", "STEP", "native"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "script", "STEP", "native"], limit=8)
         test["anyTerms"] = []
         test["requiredContractProof"] = ["Fusion 360-ready", ".f3d/.f3z boundary", "script or STEP handoff"]
         test["goal"] = "Real chat-history regression: answer Fusion 360 capability questions directly without demanding a generated CAD artifact."
@@ -10921,7 +10928,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Fusion lockup", "file", "healed STEP"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "FreeCAD", "blocker"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "FreeCAD", "blocker"], limit=8)
         test["anyTerms"] = []
         test["requiredContractProof"] = ["Fusion lockup", "file/path inspection", "healed STEP or Fusion script", "repaired candidate or blocker"]
         test["goal"] = "Real chat-history regression: handle P-51 Fusion lockup recovery directly with a local file-inspection and CAD handoff repair path instead of timing out."
@@ -10931,7 +10938,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["professional title", "Vevor", "Backup Power"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "Finder", "label"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "Finder", "label"], limit=8)
         test["anyTerms"] = []
         test["requiredContractProof"] = ["professional title", "Vevor or Backup Power example", "file/UI label consistency"]
         test["goal"] = "Real chat-history regression: preserve Tinman's professional output-label preference for engineering deliverables instead of grading it as a hardware search."
@@ -10941,7 +10948,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["autosave", "preset", "verify"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "Orca", "Codex CLI UI"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "Orca", "Codex CLI UI"], limit=8)
         test["anyTerms"] = []
         test["requiredContractProof"] = ["autosave/apply/close", "preset save", "reopen/verify persistence"]
         test["goal"] = "Real chat-history regression: answer missing Save-button settings prompts directly instead of timing out on a generic route."
@@ -10951,7 +10958,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["actual slicer work", "credit/attribution", "verified"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "profile", "UI-visible", "source-credit"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "profile", "UI-visible", "source-credit"], limit=8)
         test["requiredContractProof"] = ["actual slicer work", "credit/attribution boundary", "verified/staged/discussed buckets"]
         test["goal"] = "Real chat-history regression: answer slicer-work status questions directly with actual engineering-vs-credit accounting instead of timing out on the generic slicer route."
     if is_fibreseek_fiber_amount_location_prompt(prompt):
@@ -10960,7 +10967,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["fiber/process strategy", "Fiber Amount", "Fiber Density"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "preview", "fiber-usage"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "preview", "fiber-usage"], limit=8)
         test["requiredContractProof"] = ["fiber/process strategy", "plastic filament", "Fiber Amount", "Fiber Density", "preview", "fiber-usage"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -10972,7 +10979,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["closed-loop self-improvement", "regression", "safety gates"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "test case", "diagnosis", "patch", "rerun"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "test case", "diagnosis", "patch", "rerun"], limit=8)
         test["anyTerms"] = []
         test["requiredContractProof"] = ["closed-loop self-improvement", "regression tests", "diagnosis/patch/rerun", "safety gates"]
         test["goal"] = "Real chat-history regression: interpret Tinman's 'your son' shorthand as Codex CLI UI and answer with a systemic self-improvement loop instead of generic advice."
@@ -10982,7 +10989,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["You are right", "regression", "rerun"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "wrong output", "contract", "tool", "regression"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "wrong output", "contract", "tool", "regression"], limit=8)
         test["anyTerms"] = []
         test["requiresSource"] = False
         test["requiredContractProof"] = ["wrong output diagnosis", "contract/tool-path fix", "regression test", "rerun proof"]
@@ -10993,7 +11000,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["No", "BTT ViVD", "external"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "runout", "tangle", "external sensor", "manual"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "runout", "tangle", "external sensor", "manual"], limit=8)
         test["requiredContractProof"] = ["BTT ViVD", "runout", "tangle", "external sensor", "manual/pinout caveat"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -11005,7 +11012,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "T0", "T1"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "T0", "T1", "Beacon", "Klipper", "toolhead"], limit=10)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "T0", "T1", "Beacon", "Klipper", "toolhead"], limit=10)
         test["anyTerms"] = []
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -11016,7 +11023,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "ViVD", "U1"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "one feeder", "handoff", "bench macro"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "one feeder", "handoff", "bench macro"], limit=8)
         test["requiredContractProof"] = ["one feeder at a time", "handoff state machine", "grind/buckle risk", "bench macro"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -11028,7 +11035,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["custom", "U1", "ViVD"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "handoff", "BTT", "BIGTREETECH_MMS", "do not"], limit=10)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "handoff", "BTT", "BIGTREETECH_MMS", "do not"], limit=10)
         test["requiredContractProof"] = ["custom external loader/handoff", "U1 firmware support caveat", "BTT ViVD/MMS source", "no guessed Snapmaker firmware/plugin"]
         test["forbiddenTerms"] = sorted(set(test.get("forbiddenTerms", []) + ["snapmaker/firmware.git", "vivd --check", "python3-vivd", "enable_vivd = true"]))
         test["anyTerms"] = []
@@ -11041,7 +11048,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Possible", "experimental", "toolhead"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "device identity", "one toolhead", "source"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "device identity", "one toolhead", "source"], limit=8)
         test["requiredContractProof"] = ["possible but experimental", "device identity/config namespace", "one toolhead first", "official source caveat"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -11053,7 +11060,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Klipper"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Klipper", "Moonraker", "CSS", "backup", "validation"], limit=10)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Klipper", "Moonraker", "CSS", "backup", "validation"], limit=10)
         test["requiredContractProof"] = ["Klipper/Moonraker assets", "CSS/theme edit", "backup", "UI validation"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -11065,7 +11072,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["BTT ViVD", "bench-test", "official"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "firmware", "slicer", "wiring", "manual"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "firmware", "slicer", "wiring", "manual"], limit=8)
         test["requiredContractProof"] = ["BTT ViVD", "official docs/manual", "bench-test plan", "firmware/slicer/wiring gates", "no guessed repo/build commands"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -11078,7 +11085,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["filament-path block diagram", "ViVD Filament Path To Toolhead"]
-        test["requiredTerms"] = normalize_terms(
+        test["requiredTerms"] = normalize_required_terms(
             [
                 "filament-path block diagram",
                 "ViVD Filament Path To Toolhead",
@@ -11110,7 +11117,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Graphviz"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Graphviz", "draw.io", "Mermaid", "KiCad"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Graphviz", "draw.io", "Mermaid", "KiCad"], limit=8)
         test["requiredContractProof"] = ["Graphviz", "draw.io or Mermaid", "KiCad boundary"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -11133,7 +11140,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "current nozzle/build artifact", "simulator"]
-        test["requiredTerms"] = normalize_terms(
+        test["requiredTerms"] = normalize_required_terms(
             [
                 "This is why",
                 "You should also consider",
@@ -11172,7 +11179,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["medium", "auto-escalate", "completion time"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "weekly", "high/deep"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "weekly", "high/deep"], limit=8)
         test["anyTerms"] = []
         test["requiredContractProof"] = ["medium default", "auto-escalate", "completion-time tradeoff"]
         test["goal"] = "Real chat-history regression: answer reasoning-level data-budget tradeoffs directly with a medium-default plus escalation policy."
@@ -11182,7 +11189,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Y-only", "G28 Y", "do not command another X move"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "belts", "toolhead"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "belts", "toolhead"], limit=8)
         test["requiredContractProof"] = ["G28 Y", "no X move", "clear-path safety", "post-home verification"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -11194,7 +11201,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Next step", "load the filament", "heat and purge"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "sensor", "calibration"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "sensor", "calibration"], limit=8)
         test["requiredContractProof"] = ["load/purge sequence", "sensor/drag caveat"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -11217,7 +11224,7 @@ def golden_test_from_prompt(prompt, source):
                 test["expectedContractGate"] = "pass"
                 test["directAnswer"] = True
                 test["directTerms"] = []
-                test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+                test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
                 test["requiredContractProof"] = proof_terms
                 test["anyTerms"] = []
                 test["requiresSource"] = False
@@ -11245,7 +11252,7 @@ def golden_test_from_prompt(prompt, source):
                 test["expectedContractGate"] = "pass"
                 test["directAnswer"] = True
                 test["directTerms"] = []
-                test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+                test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
                 test["requiredContractProof"] = proof_terms
                 test["anyTerms"] = []
                 test["requiresSource"] = False
@@ -11270,7 +11277,7 @@ def golden_test_from_prompt(prompt, source):
                 test["expectedContractGate"] = "pass"
                 test["directAnswer"] = True
                 test["directTerms"] = []
-                test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+                test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
                 test["requiredContractProof"] = proof_terms
                 test["anyTerms"] = []
                 test["requiresSource"] = False
@@ -11297,7 +11304,7 @@ def golden_test_from_prompt(prompt, source):
                 test["expectedContractGate"] = "pass"
                 test["directAnswer"] = True
                 test["directTerms"] = []
-                test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+                test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
                 test["requiredContractProof"] = proof_terms
                 test["anyTerms"] = []
                 test["requiresSource"] = False
@@ -11333,7 +11340,7 @@ def golden_test_from_prompt(prompt, source):
                 test["expectedContractGate"] = "pass"
                 test["directAnswer"] = True
                 test["directTerms"] = []
-                test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+                test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
                 test["requiredContractProof"] = proof_terms
                 test["anyTerms"] = []
                 test["requiresSource"] = False
@@ -11362,7 +11369,7 @@ def golden_test_from_prompt(prompt, source):
                 test["expectedContractGate"] = "pass"
                 test["directAnswer"] = True
                 test["directTerms"] = []
-                test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+                test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
                 test["requiredContractProof"] = proof_terms
                 test["anyTerms"] = []
                 test["requiresSource"] = False
@@ -11395,7 +11402,7 @@ def golden_test_from_prompt(prompt, source):
                 test["expectedContractGate"] = "pass"
                 test["directAnswer"] = True
                 test["directTerms"] = []
-                test["requiredTerms"] = normalize_terms(["This is why", "You should also consider"], limit=8)
+                test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider"], limit=8)
                 test["requiredContractProof"] = proof_terms
                 test["anyTerms"] = []
                 test["requiresSource"] = False
@@ -11419,7 +11426,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["specific project", "updated completion time", "checkpoint"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "specific project", "completion time"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "specific project", "completion time"], limit=8)
         test["requiredContractProof"] = ["specific project", "updated completion time", "checkpoint or active task"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -11433,7 +11440,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Prusa-compatible", "Orca Codex"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Prusa-compatible", "Orca Codex", "UI"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Prusa-compatible", "Orca Codex", "UI"], limit=8)
         test["requiredContractProof"] = ["Prusa-compatible filament preset bridge", "Orca Codex", "machine UI", "safe temperature fields"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -11445,7 +11452,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["source ledger", "credit", "release checklist"]
-        test["requiredTerms"] = normalize_terms(["this is why", "you should also consider", "license", "attribution"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["this is why", "you should also consider", "license", "attribution"], limit=8)
         test["requiredContractProof"] = ["source ledger", "attribution fields", "privacy boundary"]
         test["goal"] = "Real chat-history regression: answer short credit/attribution instructions directly instead of timing out."
     if is_aviation_life_limited_part_quiz_prompt(prompt):
@@ -11454,7 +11461,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["C", "Segregation"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "life-limited", "segregation"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "life-limited", "segregation"], limit=8)
         test["requiredContractProof"] = ["C. Segregation", "life-limited part", "deter installation"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -11467,7 +11474,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Fan 6", "Motor 7"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Fan 6", "Motor 7", "http"], limit=10)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Fan 6", "Motor 7", "http"], limit=10)
         test["requiredContractProof"] = ["fan/pump control plan", "safe tuning method", "research/source caveat"]
         test["requiresSource"] = True
         test["webSearch"] = "disabled"
@@ -11480,7 +11487,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "K2 Plus"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Creality Print", "0.4", "0.6", "profiles", "http"], limit=10)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Creality Print", "0.4", "0.6", "profiles", "http"], limit=10)
         test["requiredContractProof"] = ["K2 Plus", "Creality Print", "machine/filament/process profiles", "0.4", "0.6"]
         test["requiresSource"] = True
         test["webSearch"] = "disabled"
@@ -11493,7 +11500,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Invoice"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "cover page", "page 2", "page numbers"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "cover page", "page 2", "page numbers"], limit=8)
         test["requiredContractProof"] = ["cover page", "not an Invoice", "page 2", "page numbers", "PDF render"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -11506,7 +11513,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "pilot"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "overlapping", "different aircraft", "server-side"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "overlapping", "different aircraft", "server-side"], limit=8)
         test["requiredContractProof"] = ["pilot", "overlapping flights", "different aircraft", "server-side", "regression tests"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -11519,7 +11526,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "aircraft"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "flight log", "aircraft", "All Aircraft"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "flight log", "aircraft", "All Aircraft"], limit=8)
         test["requiredContractProof"] = ["flight log", "aircraft", "All Aircraft", "aircraft_id", "verification"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -11532,7 +11539,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Method 1"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "same aircraft", "same customer", "cover page"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "same aircraft", "same customer", "cover page"], limit=8)
         test["requiredContractProof"] = ["Method 1 fuel", "same aircraft", "same customer", "average fuel burn", "cover page fuel table"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -11545,7 +11552,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "PDF"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "pilot reports", "PDF", "render"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "pilot reports", "PDF", "render"], limit=8)
         test["requiredContractProof"] = ["pilot reports", "PDF", "filters/totals", "render regression"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -11558,7 +11565,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["hollow", "20 x 20"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "hollow", "solid", "moving mass", "input shaper"], limit=10)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "hollow", "solid", "moving mass", "input shaper"], limit=10)
         test["requiredContractProof"] = ["20 x 20", "hollow", "solid", "moving mass", "input shaper"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -11571,7 +11578,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["rsync", "192.0.2.118"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "new folder", "rsync", "no changes"], limit=10)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "new folder", "rsync", "no changes"], limit=10)
         test["requiredContractProof"] = ["192.0.2.118", "new folder", "rsync", "not mixed with old files", "no changes"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -11584,7 +11591,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = False
         test["directTerms"] = []
-        test["requiredTerms"] = normalize_terms(["300 RPM", "60", "$500", "http"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["300 RPM", "60", "$500", "http"], limit=8)
         test["requiredContractProof"] = ["300 RPM", "60 VDC", "under $500", "source URL", "reject"]
         test["requiresSource"] = True
         test["webSearch"] = "live"
@@ -11597,7 +11604,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = False
         test["directTerms"] = []
-        test["requiredTerms"] = normalize_terms(["Snapmaker U1", "0.6 nozzle", "http", "shipping"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["Snapmaker U1", "0.6 nozzle", "http", "shipping"], limit=8)
         test["requiredContractProof"] = ["Snapmaker U1", "0.6 nozzle", "source URL", "shipping"]
         test["requiresSource"] = True
         test["webSearch"] = "live"
@@ -11610,7 +11617,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "K2 Plus", "Qidi"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "macros", "cfg", "no-live-printer-change"], limit=10)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "macros", "cfg", "no-live-printer-change"], limit=10)
         test["requiredContractProof"] = ["K2 Plus", "Qidi", "macros/cfg", "box/filament change", "no-live-printer-change gate"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -11623,7 +11630,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Only if", "KlipperScreen"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "KlipperScreen", "macro", "menu"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "KlipperScreen", "macro", "menu"], limit=8)
         test["requiredContractProof"] = ["KlipperScreen", "macro/menu/status object", "restart/refresh"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -11636,7 +11643,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Yes", "Sovol"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Sovol", "filament profiles", "PETG-CF"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Sovol", "filament profiles", "PETG-CF"], limit=8)
         test["requiredContractProof"] = ["Sovol", "filament profiles", "PETG-CF pattern", "machine/filament/process separation", "visibility check"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -11649,7 +11656,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["I would not", "spring"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "spring", "belt tension", "input shaper"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "spring", "belt tension", "input shaper"], limit=8)
         test["requiredContractProof"] = ["spring compliance", "resonance", "unequal belt tension", "input shaper"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -11662,7 +11669,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Start", "acceleration"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "Rat Rig", "IDEX", "input shaper"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "Rat Rig", "IDEX", "input shaper"], limit=8)
         test["requiredContractProof"] = ["Rat Rig", "IDEX", "initial testing", "input shaper", "pressure advance"]
         test["requiresSource"] = False
         test["webSearch"] = "disabled"
@@ -11675,7 +11682,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["Codex"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "preference"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "preference"], limit=8)
         test["requiredContractProof"] = ["direct answer", "why/caveat shape"]
         test["anyTerms"] = normalize_terms(["Codex", "Red Codex", "Red"], limit=6)
         test["requiresSource"] = False
@@ -11689,7 +11696,7 @@ def golden_test_from_prompt(prompt, source):
         test["expectedContractGate"] = "pass"
         test["directAnswer"] = True
         test["directTerms"] = ["No internal memory upgrade"]
-        test["requiredTerms"] = normalize_terms(["This is why", "You should also consider", "unified memory", "AI"], limit=8)
+        test["requiredTerms"] = normalize_required_terms(["This is why", "You should also consider", "unified memory", "AI"], limit=8)
         test["requiredContractProof"] = ["local hardware profile", "unified memory", "no internal memory upgrade", "AI performance"]
         test["anyTerms"] = []
         test["requiresSource"] = False
@@ -11697,6 +11704,7 @@ def golden_test_from_prompt(prompt, source):
         test["minAnalyticalScore"] = 84
         test["maxDurationMs"] = 750
         test["goal"] = "Real chat-history regression: answer Mac memory and AI-performance questions from this Mac's local hardware profile instead of generic research."
+    test = normalize_golden_test_presentation(test, enforce_direct_answer_coverage=True)
     if not test["expectedProjectId"]:
         test.pop("expectedProjectId")
     if not test["requiredTerms"]:

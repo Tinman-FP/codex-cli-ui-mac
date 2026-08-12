@@ -313,6 +313,56 @@ def audit(root):
             scanner_detail = (scanner_run.stderr or scanner_run.stdout or "scanner output unreadable")[:240]
     add_check(checks, "release-privacy-scan-runnable", scanner_ok, scanner_detail)
 
+    scanner_smoke = root / "tools" / "release_privacy_scan_smoke.py"
+    scanner_smoke_run = None
+    scanner_smoke_detail = "focused privacy scanner smoke missing"
+    if scanner_smoke.exists():
+        try:
+            scanner_smoke_run = run_cmd([sys.executable, str(scanner_smoke)], root)
+        except subprocess.TimeoutExpired:
+            scanner_smoke_detail = "focused privacy scanner smoke timed out after 60 seconds"
+    scanner_smoke_ok = False
+    if scanner_smoke_run is not None:
+        try:
+            smoke_report = json.loads(scanner_smoke_run.stdout or "{}")
+            smoke_checks = smoke_report.get("checks")
+            expected_smoke_checks = {
+                "absoluteUserPathRemainsDetected",
+                "comparisonsAreNotAssignments",
+                "generatedOpaqueIdentifiersAreBenign",
+                "literalCredentialsRemainDetected",
+                "onlyExpectedSensitiveFixturesAreReported",
+                "privateIpv4RemainsDetected",
+            }
+            smoke_total = smoke_report.get("total")
+            smoke_passed = smoke_report.get("passed")
+            scanner_smoke_ok = (
+                scanner_smoke_run.returncode == 0
+                and smoke_report.get("status") == "pass"
+                and smoke_report.get("failures") == []
+                and isinstance(smoke_checks, dict)
+                and expected_smoke_checks.issubset(smoke_checks)
+                and bool(smoke_checks)
+                and all(value is True for value in smoke_checks.values())
+                and smoke_total == len(smoke_checks)
+                and smoke_passed == smoke_total
+            )
+            scanner_smoke_detail = (
+                f"{smoke_passed}/{smoke_total} focused privacy scanner classification checks passed"
+            )
+        except json.JSONDecodeError:
+            scanner_smoke_detail = (
+                scanner_smoke_run.stderr
+                or scanner_smoke_run.stdout
+                or "focused privacy scanner smoke output unreadable"
+            )[:240]
+    add_check(
+        checks,
+        "release-privacy-scan-classification-smoke",
+        scanner_smoke_ok,
+        scanner_smoke_detail,
+    )
+
     failed = [check for check in checks if not check["passed"]]
     return {
         "status": "pass" if not failed else "fail",

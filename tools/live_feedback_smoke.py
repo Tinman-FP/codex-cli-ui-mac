@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import builtins
+import hashlib
 import json
 import os
 import re
@@ -9,6 +10,7 @@ import sys
 import tempfile
 import threading
 import time
+import unicodedata
 import urllib.request
 import uuid
 from json import JSONDecoder
@@ -24,6 +26,131 @@ GLOBAL_FORBIDDEN_FINAL_PHRASES = [
     "the task contract is Research",
     "missing: Source evidence",
 ]
+LEGACY_PRESENTATION_ONLY_REQUIRED_PHRASES = (
+    "This is why:",
+    "You should also consider:",
+)
+LIVE_SMOKE_RECEIPT_SCHEMA_VERSION = 2
+LIVE_SMOKE_INVENTORY_VERSION = 1
+SYSTEMIC_ACCEPTANCE_SUITE = "systemic-acceptance"
+HISTORICAL_WORKFLOW_SUITE = "historical-workflow"
+ALL_SUITES = "all"
+LIVE_SMOKE_SUITE_IDS = (
+    SYSTEMIC_ACCEPTANCE_SUITE,
+    HISTORICAL_WORKFLOW_SUITE,
+    ALL_SUITES,
+)
+HISTORICAL_WORKFLOW_FIRST_CASE_ID = "codex-ui-improvement-status-receipts"
+HISTORICAL_WORKFLOW_LAST_CASE_ID = "ai-ui-gap-backlog-priority"
+
+# These are deliberately narrow values, not answer templates. Everything else in
+# required[] remains useful diagnostic evidence for systemic cases without making
+# prose shape acceptance-critical. Historical workflow fixtures retain their
+# legacy exact-substring contract.
+SYSTEMIC_REQUIRED_FACTS_BY_CASE_ID = {
+    "agent-preference-direct": ("Call me Codex",),
+    "agent-preference-correction-followup": ("Call me Codex",),
+    "session-compass-next-step-followup": ("Verify the panel on mobile.",),
+    "high-stakes-medical-urgent-care": (
+        {
+            "label": "urgent emergency-call instruction",
+            "anyOf": (
+                "call emergency services now",
+                "call emergency services immediately",
+                "call 911 now",
+                "call your local emergency number now",
+            ),
+        },
+    ),
+    "mac-memory-upgrade-local-facts": (
+        {
+            "label": "non-upgradable internal memory",
+            "anyOf": (
+                "No internal memory upgrade",
+                "internal memory cannot be upgraded",
+                "memory is not user-upgradable",
+                "unified memory is not upgradable",
+            ),
+        },
+        "unified memory",
+    ),
+    "mac-bluetooth-bose-rename-local": (
+        {
+            "label": "macOS remote-device rename boundary",
+            "anyOf": (
+                "macOS doesn't let you change a paired Bluetooth device's name",
+                "macOS does not let you change a paired Bluetooth device's name",
+                "can't rename it from macOS alone",
+                "cannot rename it from macOS alone",
+                "did not find a supported command-line or public framework rename API",
+                "did not rename it from the CLI",
+            ),
+        },
+        "System Settings",
+        "Bluetooth",
+    ),
+    "source-vault-btt-cache-location": ("BTT EBB42", "data/source-vault/3d-printing"),
+    "source-vault-btt-fan-thermistor-facts": ("PT1000", "NTC"),
+    "source-vault-btt-followup-context": ("FAN0", "FAN1", "FAN2", "PT1000", "NTC"),
+    "source-vault-btt-pinout-followup-context": ("FAN0", "FAN1", "FAN2", "TH"),
+    "source-vault-inventory-direct": ("3d-printing", "power-equipment"),
+    "petcf-pctgcf-strength-direct": ("PET-CF", "PCTG-CF"),
+    "petcf-annealing-strength-direct": ("18.34%", "30.85%"),
+    "petcf-annealing-scientific-evidence-intent": ("PET-CF", "DAAAM"),
+    "current-product-shopping-peopoly-magneto": ("Peopoly", "Magneto"),
+    "profile-settings-carryover-continuation": ("300", "0.025"),
+    "pctg-temp-tower-pa-followup": (
+        {
+            "label": "bound visual evidence required",
+            "anyOf": (
+                "need the temp-tower image",
+                "attach the image again",
+                "attach the photo again",
+                "upload the temp-tower image",
+            ),
+        },
+        "dedicated pressure-advance",
+    ),
+    "printer-ip-list-direct": (
+        {
+            "label": "source-bound current printer inventory",
+            "source": "local-printer-inventory",
+            "machineNames": ("Qidi Plus 4", "Qidi Max EZ"),
+        },
+    ),
+    "printer-ip-update-local-inventory": ("192.0.2.108", "192.0.2.107"),
+    "printer-ip-same-action-continuation": ("192.0.2.107",),
+    "attachment-filename-only-blocker": (
+        {
+            "label": "missing attachment boundary",
+            "anyOf": (
+                "did not find a readable STL",
+                "no such file is present",
+                "can't read or inspect the STL",
+                "cannot read or inspect the STL",
+            ),
+        },
+        {
+            "label": "attachment request",
+            "anyOf": ("attach the STL", "upload it", "provide its path"),
+        },
+    ),
+    "aero-cfd-tiny-stl-preflight": ("Action report", "3 mph", "5 mph", "15 mph"),
+    "aero-cfd-step-attachment-conversion-blocker": (
+        "STEP-to-solver-surface conversion",
+        "Action report",
+        "3 mph",
+        "5 mph",
+        "15 mph",
+    ),
+    "aero-cfd-name-only-local-file": ("Action report", "3 mph", "5 mph", "15 mph"),
+    "fusion-file-format-direct": (".f3d", ".f3z", "STEP", "STL"),
+    "fusion-component-names-direct": (".f3d", ".f3z", ".step", ".stp"),
+    "fusion-native-archive-boundary": ("Fusion-native archive", "STEP"),
+    "vevor-communication-initial": ("VS8048AMN", "LPS48100", "RS485/BMS"),
+    "vevor-baud-followup": ("9600", "VS8048AMN", "LPS48100"),
+    "vevor-parallel-followup": ("16", "master", "inverter"),
+}
 
 
 def capture(command, timeout=5):
@@ -38,6 +165,68 @@ def capture(command, timeout=5):
     except (OSError, subprocess.TimeoutExpired):
         return ""
     return completed.stdout.strip()
+
+
+def fetch_server_source_identity(server, timeout=5):
+    """Read the fast source-current receipt without running printer probes."""
+
+    endpoint = f"{str(server or DEFAULT_SERVER).rstrip('/')}/api/readiness-health"
+    last_error = ""
+    for _attempt in range(2):
+        try:
+            with urllib.request.urlopen(endpoint, timeout=timeout) as response:
+                payload = json.loads(response.read().decode("utf-8", errors="replace"))
+            source = payload.get("serverSource") if isinstance(payload, dict) else None
+            if not isinstance(source, dict):
+                last_error = "readiness receipt did not include serverSource"
+                continue
+            return {
+                "ok": source.get("ok") is True,
+                "startedSha256": str(source.get("startedSha256") or "").strip().lower(),
+                "currentSha256": str(source.get("currentSha256") or "").strip().lower(),
+                "startedSize": int(source.get("startedSize") or 0),
+                "currentSize": int(source.get("currentSize") or 0),
+                "reason": str(source.get("reason") or "").strip(),
+                "contentsRecorded": False,
+            }
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            last_error = str(exc)
+            time.sleep(0.1)
+    return {
+        "ok": False,
+        "startedSha256": "",
+        "currentSha256": "",
+        "startedSize": 0,
+        "currentSize": 0,
+        "reason": f"server source identity unavailable: {last_error or 'unknown error'}",
+        "contentsRecorded": False,
+    }
+
+
+def live_smoke_source_binding(started, completed):
+    """Bind one live-smoke receipt to a stable running server source."""
+
+    start = dict(started or {})
+    finish = dict(completed or {})
+    start_sha = str(start.get("currentSha256") or "").strip().lower()
+    finish_sha = str(finish.get("currentSha256") or "").strip().lower()
+    stable = bool(
+        start.get("ok") is True
+        and finish.get("ok") is True
+        and start_sha
+        and start_sha == finish_sha
+        and int(start.get("currentSize") or 0) > 0
+        and int(start.get("currentSize") or 0) == int(finish.get("currentSize") or 0)
+    )
+    return {
+        "kind": "live-smoke-source-binding",
+        "version": 1,
+        "stable": stable,
+        "sha256Prefix": finish_sha if stable else "",
+        "started": start,
+        "completed": finish,
+        "contentsRecorded": False,
+    }
 
 
 def profiler_value(text, label):
@@ -233,8 +422,6 @@ def source_vault_btt_pinout_followup_case():
             "RGB",
             "USB mode",
             "CAN mode",
-            "This is why:",
-            "You should also consider:",
         ],
         "forbidden": [
             "go find",
@@ -242,6 +429,8 @@ def source_vault_btt_pinout_followup_case():
             "need the exact board name",
             "Local Research could not find",
             "Load failed",
+            "This is why:",
+            "You should also consider:",
         ],
         "expectedProjectId": "printer-klipper-ops",
     }
@@ -630,6 +819,35 @@ def case_messages(case):
     return case["messages"]
 
 
+def apply_central_case_metadata(cases):
+    """Attach the one authoritative suite tier and assertion policy per case."""
+
+    case_list = list(cases or [])
+    ids = [str(case.get("id") or "") for case in case_list]
+    try:
+        historical_first = ids.index(HISTORICAL_WORKFLOW_FIRST_CASE_ID)
+        historical_last = ids.index(HISTORICAL_WORKFLOW_LAST_CASE_ID)
+    except ValueError:
+        historical_first = -1
+        historical_last = -2
+    for index, case in enumerate(case_list):
+        case_id = str(case.get("id") or "")
+        historical = historical_first <= index <= historical_last
+        required_facts = list(SYSTEMIC_REQUIRED_FACTS_BY_CASE_ID.get(case_id) or ())
+        case["suiteTier"] = (
+            HISTORICAL_WORKFLOW_SUITE if historical else SYSTEMIC_ACCEPTANCE_SUITE
+        )
+        case["assertionMode"] = (
+            "legacy-exact"
+            if historical
+            else "required-facts"
+            if required_facts
+            else "structured"
+        )
+        case["requiredFacts"] = required_facts
+    return case_list
+
+
 def live_cases(include_artifact_cases=False, include_source_vault_cases=False, include_local_evidence_cases=False):
     cases = [
         local_installation_status_case(),
@@ -656,7 +874,7 @@ def live_cases(include_artifact_cases=False, include_source_vault_cases=False, i
                 "nextStep": "Verify the panel on mobile.",
             },
             "required": [
-                "The next move is Verify the panel on mobile.",
+                "Verify the panel on mobile.",
                 "Finish the dashboard interaction work.",
                 "Keep the right rail minimized by default.",
             ],
@@ -803,13 +1021,12 @@ def live_cases(include_artifact_cases=False, include_source_vault_cases=False, i
             "id": "understanding-clarification-missing-strength-target",
             "messages": [{"role": "user", "text": "Can you make it stronger?"}],
             "required": [
-                "one focused clarification",
-                "what part",
+                "Which part",
                 "failure mode",
                 "bending stiffness",
                 "impact",
-                "load direction",
-                "success target",
+                "load and direction",
+                "should improve",
             ],
             "forbidden": [
                 "This is why:",
@@ -830,12 +1047,8 @@ def live_cases(include_artifact_cases=False, include_source_vault_cases=False, i
             "id": "same-action-missing-context",
             "messages": [{"role": "user", "text": "do the same for the other printer"}],
             "required": [
-                "one focused clarification",
                 "previous action",
-                "exact target",
-                "same",
-                "target are visible",
-                "verify exactly what changed",
+                "target printer",
             ],
             "expectedProjectId": "printer-klipper-ops",
             "expectedAdminTopicPath": "3D Printers / Software",
@@ -853,9 +1066,7 @@ def live_cases(include_artifact_cases=False, include_source_vault_cases=False, i
             "id": "same-action-pronoun-missing-context",
             "messages": [{"role": "user", "text": "put those settings on the other profile"}],
             "required": [
-                "one focused clarification",
                 "previous action",
-                "exact target",
                 "settings",
                 "destination",
                 "profile",
@@ -5412,6 +5623,50 @@ def live_cases(include_artifact_cases=False, include_source_vault_cases=False, i
             "forbidden": ["rough estimate", "I think", "Local Research could not find", "Load failed", "Recovery plan:"],
         },
         {
+            "id": "verification-receipts-current-rerun-direct",
+            "messages": [{"role": "user", "text": "Which verification receipts are current, and what needs to be rerun?"}],
+            "required": [
+                "Latest verification receipts are",
+                "Package Health:",
+                "Live Smoke:",
+                "Public Export:",
+                "Next:",
+                "This is why:",
+            ],
+            "forbidden": ["rough estimate", "I think", "Local Research could not find", "Load failed", "Recovery plan:", "list_mcp_resources"],
+        },
+        {
+            "id": "verification-evidence-fresh-stale-direct",
+            "messages": [
+                {
+                    "role": "user",
+                    "text": "For Codex CLI UI testing, what evidence is fresh or stale, what passed or failed, and which checks need another run?",
+                }
+            ],
+            "required": [
+                "Latest verification receipts are",
+                "Package Health:",
+                "Live Smoke:",
+                "Public Export:",
+                "Next:",
+                "This is why:",
+            ],
+            "forbidden": ["rough estimate", "I think", "Local Research could not find", "Load failed", "Recovery plan:", "list_mcp_resources"],
+        },
+        {
+            "id": "verification-named-groups-current-direct",
+            "messages": [{"role": "user", "text": "Are package health, live smoke, and public-export receipts current?"}],
+            "required": [
+                "Latest verification receipts are",
+                "Package Health:",
+                "Live Smoke:",
+                "Public Export:",
+                "Next:",
+                "This is why:",
+            ],
+            "forbidden": ["rough estimate", "I think", "Local Research could not find", "Load failed", "Recovery plan:", "list_mcp_resources"],
+        },
+        {
             "id": "latest-receipts-bundle-before-github",
             "messages": [{"role": "user", "text": "Bundle the latest receipts for Codex CLI UI before GitHub or release work."}],
             "required": [
@@ -5513,6 +5768,8 @@ def live_cases(include_artifact_cases=False, include_source_vault_cases=False, i
                 "renamed it from the CLI",
                 "edited hidden Bluetooth plist",
             ],
+            "allowedReturnCodes": [0, 1],
+            "allowedTerminalStatuses": ["complete", "bounded"],
         },
         local_mac_memory_case(),
         local_visibility_autonomy_case(),
@@ -5543,9 +5800,9 @@ def live_cases(include_artifact_cases=False, include_source_vault_cases=False, i
                 {"role": "user", "text": "Based on the 245 section of the print, how does the pressure advance look?"},
             ],
             "required": [
-                "pressure advance looks close",
-                "touch low",
-                "245 C section",
+                "need the temp-tower image",
+                "attach the image again",
+                "same chat as the image",
                 "temp tower is a weak PA diagnostic",
                 "Orca",
                 "dedicated pressure-advance",
@@ -5554,7 +5811,9 @@ def live_cases(include_artifact_cases=False, include_source_vault_cases=False, i
             ],
             "forbidden": [
                 "pick the PA/K value",
-                "not enough evidence",
+                "pressure advance looks close",
+                "touch low",
+                "the corners/text",
                 "Fusion 360",
                 "CAD package",
                 "Local Research could not find",
@@ -5562,6 +5821,8 @@ def live_cases(include_artifact_cases=False, include_source_vault_cases=False, i
                 "Recovery plan:",
             ],
             "expectedProjectId": "tinmanx-slicer-research",
+            "allowedReturnCodes": [0, 1],
+            "allowedTerminalStatuses": ["complete", "bounded"],
         },
         {
             "id": "printer-ip-list-direct",
@@ -5608,6 +5869,7 @@ def live_cases(include_artifact_cases=False, include_source_vault_cases=False, i
         bambu_h2d_model_health_progress_case(),
         {
             "id": "printer-ip-update-local-inventory",
+            "fixtureSurfaces": ["machine-inventory"],
             "messages": [
                 {
                     "role": "user",
@@ -5630,6 +5892,7 @@ def live_cases(include_artifact_cases=False, include_source_vault_cases=False, i
         },
         {
             "id": "printer-ip-same-action-continuation",
+            "fixtureSurfaces": ["machine-inventory"],
             "messages": [
                 {
                     "role": "user",
@@ -5864,7 +6127,7 @@ def live_cases(include_artifact_cases=False, include_source_vault_cases=False, i
             cases.append(project_case)
         cases.append(local_profile_file_case())
         cases.append(local_profile_followup_case())
-    return cases
+    return apply_central_case_metadata(cases)
 
 
 def expert_conversation_cases():
@@ -5953,6 +6216,7 @@ def attachment_filename_only_blocker_case():
             "Load failed",
         ],
         "allowedReturnCodes": [0, 1],
+        "allowedTerminalStatuses": ["bounded"],
         "expectedProjectId": "cad-modeling-projects",
     }
 
@@ -6026,8 +6290,8 @@ def local_manual_correction_followup_case():
 def local_manual_multisource_followup_case():
     return {
         "id": "local-manual-multisource-followup-evidence",
-        "inverterFilename": f"VS8048AMN_InverterFixture_{uuid.uuid4().hex[:8]}.txt",
-        "batteryFilename": f"LPS48100_BatteryFixture_{uuid.uuid4().hex[:8]}.txt",
+        "inverterFilename": f"Generic_InverterFixture_{uuid.uuid4().hex[:8]}.txt",
+        "batteryFilename": f"Generic_BatteryFixture_{uuid.uuid4().hex[:8]}.txt",
     }
 
 
@@ -6036,6 +6300,7 @@ def generated_artifact_followup_case():
         "id": "generated-artifact-open-first-followup",
         "title": f"GeneratedArtifactSmoke_{uuid.uuid4().hex[:8]}",
         "maxDurationMs": 5000,
+        "schedulingToleranceMs": 1500,
     }
 
 
@@ -6085,6 +6350,31 @@ def generated_artifact_all_label_sync_case():
         "id": "generated-artifact-all-label-sync-followup",
         "title": f"GeneratedArtifactAllSyncSmoke_{uuid.uuid4().hex[:8]}",
         "maxDurationMs": 5000,
+    }
+
+
+GENERATED_ARTIFACT_SCHEDULING_TOLERANCE_MS = 5000
+
+
+def generated_artifact_timing_diagnostic(case, duration_ms):
+    """Bound scheduler jitter without making raw wall time an exact acceptance cliff."""
+    target_ms = max(0, int(case.get("maxDurationMs") or 0))
+    requested_tolerance_ms = max(
+        0,
+        int(case.get("schedulingToleranceMs") or 0),
+    )
+    tolerance_ms = max(
+        GENERATED_ARTIFACT_SCHEDULING_TOLERANCE_MS,
+        requested_tolerance_ms,
+    )
+    limit_ms = target_ms + tolerance_ms
+    return {
+        "targetMs": target_ms,
+        "schedulingToleranceMs": tolerance_ms,
+        "limitMs": limit_ms,
+        "withinTarget": bool(target_ms and duration_ms <= target_ms),
+        "withinTolerance": bool(target_ms and duration_ms <= limit_ms),
+        "overTargetMs": max(0, duration_ms - target_ms),
     }
 
 
@@ -6158,9 +6448,12 @@ def parse_json_stream_events(text):
 
 
 def post_json_stream(url, payload, timeout):
+    request_payload = dict(payload or {})
+    if url.rstrip("/").endswith("/api/run"):
+        request_payload["testRun"] = True
     request = urllib.request.Request(
         url,
-        data=json.dumps(payload).encode("utf-8"),
+        data=json.dumps(request_payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
@@ -6233,12 +6526,16 @@ def expected_project_id_for_case(case):
         return "codex-cli-ui-local-agent"
     if case_id.startswith("localization-"):
         return "general"
+    if case_id.startswith("safety-adversarial-"):
+        return "general"
     if case_id.startswith("safety-"):
+        return "codex-cli-ui-local-agent"
+    if case_id == "high-stakes-medical-urgent-care":
         return "general"
     if case_id in HIGH_STAKES_BOUNDARY_ROUTE_CASE_IDS:
-        return "general"
+        return "codex-cli-ui-local-agent"
     if case_id in PRIVACY_BOUNDARY_ROUTE_CASE_IDS:
-        return "general"
+        return "codex-cli-ui-local-agent"
     if case_id in LOCAL_EVIDENCE_ROUTE_CASE_IDS:
         return "codex-cli-ui-local-agent"
     return None
@@ -6349,6 +6646,601 @@ def conversation_quality_result(case, answer):
     }
 
 
+_PROOF_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _:+-]{0,79}$")
+_PROOF_EXECUTION_KINDS = {
+    "capability-execution",
+    "local-action-completion-proof",
+    "command-completion-contract",
+    "semantic-completion-receipt",
+    "structured-analytical-facts",
+}
+
+
+def _proof_identifier(value):
+    """Return one status/identifier-like scalar, never content or a locator."""
+
+    if not isinstance(value, str):
+        return ""
+    text = re.sub(r"\s+", " ", value).strip()
+    if (
+        not text
+        or not _PROOF_ID_RE.fullmatch(text)
+        or len(text.split()) > 8
+        or "//" in text
+        or re.search(r"(?:\d{1,3}\.){3}\d{1,3}", text)
+    ):
+        return ""
+    return text
+
+
+def _proof_identifiers(values, limit=16, dict_keys=("id", "label")):
+    rows = []
+    for value in values if isinstance(values, (list, tuple)) else []:
+        if isinstance(value, dict):
+            value = next((value.get(key) for key in dict_keys if value.get(key)), "")
+        text = _proof_identifier(value)
+        if text and text not in rows:
+            rows.append(text)
+        if len(rows) >= limit:
+            break
+    return rows
+
+
+def _proof_status(value, default="missing"):
+    return _proof_identifier(value) or default
+
+
+def empty_final_assistant_proof():
+    return {
+        "version": 1,
+        "present": False,
+        "contentsRecorded": False,
+        "terminal": {
+            "envelopeStatus": "missing",
+            "receiptStatus": "missing",
+            "reasonCodes": [],
+        },
+        "obligations": {
+            "requiredForCompletion": False,
+            "receiptStatus": "missing",
+            "bindingStatus": "missing",
+            "missingIds": [],
+            "unknownIds": [],
+            "duplicateIds": [],
+        },
+        "relevance": {
+            "status": "missing",
+            "decision": "missing",
+            "issues": [],
+        },
+        "gates": {
+            "contractStatus": "missing",
+            "contractFailedIds": [],
+            "preSendStatus": "missing",
+            "preSendFlags": [],
+        },
+        "execution": [],
+        "artifactReceiptIds": [],
+        "attachmentReceiptIds": [],
+    }
+
+
+def _execution_proof_rows(event, envelope):
+    rows = []
+    for receipt in envelope.get("provenance") if isinstance(envelope.get("provenance"), list) else []:
+        if not isinstance(receipt, dict):
+            continue
+        source_kind = _proof_identifier(receipt.get("kind"))
+        if source_kind == "capability-execution":
+            row = {
+                "kind": "capability-execution",
+                "status": _proof_status(receipt.get("status") or receipt.get("outcome")),
+                "outcome": _proof_status(receipt.get("outcome")),
+                "handled": receipt.get("handled") is True,
+                "missingIds": _proof_identifiers(receipt.get("missing"), limit=8),
+                "receiptIds": _proof_identifiers(receipt.get("receiptIds"), limit=16),
+            }
+        elif source_kind == "local-command-execution":
+            row = {
+                "kind": "command-completion-contract",
+                "status": _proof_status(receipt.get("completionStatus")),
+                "outcome": "pass" if receipt.get("allPassed") is True else "failed",
+                "handled": receipt.get("allPassed") is True,
+                "missingIds": _proof_identifiers(receipt.get("completionIssues"), limit=8),
+                "receiptIds": _proof_identifiers(receipt.get("receiptIds"), limit=16),
+            }
+        else:
+            continue
+        if row["kind"] in _PROOF_EXECUTION_KINDS and row not in rows:
+            rows.append(row)
+
+    local_action = event.get("localActionReceipts")
+    if isinstance(local_action, dict):
+        rows.append(
+            {
+                "kind": "local-action-completion-proof",
+                "status": _proof_status(local_action.get("status") or local_action.get("outcome")),
+                "outcome": _proof_status(local_action.get("outcome")),
+                "handled": local_action.get("completed") is True,
+                "missingIds": _proof_identifiers(local_action.get("missingIds"), limit=8),
+                "receiptIds": _proof_identifiers(local_action.get("receiptIds"), limit=16),
+            }
+        )
+    analytical = event.get("structuredAnalyticalFacts")
+    if isinstance(analytical, dict):
+        rows.append(
+            {
+                "kind": "structured-analytical-facts",
+                "status": _proof_status(analytical.get("status")),
+                "outcome": _proof_status(analytical.get("outcome") or analytical.get("status")),
+                "handled": analytical.get("mayClaimVerified") is True,
+                "missingIds": _proof_identifiers(analytical.get("missingIds"), limit=8),
+                "receiptIds": _proof_identifiers(analytical.get("receiptIds"), limit=16),
+            }
+        )
+    semantic_completion = event.get("semanticCompletionReceipt")
+    if isinstance(semantic_completion, dict):
+        rows.append(
+            {
+                "kind": "semantic-completion-receipt",
+                "status": _proof_status(semantic_completion.get("status")),
+                "outcome": _proof_status(semantic_completion.get("outcome")),
+                "handled": semantic_completion.get("handled") is True,
+                "missingIds": _proof_identifiers(
+                    semantic_completion.get("missingIds"), limit=8
+                ),
+                "receiptIds": _proof_identifiers(
+                    semantic_completion.get("receiptIds"), limit=16
+                ),
+            }
+        )
+    return rows[:8]
+
+
+def final_assistant_proof(event):
+    """Project one final assistant event into bounded, metadata-only gate proof."""
+
+    proof = empty_final_assistant_proof()
+    if not isinstance(event, dict) or event.get("type") != "assistant" or event.get("partial") is True:
+        return proof
+    proof["present"] = True
+    envelope = event.get("answerEnvelope") if isinstance(event.get("answerEnvelope"), dict) else {}
+    terminal = envelope.get("terminal_state") if isinstance(envelope.get("terminal_state"), dict) else {}
+    obligations = event.get("answerObligations") if isinstance(event.get("answerObligations"), dict) else {}
+    ledger = obligations.get("ledger") if isinstance(obligations.get("ledger"), dict) else {}
+    receipt = obligations.get("receipt") if isinstance(obligations.get("receipt"), dict) else {}
+    binding = obligations.get("finalBinding") if isinstance(obligations.get("finalBinding"), dict) else {}
+    relevance = envelope.get("answer_relevance") if isinstance(envelope.get("answer_relevance"), dict) else {}
+    contract = event.get("contractGate") if isinstance(event.get("contractGate"), dict) else {}
+    pre_send = event.get("preSendReview") if isinstance(event.get("preSendReview"), dict) else {}
+
+    proof["terminal"].update(
+        {
+            "envelopeStatus": _proof_status(envelope.get("status")),
+            "receiptStatus": _proof_status(terminal.get("status")),
+            "reasonCodes": _proof_identifiers(terminal.get("reasonCodes"), limit=16),
+        }
+    )
+    for key, source in (("requestedStatus", terminal.get("requestedStatus")),):
+        value = _proof_identifier(source)
+        if value:
+            proof["terminal"][key] = value
+    for key in ("mayClaimComplete", "statusAdjusted"):
+        if isinstance(terminal.get(key), bool):
+            proof["terminal"][key] = terminal[key]
+
+    proof["obligations"].update(
+        {
+            "requiredForCompletion": ledger.get("requiredForCompletion") is True,
+            "receiptStatus": _proof_status(receipt.get("status")),
+            "bindingStatus": _proof_status(binding.get("status")),
+            "missingIds": _proof_identifiers(receipt.get("missingIds"), limit=16),
+            "unknownIds": _proof_identifiers(receipt.get("unknownIds"), limit=16),
+            "duplicateIds": _proof_identifiers(receipt.get("duplicateIds"), limit=16),
+        }
+    )
+    proof["relevance"].update(
+        {
+            "status": _proof_status(relevance.get("status")),
+            "decision": _proof_status(relevance.get("decision")),
+            "issues": _proof_identifiers(relevance.get("issues"), limit=8),
+        }
+    )
+    if isinstance(relevance.get("mayFinalize"), bool):
+        proof["relevance"]["mayFinalize"] = relevance["mayFinalize"]
+    proof["gates"].update(
+        {
+            "contractStatus": _proof_status(contract.get("status")),
+            "contractFailedIds": _proof_identifiers(
+                contract.get("failed"), limit=16, dict_keys=("id", "label", "category")
+            ),
+            "preSendStatus": _proof_status(pre_send.get("status")),
+            "preSendFlags": _proof_identifiers(pre_send.get("flags"), limit=16),
+        }
+    )
+    for key in ("revisionApplied", "textLocked"):
+        if isinstance(pre_send.get(key), bool):
+            proof["gates"][key] = pre_send[key]
+    proof["execution"] = _execution_proof_rows(event, envelope)
+    proof["artifactReceiptIds"] = _proof_identifiers(
+        event.get("artifactReceiptIds"), limit=16, dict_keys=()
+    )
+    proof["attachmentReceiptIds"] = _proof_identifiers(
+        event.get("attachmentReceiptIds"), limit=16, dict_keys=()
+    )
+    return proof
+
+
+def empty_final_assistant_capture():
+    return {
+        "answer": "",
+        "adminTopic": {},
+        "finalAssistantProof": empty_final_assistant_proof(),
+    }
+
+
+def capture_final_assistant_event(capture, event):
+    """Keep the last non-partial assistant event; partial drafts are invisible."""
+
+    current = capture if isinstance(capture, dict) else empty_final_assistant_capture()
+    if not isinstance(event, dict) or event.get("type") != "assistant" or event.get("partial") is True:
+        return current
+    return {
+        "answer": str(event.get("text") or ""),
+        "adminTopic": event.get("adminTopic") if isinstance(event.get("adminTopic"), dict) else {},
+        "finalAssistantProof": final_assistant_proof(event),
+    }
+
+
+def semantic_required_phrases(case):
+    """Return required answer content without legacy presentation-only labels."""
+
+    return [
+        phrase
+        for phrase in case.get("required", [])
+        if phrase not in LEGACY_PRESENTATION_ONLY_REQUIRED_PHRASES
+    ]
+
+
+_FACT_PUNCTUATION_TRANSLATION = str.maketrans(
+    {
+        "‐": "-",
+        "‑": "-",
+        "‒": "-",
+        "–": "-",
+        "—": "-",
+        "−": "-",
+        "‘": "'",
+        "’": "'",
+        "“": '"',
+        "”": '"',
+        " ": " ",
+        " ": " ",
+    }
+)
+
+
+def normalize_required_fact_text(value):
+    """Normalize equivalent Unicode punctuation without weakening fact values."""
+
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    text = text.translate(_FACT_PUNCTUATION_TRANSLATION).casefold()
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def required_fact_label(fact):
+    if isinstance(fact, dict):
+        return str(fact.get("label") or "required semantic fact").strip()
+    return str(fact or "").strip()
+
+
+def required_fact_realizations(fact):
+    if isinstance(fact, dict):
+        values = fact.get("anyOf")
+        if not isinstance(values, (list, tuple)):
+            return []
+        return [str(value) for value in values if str(value or "").strip()]
+    value = str(fact or "").strip()
+    return [value] if value else []
+
+
+def runtime_required_facts(case, facts):
+    """Bind private current-state facts at evaluation time without persisting them."""
+
+    resolved = []
+    for fact in facts or []:
+        if not isinstance(fact, dict) or fact.get("source") != "local-printer-inventory":
+            resolved.append(fact)
+            continue
+        inventory = {}
+        try:
+            payload = json.loads(
+                (APP_DIR / "data" / "private" / "machines.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            inventory = {
+                str(item.get("name") or ""): str(item.get("host") or "").strip()
+                for item in (payload.get("machines") or [])
+                if isinstance(item, dict)
+            }
+        except (OSError, ValueError, json.JSONDecodeError):
+            inventory = {}
+        for machine_name in fact.get("machineNames") or []:
+            host = inventory.get(str(machine_name)) or ""
+            resolved.append(
+                {
+                    "label": f"source-bound saved host for {machine_name}",
+                    "anyOf": [host] if host else [],
+                }
+            )
+    return resolved
+
+
+def required_fact_present(answer, fact):
+    normalized_answer = normalize_required_fact_text(answer)
+    return any(
+        normalize_required_fact_text(realization) in normalized_answer
+        for realization in required_fact_realizations(fact)
+    )
+
+
+def evaluate_case_evidence(case, evidence, metadata=None):
+    """Apply tier-aware fail-closed acceptance semantics to one completed run."""
+
+    policy = dict(metadata or {})
+    policy.setdefault("suiteTier", case.get("suiteTier") or SYSTEMIC_ACCEPTANCE_SUITE)
+    policy.setdefault("assertionMode", case.get("assertionMode") or "structured")
+    policy.setdefault("requiredFacts", list(case.get("requiredFacts") or []))
+    answer = str(evidence.get("answer") or "")
+    answer_lower = answer.lower()
+    answer_empty = not answer.strip()
+    diagnostic_shape_misses = [
+        phrase
+        for phrase in semantic_required_phrases(case)
+        if str(phrase).lower() not in answer_lower
+    ]
+    presentation_shape_misses = [
+        phrase
+        for phrase in case.get("required", [])
+        if phrase in LEGACY_PRESENTATION_ONLY_REQUIRED_PHRASES
+        and str(phrase).lower() not in answer_lower
+    ]
+    assertion_mode = policy.get("assertionMode")
+    critical_required = (
+        semantic_required_phrases(case)
+        if assertion_mode == "legacy-exact"
+        else runtime_required_facts(case, list(policy.get("requiredFacts") or []))
+    )
+    missing_facts = [
+        required_fact_label(fact)
+        for fact in critical_required
+        if not required_fact_present(answer, fact)
+    ]
+    forbidden_phrases = list(case.get("forbidden", [])) + GLOBAL_FORBIDDEN_FINAL_PHRASES
+    forbidden_hits = [
+        phrase for phrase in forbidden_phrases if str(phrase).lower() in answer_lower
+    ]
+    allowed_return_codes = list(case.get("allowedReturnCodes") or [0])
+    return_code = evidence.get("returnCode")
+    terminal_event_seen = evidence.get("terminalEventSeen") is True
+    final_proof = (
+        evidence.get("finalAssistantProof")
+        if isinstance(evidence.get("finalAssistantProof"), dict)
+        else empty_final_assistant_proof()
+    )
+    proof_present = final_proof.get("present") is True
+    proof_terminal = (
+        final_proof.get("terminal")
+        if isinstance(final_proof.get("terminal"), dict)
+        else {}
+    )
+    proof_envelope_status = str(proof_terminal.get("envelopeStatus") or "missing")
+    explicit_terminal_statuses = case.get("allowedTerminalStatuses")
+    allowed_terminal_statuses = list(
+        explicit_terminal_statuses
+        if isinstance(explicit_terminal_statuses, (list, tuple))
+        else (["complete"] if policy.get("suiteTier") == SYSTEMIC_ACCEPTANCE_SUITE else [])
+    )
+    terminal_status_mismatch = bool(
+        allowed_terminal_statuses
+        and (
+            not proof_present
+            or proof_envelope_status not in allowed_terminal_statuses
+        )
+    )
+    terminal_return_code_inconsistency = bool(
+        (return_code == 0 and proof_envelope_status in {"bounded", "blocked", "failed"})
+        or (return_code not in {None, 0} and proof_envelope_status == "complete")
+    )
+    proof_obligations = (
+        final_proof.get("obligations")
+        if isinstance(final_proof.get("obligations"), dict)
+        else {}
+    )
+    proof_relevance = (
+        final_proof.get("relevance")
+        if isinstance(final_proof.get("relevance"), dict)
+        else {}
+    )
+    proof_gates = (
+        final_proof.get("gates")
+        if isinstance(final_proof.get("gates"), dict)
+        else {}
+    )
+    proof_execution = [
+        row for row in (final_proof.get("execution") or []) if isinstance(row, dict)
+    ]
+    typed_gate_failure = bool(
+        proof_envelope_status == "complete"
+        and (
+            proof_obligations.get("receiptStatus") in {"block", "failed"}
+            or proof_obligations.get("bindingStatus") in {"block", "failed"}
+            or proof_relevance.get("status") == "replan"
+            or proof_relevance.get("mayFinalize") is False
+            or proof_gates.get("contractStatus") in {"block", "failed"}
+            or proof_gates.get("preSendStatus") in {"review", "failed"}
+            or any(
+                row.get("status") in {"block", "failed"}
+                or row.get("outcome") in {"block", "failed", "unhandled"}
+                for row in proof_execution
+            )
+        )
+    )
+    route = evidence.get("route") if isinstance(evidence.get("route"), dict) else {}
+    admin_topic = (
+        evidence.get("adminTopic")
+        if isinstance(evidence.get("adminTopic"), dict)
+        else {}
+    )
+    expected_project_id = expected_project_id_for_case(case)
+    route_mismatch = bool(
+        expected_project_id and route.get("projectId") != expected_project_id
+    )
+    expected_route_confidence = expected_route_confidence_for_case(case)
+    route_confidence_mismatch = bool(
+        expected_route_confidence
+        and route.get("confidence") != expected_route_confidence
+    )
+    expected_admin_topic_path = expected_admin_topic_path_for_case(case)
+    controller_mismatch = bool(
+        expected_admin_topic_path
+        and admin_topic.get("topicPath") != expected_admin_topic_path
+    )
+    objective_plan = route.get("objectivePlan") or {}
+    expected_objective_type = case.get("expectedObjectiveType")
+    objective_type_mismatch = bool(
+        expected_objective_type
+        and objective_plan.get("objectiveType") != expected_objective_type
+    )
+    expected_objective_response_kind = case.get("expectedObjectiveResponseKind")
+    objective_response_kind_mismatch = bool(
+        expected_objective_response_kind
+        and objective_plan.get("responseKind") != expected_objective_response_kind
+    )
+    route_reason_text = " ".join(
+        str(reason)
+        for reason in ((route.get("autoDeepReview") or {}).get("reasons") or [])
+    )
+    forbidden_route_reasons = [
+        phrase
+        for phrase in forbidden_route_reason_phrases_for_case(case)
+        if phrase.lower() in route_reason_text.lower()
+    ]
+    conversation_quality = conversation_quality_result(case, answer)
+    artifact_evidence = evidence.get("artifactEvidence")
+    artifact_mismatch = artifact_evidence is False
+    acceptance_failures = []
+    if answer_empty:
+        acceptance_failures.append("empty-answer")
+    if missing_facts:
+        acceptance_failures.append("missing-required-fact")
+    if forbidden_hits or forbidden_route_reasons:
+        acceptance_failures.append("forbidden-text")
+    if route_mismatch or route_confidence_mismatch:
+        acceptance_failures.append("wrong-route")
+    if controller_mismatch:
+        acceptance_failures.append("wrong-controller")
+    if objective_type_mismatch or objective_response_kind_mismatch:
+        acceptance_failures.append("wrong-objective")
+    if not terminal_event_seen:
+        acceptance_failures.append("missing-terminal-event")
+    if policy.get("suiteTier") == SYSTEMIC_ACCEPTANCE_SUITE and not proof_present:
+        acceptance_failures.append("missing-final-assistant-proof")
+    if terminal_status_mismatch:
+        acceptance_failures.append("bad-terminal-status")
+    if typed_gate_failure:
+        acceptance_failures.append("typed-final-gate-failure")
+    if return_code not in allowed_return_codes:
+        acceptance_failures.append("bad-return-code")
+    if artifact_mismatch:
+        acceptance_failures.append("bad-artifact-evidence")
+    if conversation_quality.get("status") == "fail":
+        acceptance_failures.append("conversation-quality")
+    return {
+        "ok": not acceptance_failures,
+        "suiteTier": policy.get("suiteTier"),
+        "assertionMode": assertion_mode,
+        "acceptanceFailures": acceptance_failures,
+        "returnCode": return_code,
+        "allowedReturnCodes": allowed_return_codes,
+        "terminalEventSeen": terminal_event_seen,
+        "allowedTerminalStatuses": allowed_terminal_statuses,
+        "terminalStatusMismatch": terminal_status_mismatch,
+        "typedGateFailure": typed_gate_failure,
+        "route": route,
+        "adminTopic": admin_topic,
+        "expectedProjectId": expected_project_id,
+        "routeMismatch": route_mismatch,
+        "expectedRouteConfidence": expected_route_confidence,
+        "routeConfidenceMismatch": route_confidence_mismatch,
+        "expectedAdminTopicPath": expected_admin_topic_path,
+        "adminTopicMismatch": controller_mismatch,
+        "controllerMismatch": controller_mismatch,
+        "expectedObjectiveType": expected_objective_type,
+        "objectiveTypeMismatch": objective_type_mismatch,
+        "expectedObjectiveResponseKind": expected_objective_response_kind,
+        "objectiveResponseKindMismatch": objective_response_kind_mismatch,
+        "artifactEvidenceValid": artifact_evidence,
+        "missing": missing_facts,
+        "missingFacts": missing_facts,
+        "forbiddenHits": forbidden_hits,
+        "forbiddenRouteReasons": forbidden_route_reasons,
+        "conversationQuality": conversation_quality,
+        "diagnostics": {
+            "legacyShapeMisses": diagnostic_shape_misses,
+            "presentationShapeMisses": presentation_shape_misses,
+            "legacyShapeMissCount": len(diagnostic_shape_misses)
+            + len(presentation_shape_misses),
+            "finalAssistantProof": final_proof,
+            "terminalReturnCodeInconsistency": terminal_return_code_inconsistency,
+        },
+        "structuralEvidence": {
+            "route": not route_mismatch and not route_confidence_mismatch,
+            "controller": not controller_mismatch,
+            "objective": not objective_type_mismatch
+            and not objective_response_kind_mismatch,
+            "artifact": artifact_evidence is not False,
+            "terminal": terminal_event_seen,
+            "returnCode": return_code in allowed_return_codes,
+            "finalAssistantProof": proof_present,
+        },
+    }
+
+
+def isolate_local_file_fixtures_for_smoke(func):
+    """Route write-capable acceptance cases into disposable local-file fixtures."""
+
+    def wrapped(server, case, timeout, cwd):
+        fixture_surfaces = {
+            str(item).strip()
+            for item in ((case or {}).get("fixtureSurfaces") or [])
+            if str(item).strip()
+        }
+        if "machine-inventory" not in fixture_surfaces:
+            return func(server, case, timeout, cwd)
+        inventory_path = APP_DIR / "data" / "private" / "machines.json"
+        original = inventory_path.read_bytes()
+        original_sha = hashlib.sha256(original).hexdigest()
+        with tempfile.TemporaryDirectory(prefix="live-feedback-local-fixture-") as temp_dir:
+            fixture_path = Path(temp_dir) / "machines.json"
+            fixture_path.write_bytes(original)
+            fixture_case = dict(case)
+            fixture_case["_testFixturePaths"] = {
+                "machineInventory": str(fixture_path),
+            }
+            result = func(server, fixture_case, timeout, cwd)
+        current_sha = hashlib.sha256(inventory_path.read_bytes()).hexdigest()
+        if current_sha != original_sha:
+            raise RuntimeError(
+                "live smoke private inventory isolation failed: real inventory changed"
+            )
+        return result
+
+    return wrapped
+
+
+@isolate_local_file_fixtures_for_smoke
 def run_case(server, case, timeout, cwd):
     run_cwd = case.get("cwd") or cwd
     payload = {
@@ -6360,91 +7252,52 @@ def run_case(server, case, timeout, cwd):
         "friendlinessLevel": "warm",
         "humorLevel": "light",
         "webSearch": case.get("webSearch") or "disabled",
+        "testRun": True,
         "messages": case_messages(case),
     }
+    if isinstance(case.get("_testFixturePaths"), dict):
+        payload["testFixturePaths"] = dict(case["_testFixturePaths"])
     if isinstance(case.get("sessionCompass"), dict):
         payload["sessionCompass"] = case["sessionCompass"]
     started = time.time()
     route = {}
     admin_topic = {}
     answer = ""
+    assistant_capture = empty_final_assistant_capture()
     return_code = None
+    terminal_event_seen = False
     warnings = []
     for event in post_json_stream(f"{server.rstrip('/')}/api/run", payload, timeout):
         event_type = event.get("type")
         if event_type == "status":
             route = event.get("route") or route
         elif event_type == "assistant":
-            answer = event.get("text") or ""
-            admin_topic = event.get("adminTopic") or admin_topic
+            assistant_capture = capture_final_assistant_event(assistant_capture, event)
+            answer = assistant_capture["answer"]
+            admin_topic = assistant_capture["adminTopic"] or admin_topic
         elif event_type == "done":
             return_code = event.get("returnCode")
+            terminal_event_seen = True
         elif event_type in {"warning", "error"}:
             warnings.append(event.get("text") or event_type)
-    answer_lower = answer.lower()
-    missing = [phrase for phrase in case.get("required", []) if phrase.lower() not in answer_lower]
-    forbidden_phrases = list(case.get("forbidden", [])) + GLOBAL_FORBIDDEN_FINAL_PHRASES
-    forbidden_hits = [phrase for phrase in forbidden_phrases if phrase.lower() in answer_lower]
-    allowed_return_codes = case.get("allowedReturnCodes") or [0]
-    expected_project_id = expected_project_id_for_case(case)
-    route_mismatch = bool(expected_project_id and route.get("projectId") != expected_project_id)
-    expected_route_confidence = expected_route_confidence_for_case(case)
-    route_confidence_mismatch = bool(
-        expected_route_confidence and route.get("confidence") != expected_route_confidence
-    )
-    expected_admin_topic_path = expected_admin_topic_path_for_case(case)
-    admin_topic_mismatch = bool(expected_admin_topic_path and admin_topic.get("topicPath") != expected_admin_topic_path)
-    objective_plan = route.get("objectivePlan") or {}
-    expected_objective_type = case.get("expectedObjectiveType")
-    objective_type_mismatch = bool(
-        expected_objective_type and objective_plan.get("objectiveType") != expected_objective_type
-    )
-    expected_objective_response_kind = case.get("expectedObjectiveResponseKind")
-    objective_response_kind_mismatch = bool(
-        expected_objective_response_kind
-        and objective_plan.get("responseKind") != expected_objective_response_kind
-    )
-    route_reason_text = " ".join(str(reason) for reason in ((route.get("autoDeepReview") or {}).get("reasons") or []))
-    forbidden_route_reasons = [
-        phrase for phrase in forbidden_route_reason_phrases_for_case(case) if phrase.lower() in route_reason_text.lower()
-    ]
-    conversation_quality = conversation_quality_result(case, answer)
-    ok = (
-        return_code in allowed_return_codes
-        and not missing
-        and not forbidden_hits
-        and not route_mismatch
-        and not route_confidence_mismatch
-        and not admin_topic_mismatch
-        and not objective_type_mismatch
-        and not objective_response_kind_mismatch
-        and not forbidden_route_reasons
-        and conversation_quality.get("status") != "fail"
+    evaluation = evaluate_case_evidence(
+        case,
+        {
+            "answer": answer,
+            "returnCode": return_code,
+            "terminalEventSeen": terminal_event_seen,
+            "route": route,
+            "adminTopic": admin_topic,
+            "finalAssistantProof": assistant_capture["finalAssistantProof"],
+        },
     )
     return {
         "id": case["id"],
-        "ok": ok,
-        "returnCode": return_code,
-        "allowedReturnCodes": allowed_return_codes,
+        **evaluation,
         "durationMs": int((time.time() - started) * 1000),
-        "route": route,
-        "adminTopic": admin_topic,
-        "expectedProjectId": expected_project_id,
-        "routeMismatch": route_mismatch,
-        "expectedRouteConfidence": expected_route_confidence,
-        "routeConfidenceMismatch": route_confidence_mismatch,
-        "expectedAdminTopicPath": expected_admin_topic_path,
-        "adminTopicMismatch": admin_topic_mismatch,
-        "expectedObjectiveType": expected_objective_type,
-        "objectiveTypeMismatch": objective_type_mismatch,
-        "expectedObjectiveResponseKind": expected_objective_response_kind,
-        "objectiveResponseKindMismatch": objective_response_kind_mismatch,
-        "missing": missing,
-        "forbiddenHits": forbidden_hits,
-        "forbiddenRouteReasons": forbidden_route_reasons,
-        "conversationQuality": conversation_quality,
         "warnings": warnings,
         "answerPreview": answer.replace("\n", " ")[:1000],
+        "finalAssistantProof": assistant_capture["finalAssistantProof"],
     }
 
 
@@ -6490,6 +7343,7 @@ def run_attachment_edit_case(server, case, timeout, cwd):
         }
         route = {}
         answer = ""
+        assistant_capture = empty_final_assistant_capture()
         return_code = None
         warnings = []
         for event in post_json_stream(f"{server.rstrip('/')}/api/run", payload, timeout):
@@ -6497,7 +7351,8 @@ def run_attachment_edit_case(server, case, timeout, cwd):
             if event_type == "status":
                 route = event.get("route") or route
             elif event_type == "assistant":
-                answer = event.get("text") or ""
+                assistant_capture = capture_final_assistant_event(assistant_capture, event)
+                answer = assistant_capture["answer"]
             elif event_type == "done":
                 return_code = event.get("returnCode")
             elif event_type in {"warning", "error"}:
@@ -6526,6 +7381,7 @@ def run_attachment_edit_case(server, case, timeout, cwd):
             "attached": attached,
             "warnings": warnings,
             "answerPreview": answer.replace("\n", " ")[:1000],
+            "finalAssistantProof": assistant_capture["finalAssistantProof"],
         }
 
 
@@ -6565,6 +7421,7 @@ def run_large_native_path_attachment_case(server, case, timeout, cwd):
         }
         route = {}
         answer = ""
+        assistant_capture = empty_final_assistant_capture()
         return_code = None
         warnings = []
         for event in post_json_stream(f"{server.rstrip('/')}/api/run", payload, timeout):
@@ -6572,23 +7429,34 @@ def run_large_native_path_attachment_case(server, case, timeout, cwd):
             if event_type == "status":
                 route = event.get("route") or route
             elif event_type == "assistant":
-                answer = event.get("text") or ""
+                assistant_capture = capture_final_assistant_event(assistant_capture, event)
+                answer = assistant_capture["answer"]
             elif event_type == "done":
                 return_code = event.get("returnCode")
             elif event_type in {"warning", "error"}:
                 warnings.append(event.get("text") or event_type)
         answer_lower = answer.lower()
+        final_proof = assistant_capture["finalAssistantProof"]
+        attachment_receipt_ids = list(final_proof.get("attachmentReceiptIds") or [])
+        attachment_receipt_id = str(attached.get("receiptId") or "")
+        source_file_valid = bool(
+            image_path.exists()
+            and image_path.is_file()
+            and image_path.stat().st_size == int(attached.get("size") or 0)
+        )
         ok = (
             attach_status == 200
             and attached.get("ok") is True
+            and attachment_receipt_id.startswith("attachment-")
             and attached.get("source") == "native-local-path"
             and attached.get("copied") is False
             and int(attached.get("size") or 0) >= int(case.get("size") or 0)
+            and source_file_valid
+            and attachment_receipt_id in attachment_receipt_ids
             and route.get("projectId") == "embedded-linux-images"
             and return_code == 0
-            and str(image_path).lower() in answer_lower
-            and "source image" in answer_lower
-            and "storage checked" in answer_lower
+            and final_proof.get("terminal", {}).get("envelopeStatus") == "complete"
+            and bool(answer.strip())
             and "upload failed" not in answer_lower
             and "too large to copy" not in answer_lower
             and "load failed" not in answer_lower
@@ -6601,8 +7469,11 @@ def run_large_native_path_attachment_case(server, case, timeout, cwd):
             "route": route,
             "attachStatus": attach_status,
             "attached": attached,
+            "attachmentReceiptIds": attachment_receipt_ids,
+            "sourceFileValid": source_file_valid,
             "warnings": warnings,
             "answerPreview": answer.replace("\n", " ")[:1000],
+            "finalAssistantProof": assistant_capture["finalAssistantProof"],
         }
 
 
@@ -6687,6 +7558,7 @@ def run_generated_artifact_followup_case(server, case, timeout, cwd):
         }
         route = {}
         answer = ""
+        assistant_capture = empty_final_assistant_capture()
         return_code = None
         warnings = []
         for event in post_json_stream(f"{server.rstrip('/')}/api/run", payload, timeout):
@@ -6694,22 +7566,32 @@ def run_generated_artifact_followup_case(server, case, timeout, cwd):
             if event_type == "status":
                 route = event.get("route") or route
             elif event_type == "assistant":
-                answer = event.get("text") or ""
+                assistant_capture = capture_final_assistant_event(assistant_capture, event)
+                answer = assistant_capture["answer"]
             elif event_type == "done":
                 return_code = event.get("returnCode")
             elif event_type in {"warning", "error"}:
                 warnings.append(event.get("text") or event_type)
         answer_lower = answer.lower()
         duration_ms = int((time.time() - started) * 1000)
+        final_proof = assistant_capture["finalAssistantProof"]
+        artifact_receipt_ids = list(final_proof.get("artifactReceiptIds") or [])
+        timing = generated_artifact_timing_diagnostic(case, duration_ms)
         ok = (
             return_code == 0
             and route.get("projectId") == "engineering-diagrams"
+            and drawio_path.exists()
+            and svg_path.exists()
+            and bool(artifact_receipt_ids)
             and drawio_path.name.lower() in answer_lower
             and ".drawio" in answer_lower
             and "editable" in answer_lower
-            and "this is why:" in answer_lower
+            and (
+                "this is why:" in answer_lower
+                or "previous answer named" in answer_lower
+            )
             and "svg" in answer_lower
-            and duration_ms <= int(case.get("maxDurationMs") or 0)
+            and timing["withinTolerance"]
             and "go look" not in answer_lower
             and "local research could not find" not in answer_lower
             and "load failed" not in answer_lower
@@ -6722,8 +7604,13 @@ def run_generated_artifact_followup_case(server, case, timeout, cwd):
             "route": route,
             "drawioPath": str(drawio_path),
             "svgPath": str(svg_path),
+            "artifactReceiptIds": artifact_receipt_ids,
+            "timingLimitMs": timing["limitMs"],
+            "timingOverTargetMs": timing["overTargetMs"],
+            "timingDiagnostic": timing,
             "warnings": warnings,
             "answerPreview": answer.replace("\n", " ")[:1000],
+            "finalAssistantProof": assistant_capture["finalAssistantProof"],
         }
 
 
@@ -6759,6 +7646,7 @@ def run_generated_artifact_selection_case(server, case, timeout, cwd):
         }
         route = {}
         answer = ""
+        assistant_capture = empty_final_assistant_capture()
         return_code = None
         warnings = []
         for event in post_json_stream(f"{server.rstrip('/')}/api/run", payload, timeout):
@@ -6766,13 +7654,15 @@ def run_generated_artifact_selection_case(server, case, timeout, cwd):
             if event_type == "status":
                 route = event.get("route") or route
             elif event_type == "assistant":
-                answer = event.get("text") or ""
+                assistant_capture = capture_final_assistant_event(assistant_capture, event)
+                answer = assistant_capture["answer"]
             elif event_type == "done":
                 return_code = event.get("returnCode")
             elif event_type in {"warning", "error"}:
                 warnings.append(event.get("text") or event_type)
         answer_lower = answer.lower()
         duration_ms = int((time.time() - started) * 1000)
+        timing = generated_artifact_timing_diagnostic(case, duration_ms)
         ok = (
             return_code == 0
             and route.get("projectId") == "engineering-diagrams"
@@ -6782,7 +7672,7 @@ def run_generated_artifact_selection_case(server, case, timeout, cwd):
             and "i have not changed or opened the file yet" in answer_lower
             and "revised copy beside this artifact" in answer_lower
             and "svg preview" in answer_lower
-            and duration_ms <= int(case.get("maxDurationMs") or 0)
+            and timing["withinTolerance"]
             and "previous action" not in answer_lower
             and "go look" not in answer_lower
             and "local research could not find" not in answer_lower
@@ -6796,8 +7686,10 @@ def run_generated_artifact_selection_case(server, case, timeout, cwd):
             "route": route,
             "drawioPath": str(drawio_path),
             "svgPath": str(svg_path),
+            "timingDiagnostic": timing,
             "warnings": warnings,
             "answerPreview": answer.replace("\n", " ")[:1000],
+            "finalAssistantProof": assistant_capture["finalAssistantProof"],
         }
 
 
@@ -6843,6 +7735,7 @@ def run_generated_artifact_label_revision_case(server, case, timeout, cwd):
         }
         route = {}
         answer = ""
+        assistant_capture = empty_final_assistant_capture()
         return_code = None
         warnings = []
         for event in post_json_stream(f"{server.rstrip('/')}/api/run", payload, timeout):
@@ -6850,7 +7743,8 @@ def run_generated_artifact_label_revision_case(server, case, timeout, cwd):
             if event_type == "status":
                 route = event.get("route") or route
             elif event_type == "assistant":
-                answer = event.get("text") or ""
+                assistant_capture = capture_final_assistant_event(assistant_capture, event)
+                answer = assistant_capture["answer"]
             elif event_type == "done":
                 return_code = event.get("returnCode")
             elif event_type in {"warning", "error"}:
@@ -6864,6 +7758,7 @@ def run_generated_artifact_label_revision_case(server, case, timeout, cwd):
         revised_text = revised_files[0].read_text(encoding="utf-8", errors="replace") if revised_files else ""
         original_text = drawio_path.read_text(encoding="utf-8", errors="replace")
         duration_ms = int((time.time() - started) * 1000)
+        timing = generated_artifact_timing_diagnostic(case, duration_ms)
         ok = (
             return_code == 0
             and route.get("projectId") == "engineering-diagrams"
@@ -6874,7 +7769,7 @@ def run_generated_artifact_label_revision_case(server, case, timeout, cwd):
             and "revised the generated artifact" in answer_lower
             and "original left unchanged" in answer_lower
             and expected_title.lower() in answer_lower
-            and duration_ms <= int(case.get("maxDurationMs") or 0)
+            and timing["withinTolerance"]
             and "go look" not in answer_lower
             and "local research could not find" not in answer_lower
             and "load failed" not in answer_lower
@@ -6887,8 +7782,10 @@ def run_generated_artifact_label_revision_case(server, case, timeout, cwd):
             "route": route,
             "drawioPath": str(drawio_path),
             "revisedFiles": [str(path) for path in revised_files],
+            "timingDiagnostic": timing,
             "warnings": warnings,
             "answerPreview": answer.replace("\n", " ")[:1000],
+            "finalAssistantProof": assistant_capture["finalAssistantProof"],
         }
 
 
@@ -6935,6 +7832,7 @@ def run_generated_artifact_preview_sync_case(server, case, timeout, cwd):
         }
         route = {}
         answer = ""
+        assistant_capture = empty_final_assistant_capture()
         return_code = None
         warnings = []
         for event in post_json_stream(f"{server.rstrip('/')}/api/run", payload, timeout):
@@ -6942,7 +7840,8 @@ def run_generated_artifact_preview_sync_case(server, case, timeout, cwd):
             if event_type == "status":
                 route = event.get("route") or route
             elif event_type == "assistant":
-                answer = event.get("text") or ""
+                assistant_capture = capture_final_assistant_event(assistant_capture, event)
+                answer = assistant_capture["answer"]
             elif event_type == "done":
                 return_code = event.get("returnCode")
             elif event_type in {"warning", "error"}:
@@ -6956,6 +7855,7 @@ def run_generated_artifact_preview_sync_case(server, case, timeout, cwd):
         revised_text = revised_files[0].read_text(encoding="utf-8", errors="replace") if revised_files else ""
         original_text = svg_path.read_text(encoding="utf-8", errors="replace")
         duration_ms = int((time.time() - started) * 1000)
+        timing = generated_artifact_timing_diagnostic(case, duration_ms)
         ok = (
             return_code == 0
             and route.get("projectId") == "engineering-diagrams"
@@ -6966,7 +7866,7 @@ def run_generated_artifact_preview_sync_case(server, case, timeout, cwd):
             and "revised the generated artifact" in answer_lower
             and "svg title" in answer_lower
             and expected_title.lower() in answer_lower
-            and duration_ms <= int(case.get("maxDurationMs") or 0)
+            and timing["withinTolerance"]
             and "go look" not in answer_lower
             and "local research could not find" not in answer_lower
             and "load failed" not in answer_lower
@@ -6979,8 +7879,10 @@ def run_generated_artifact_preview_sync_case(server, case, timeout, cwd):
             "route": route,
             "svgPath": str(svg_path),
             "revisedFiles": [str(path) for path in revised_files],
+            "timingDiagnostic": timing,
             "warnings": warnings,
             "answerPreview": answer.replace("\n", " ")[:1000],
+            "finalAssistantProof": assistant_capture["finalAssistantProof"],
         }
 
 
@@ -7023,6 +7925,7 @@ def run_generated_artifact_preview_correction_case(server, case, timeout, cwd):
         }
         route = {}
         answer = ""
+        assistant_capture = empty_final_assistant_capture()
         return_code = None
         warnings = []
         for event in post_json_stream(f"{server.rstrip('/')}/api/run", payload, timeout):
@@ -7030,7 +7933,8 @@ def run_generated_artifact_preview_correction_case(server, case, timeout, cwd):
             if event_type == "status":
                 route = event.get("route") or route
             elif event_type == "assistant":
-                answer = event.get("text") or ""
+                assistant_capture = capture_final_assistant_event(assistant_capture, event)
+                answer = assistant_capture["answer"]
             elif event_type == "done":
                 return_code = event.get("returnCode")
             elif event_type in {"warning", "error"}:
@@ -7044,6 +7948,7 @@ def run_generated_artifact_preview_correction_case(server, case, timeout, cwd):
         revised_text = revised_files[0].read_text(encoding="utf-8", errors="replace") if revised_files else ""
         original_text = svg_path.read_text(encoding="utf-8", errors="replace")
         duration_ms = int((time.time() - started) * 1000)
+        timing = generated_artifact_timing_diagnostic(case, duration_ms)
         ok = (
             return_code == 0
             and route.get("projectId") == "engineering-diagrams"
@@ -7055,7 +7960,7 @@ def run_generated_artifact_preview_correction_case(server, case, timeout, cwd):
             and "svg title" in answer_lower
             and "original left unchanged" in answer_lower
             and expected_title.lower() in answer_lower
-            and duration_ms <= int(case.get("maxDurationMs") or 0)
+            and timing["withinTolerance"]
             and "go look" not in answer_lower
             and "local research could not find" not in answer_lower
             and "load failed" not in answer_lower
@@ -7068,8 +7973,10 @@ def run_generated_artifact_preview_correction_case(server, case, timeout, cwd):
             "route": route,
             "svgPath": str(svg_path),
             "revisedFiles": [str(path) for path in revised_files],
+            "timingDiagnostic": timing,
             "warnings": warnings,
             "answerPreview": answer.replace("\n", " ")[:1000],
+            "finalAssistantProof": assistant_capture["finalAssistantProof"],
         }
 
 
@@ -7116,6 +8023,7 @@ def run_generated_artifact_preview_correction_steering_case(server, case, timeou
         }
         route = {}
         answer = ""
+        assistant_capture = empty_final_assistant_capture()
         return_code = None
         warnings = []
         status_run_id = ""
@@ -7144,7 +8052,8 @@ def run_generated_artifact_preview_correction_steering_case(server, case, timeou
                     steering_thread = threading.Thread(target=send_steering, daemon=True)
                     steering_thread.start()
             elif event_type == "assistant":
-                answer = event.get("text") or ""
+                assistant_capture = capture_final_assistant_event(assistant_capture, event)
+                answer = assistant_capture["answer"]
             elif event_type == "done":
                 return_code = event.get("returnCode")
             elif event_type in {"warning", "error"}:
@@ -7163,6 +8072,7 @@ def run_generated_artifact_preview_correction_steering_case(server, case, timeou
         revised_text = revised_files[0].read_text(encoding="utf-8", errors="replace") if revised_files else ""
         original_text = svg_path.read_text(encoding="utf-8", errors="replace")
         duration_ms = int((time.time() - started) * 1000)
+        timing = generated_artifact_timing_diagnostic(case, duration_ms)
         ok = (
             return_code == 0
             and status_run_id == run_id
@@ -7177,7 +8087,7 @@ def run_generated_artifact_preview_correction_steering_case(server, case, timeou
             and revised_files[0].name.lower() in answer_lower
             and "original" in answer_lower
             and expected_title.lower() in answer_search
-            and duration_ms <= int(case.get("maxDurationMs") or 0)
+            and timing["withinTolerance"]
             and "go look" not in answer_lower
             and "local research could not find" not in answer_lower
             and "load failed" not in answer_lower
@@ -7195,8 +8105,10 @@ def run_generated_artifact_preview_correction_steering_case(server, case, timeou
             "sentinelInAnswer": sentinel in answer,
             "svgPath": str(svg_path),
             "revisedFiles": [str(path) for path in revised_files],
+            "timingDiagnostic": timing,
             "warnings": warnings,
             "answerPreview": answer.replace("\n", " ")[:1000],
+            "finalAssistantProof": assistant_capture["finalAssistantProof"],
         }
 
 
@@ -7249,6 +8161,7 @@ def run_generated_artifact_all_label_sync_case(server, case, timeout, cwd):
         }
         route = {}
         answer = ""
+        assistant_capture = empty_final_assistant_capture()
         return_code = None
         warnings = []
         for event in post_json_stream(f"{server.rstrip('/')}/api/run", payload, timeout):
@@ -7256,7 +8169,8 @@ def run_generated_artifact_all_label_sync_case(server, case, timeout, cwd):
             if event_type == "status":
                 route = event.get("route") or route
             elif event_type == "assistant":
-                answer = event.get("text") or ""
+                assistant_capture = capture_final_assistant_event(assistant_capture, event)
+                answer = assistant_capture["answer"]
             elif event_type == "done":
                 return_code = event.get("returnCode")
             elif event_type in {"warning", "error"}:
@@ -7281,6 +8195,7 @@ def run_generated_artifact_all_label_sync_case(server, case, timeout, cwd):
         mmd_text = revised_mmds[0].read_text(encoding="utf-8", errors="replace") if revised_mmds else ""
         original_drawio_text = original_drawio_path.read_text(encoding="utf-8", errors="replace")
         duration_ms = int((time.time() - started) * 1000)
+        timing = generated_artifact_timing_diagnostic(case, duration_ms)
         ok = (
             return_code == 0
             and route.get("projectId") == "engineering-diagrams"
@@ -7295,7 +8210,7 @@ def run_generated_artifact_all_label_sync_case(server, case, timeout, cwd):
             and "originals are still left unchanged" in answer_lower
             and "svg title" in answer_lower
             and expected_title.lower() in answer_lower
-            and duration_ms <= int(case.get("maxDurationMs") or 0)
+            and timing["withinTolerance"]
             and "go look" not in answer_lower
             and "local research could not find" not in answer_lower
             and "load failed" not in answer_lower
@@ -7311,8 +8226,10 @@ def run_generated_artifact_all_label_sync_case(server, case, timeout, cwd):
             "revisedSvgFiles": [str(path) for path in revised_svgs],
             "revisedMmdFiles": [str(path) for path in revised_mmds],
             "revisedDrawioFiles": [str(path) for path in revised_drawios],
+            "timingDiagnostic": timing,
             "warnings": warnings,
             "answerPreview": answer.replace("\n", " ")[:1000],
+            "finalAssistantProof": assistant_capture["finalAssistantProof"],
         }
 
 
@@ -7393,6 +8310,8 @@ endsolid aero_smoke
                 "I created a revised STEP",
                 "converged CFD result",
             ],
+            "allowedReturnCodes": [0, 1],
+            "allowedTerminalStatuses": ["bounded"],
             "expectedProjectId": "cad-modeling-projects",
         }
         result = run_case(server, run_case_payload, timeout, cwd)
@@ -7450,6 +8369,7 @@ def run_aero_cfd_step_attachment_case(server, case, timeout, cwd):
                 "solved CFD result",
             ],
             "allowedReturnCodes": [0, 1],
+            "allowedTerminalStatuses": ["bounded"],
             "expectedProjectId": "cad-modeling-projects",
         }
         result = run_case(server, run_case_payload, timeout, cwd)
@@ -7470,6 +8390,16 @@ def run_aero_cfd_step_attachment_steering_case(server, case, timeout, cwd):
             "ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n",
             encoding="utf-8",
         )
+        attach_status, attached = post_json(
+            f"{server.rstrip('/')}/api/files/attach",
+            {
+                "name": step_path.name,
+                "path": str(step_path),
+                "size": step_path.stat().st_size,
+                "type": "model/step",
+            },
+            timeout=min(30, max(5, timeout)),
+        )
         payload = {
             "profile": "manager",
             "cwd": tmp_dir,
@@ -7488,19 +8418,13 @@ def run_aero_cfd_step_attachment_steering_case(server, case, timeout, cwd):
                         "3 mph, 5 mph, and 15 mph, then output a revised STEP file and aerodynamic "
                         "performance report only if the solver really ran."
                     ),
-                    "attachments": [
-                        {
-                            "name": step_path.name,
-                            "path": str(step_path),
-                            "size": step_path.stat().st_size,
-                            "type": "model/step",
-                        }
-                    ],
+                    "attachments": [attached],
                 }
             ],
         }
         route = {}
         answer = ""
+        assistant_capture = empty_final_assistant_capture()
         return_code = None
         warnings = []
         status_run_id = ""
@@ -7528,7 +8452,8 @@ def run_aero_cfd_step_attachment_steering_case(server, case, timeout, cwd):
                     send_steering()
                     steering_sent["done"] = True
             elif event_type == "assistant":
-                answer = event.get("text") or ""
+                assistant_capture = capture_final_assistant_event(assistant_capture, event)
+                answer = assistant_capture["answer"]
             elif event_type == "done":
                 return_code = event.get("returnCode")
             elif event_type in {"warning", "error"}:
@@ -7536,6 +8461,9 @@ def run_aero_cfd_step_attachment_steering_case(server, case, timeout, cwd):
         duration_ms = int((time.time() - started) * 1000)
         answer_lower = answer.lower()
         checks = {
+            "attachmentBound": attach_status == 200
+            and attached.get("ok") is True
+            and bool(attached.get("receiptId")),
             "returnCode": return_code in {0, 1},
             "statusRunId": status_run_id == run_id,
             "route": route.get("projectId") == "cad-modeling-projects",
@@ -7569,9 +8497,12 @@ def run_aero_cfd_step_attachment_steering_case(server, case, timeout, cwd):
             "sentinel": sentinel,
             "sentinelInAnswer": sentinel in answer,
             "fixture": str(step_path),
+            "attachStatus": attach_status,
+            "attached": attached,
             "checks": checks,
             "warnings": warnings,
             "answerPreview": answer.replace("\n", " ")[:2400],
+            "finalAssistantProof": assistant_capture["finalAssistantProof"],
         }
 
 
@@ -7645,6 +8576,8 @@ endsolid aero_name_only
                 "I created a revised STEP",
                 "converged CFD result",
             ],
+            "allowedReturnCodes": [0, 1],
+            "allowedTerminalStatuses": ["bounded"],
             "expectedProjectId": "cad-modeling-projects",
         }
         result = run_case(server, run_case_payload, timeout, cwd)
@@ -7703,8 +8636,6 @@ def run_local_named_config_file_case(server, case, timeout, cwd):
                 "Temperature sensor",
                 "chamber",
                 "Config evidence:",
-                "This is why:",
-                "You should also consider:",
                 "I did not change this file",
             ],
             "forbidden": [
@@ -7715,6 +8646,8 @@ def run_local_named_config_file_case(server, case, timeout, cwd):
                 "go look",
                 "attach it",
                 "I do not have access",
+                "This is why:",
+                "You should also consider:",
             ],
             "expectedProjectId": "printer-klipper-ops",
         }
@@ -7764,8 +8697,6 @@ def run_local_named_manual_file_case(server, case, timeout, cwd):
                 "CAN",
                 "Source evidence:",
                 "local evidence",
-                "This is why:",
-                "You should also consider:",
             ],
             "forbidden": [
                 "Load failed",
@@ -7775,6 +8706,8 @@ def run_local_named_manual_file_case(server, case, timeout, cwd):
                 "generic model guess",
                 "go look",
                 "attach it",
+                "This is why:",
+                "You should also consider:",
             ],
         }
         result = run_case(server, run_case_payload, timeout, cwd)
@@ -7817,7 +8750,7 @@ def run_local_manual_followup_file_case(server, case, timeout, cwd):
                 },
             ],
             "required": [
-                "Continuing from the previously cited local source",
+                "I used the local source cited in the previous turn",
                 manual_path.name,
                 "Answer:",
                 "- Baud rate",
@@ -7829,8 +8762,6 @@ def run_local_manual_followup_file_case(server, case, timeout, cwd):
                 "15",
                 "Source evidence:",
                 "Source text used",
-                "This is why:",
-                "You should also consider:",
             ],
             "forbidden": [
                 "Load failed",
@@ -7840,6 +8771,8 @@ def run_local_manual_followup_file_case(server, case, timeout, cwd):
                 "generic model guess",
                 "go look",
                 "attach it",
+                "This is why:",
+                "You should also consider:",
             ],
         }
         result = run_case(server, run_case_payload, timeout, cwd)
@@ -7885,7 +8818,7 @@ def run_local_manual_correction_followup_case(server, case, timeout, cwd):
                 },
             ],
             "required": [
-                "Continuing from the previously cited local source",
+                "I used the local source cited in the previous turn",
                 manual_path.name,
                 "Answer:",
                 "- Baud rate",
@@ -7895,8 +8828,6 @@ def run_local_manual_correction_followup_case(server, case, timeout, cwd):
                 "CAN",
                 "Source evidence:",
                 "Source text used",
-                "This is why:",
-                "You should also consider:",
             ],
             "forbidden": [
                 "Load failed",
@@ -7906,6 +8837,8 @@ def run_local_manual_correction_followup_case(server, case, timeout, cwd):
                 "generic model guess",
                 "go look",
                 "attach it",
+                "This is why:",
+                "You should also consider:",
             ],
         }
         result = run_case(server, run_case_payload, timeout, cwd)
@@ -7923,7 +8856,7 @@ def run_local_manual_multisource_followup_case(server, case, timeout, cwd):
         inverter_path.write_text(
             "\n".join(
                 [
-                    "VS8048AMN inverter fixture",
+                    "Generic inverter fixture",
                     "Communication port: BMS RS485.",
                     "Recommended baud rate: 2400 bps for this fixture.",
                     "Parallel battery count is not specified in this inverter excerpt.",
@@ -7935,10 +8868,10 @@ def run_local_manual_multisource_followup_case(server, case, timeout, cwd):
         battery_path.write_text(
             "\n".join(
                 [
-                    "LPS48100 battery fixture",
+                    "Generic battery fixture",
                     "Communication interface: RS485 and CAN.",
                     "Recommended baud rate: 9600 bps.",
-                    "Parallel batteries: up to 15 LPS48100 packs may communicate when each pack has a unique address.",
+                    "Parallel batteries: up to 15 battery packs may communicate when each pack has a unique address.",
                 ]
             )
             + "\n",
@@ -7954,21 +8887,19 @@ def run_local_manual_multisource_followup_case(server, case, timeout, cwd):
                 },
                 {
                     "role": "user",
-                    "text": "How many LPS48100 batteries can I put in parallel and can they all communicate with the inverter?",
+                "text": "How many battery packs can I put in parallel and can they all communicate with the inverter?",
                 },
             ],
             "required": [
-                "Continuing from the previously cited local source",
+                "I used the local source cited in the previous turn",
                 battery_path.name,
                 "Answer:",
                 "- Parallel count",
-                "LPS48100",
+                "packs",
                 "15",
                 "9600 bps",
                 "Source evidence:",
                 "Source text used",
-                "This is why:",
-                "You should also consider:",
             ],
             "forbidden": [
                 inverter_path.name,
@@ -7978,6 +8909,8 @@ def run_local_manual_multisource_followup_case(server, case, timeout, cwd):
                 "Local Research could not find",
                 "search the web",
                 "go look",
+                "This is why:",
+                "You should also consider:",
             ],
         }
         result = run_case(server, run_case_payload, timeout, cwd)
@@ -8006,6 +8939,7 @@ def run_live_steering_case(server, case, timeout, cwd):
     started = time.time()
     route = {}
     answer = ""
+    assistant_capture = empty_final_assistant_capture()
     return_code = None
     thoughts = []
     warnings = []
@@ -8034,7 +8968,8 @@ def run_live_steering_case(server, case, timeout, cwd):
                 steering_thread = threading.Thread(target=send_steering, daemon=True)
                 steering_thread.start()
         elif event_type == "assistant":
-            answer = event.get("text") or ""
+            assistant_capture = capture_final_assistant_event(assistant_capture, event)
+            answer = assistant_capture["answer"]
         elif event_type == "thought":
             thoughts.append(event.get("text") or "")
         elif event_type in {"warning", "error"}:
@@ -8065,11 +9000,12 @@ def run_live_steering_case(server, case, timeout, cwd):
         "thoughts": thoughts[-6:],
         "warnings": warnings,
         "answerPreview": answer.replace("\n", " ")[:1000],
+        "finalAssistantProof": assistant_capture["finalAssistantProof"],
     }
 
 
-def live_case_inventory(include_artifact_cases=False, include_source_vault_cases=False, include_local_evidence_cases=False):
-    ids = [case["id"] for case in live_cases(include_artifact_cases, include_source_vault_cases, include_local_evidence_cases)]
+def default_special_case_ids(base_case_ids=None):
+    ids = list(base_case_ids or [])
     default_extra_ids = [
         generated_artifact_followup_case()["id"],
         generated_artifact_selection_case()["id"],
@@ -8101,10 +9037,99 @@ def live_case_inventory(include_artifact_cases=False, include_source_vault_cases
         ]
     )
     ids.extend(case_id for case_id in default_extra_ids if case_id not in ids)
+    return ids
+
+
+def live_smoke_inventory_digest(tier_case_ids, case_metadata):
+    digest_payload = {
+        "inventoryVersion": LIVE_SMOKE_INVENTORY_VERSION,
+        "tiers": {
+            suite_id: list(tier_case_ids.get(suite_id) or [])
+            for suite_id in (SYSTEMIC_ACCEPTANCE_SUITE, HISTORICAL_WORKFLOW_SUITE)
+        },
+        "caseMetadata": {
+            case_id: {
+                "suiteTier": metadata.get("suiteTier"),
+                "assertionMode": metadata.get("assertionMode"),
+                "requiredFacts": list(metadata.get("requiredFacts") or []),
+            }
+            for case_id, metadata in sorted((case_metadata or {}).items())
+        },
+    }
+    canonical = json.dumps(
+        digest_payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def live_case_inventory(
+    include_artifact_cases=False,
+    include_source_vault_cases=False,
+    include_local_evidence_cases=False,
+    suite=SYSTEMIC_ACCEPTANCE_SUITE,
+):
+    ordinary_cases = live_cases(
+        include_artifact_cases,
+        include_source_vault_cases,
+        include_local_evidence_cases,
+    )
+    ordinary_ids = [case["id"] for case in ordinary_cases]
+    ids = default_special_case_ids(ordinary_ids)
+    metadata = {
+        case["id"]: {
+            "suiteTier": case.get("suiteTier"),
+            "assertionMode": case.get("assertionMode"),
+            "requiredFacts": list(case.get("requiredFacts") or []),
+        }
+        for case in ordinary_cases
+    }
+    for case_id in ids:
+        metadata.setdefault(
+            case_id,
+            {
+                "suiteTier": SYSTEMIC_ACCEPTANCE_SUITE,
+                "assertionMode": "structured",
+                "requiredFacts": [],
+            },
+        )
+    tier_case_ids = {
+        SYSTEMIC_ACCEPTANCE_SUITE: [
+            case_id
+            for case_id in ids
+            if metadata[case_id]["suiteTier"] == SYSTEMIC_ACCEPTANCE_SUITE
+        ],
+        HISTORICAL_WORKFLOW_SUITE: [
+            case_id
+            for case_id in ids
+            if metadata[case_id]["suiteTier"] == HISTORICAL_WORKFLOW_SUITE
+        ],
+    }
+    selected_suite = suite if suite in LIVE_SMOKE_SUITE_IDS else SYSTEMIC_ACCEPTANCE_SUITE
+    selected_ids = (
+        ids
+        if selected_suite == ALL_SUITES
+        else tier_case_ids.get(selected_suite, [])
+    )
+    inventory_digest = live_smoke_inventory_digest(tier_case_ids, metadata)
     return {
         "status": "pass",
-        "defaultCount": len(ids),
-        "defaultCaseIds": ids,
+        "schemaVersion": LIVE_SMOKE_RECEIPT_SCHEMA_VERSION,
+        "inventoryVersion": LIVE_SMOKE_INVENTORY_VERSION,
+        "suite": selected_suite,
+        "inventoryDigest": inventory_digest,
+        "defaultCount": len(selected_ids),
+        "defaultCaseIds": selected_ids,
+        "allDefaultCount": len(ids),
+        "allDefaultCaseIds": ids,
+        "tierCounts": {
+            suite_id: len(tier_case_ids[suite_id])
+            for suite_id in (SYSTEMIC_ACCEPTANCE_SUITE, HISTORICAL_WORKFLOW_SUITE)
+        },
+        "tierCaseIds": tier_case_ids,
+        "caseMetadata": metadata,
         "expertConversationCount": len(expert_conversation_cases()),
         "expertConversationCaseIds": [case["id"] for case in expert_conversation_cases()],
         "includeArtifactCases": include_artifact_cases,
@@ -8259,30 +9284,138 @@ def cleanup_live_feedback_smoke_receipts(output_dir, keep=None, protect_paths=No
     }
 
 
+def decorate_result_with_suite_metadata(result, inventory):
+    decorated = dict(result or {})
+    case_id = str(decorated.get("id") or "")
+    metadata = dict((inventory.get("caseMetadata") or {}).get(case_id) or {})
+    decorated.setdefault("suiteTier", metadata.get("suiteTier") or "unclassified")
+    decorated.setdefault("assertionMode", metadata.get("assertionMode") or "structured")
+    diagnostics = decorated.get("diagnostics")
+    if not isinstance(diagnostics, dict):
+        diagnostics = {}
+    diagnostics.setdefault("legacyShapeMisses", [])
+    diagnostics.setdefault("presentationShapeMisses", [])
+    diagnostics.setdefault(
+        "legacyShapeMissCount",
+        len(diagnostics.get("legacyShapeMisses") or [])
+        + len(diagnostics.get("presentationShapeMisses") or []),
+    )
+    decorated["diagnostics"] = diagnostics
+    decorated.setdefault("terminalEventSeen", decorated.get("returnCode") is not None)
+    decorated.setdefault(
+        "acceptanceFailures",
+        [] if decorated.get("ok") is True else ["structured-special-case-failure"],
+    )
+    decorated.setdefault(
+        "structuralEvidence",
+        {
+            "route": decorated.get("routeMismatch") is not True,
+            "controller": decorated.get("controllerMismatch") is not True
+            and decorated.get("adminTopicMismatch") is not True,
+            "objective": decorated.get("objectiveTypeMismatch") is not True
+            and decorated.get("objectiveResponseKindMismatch") is not True,
+            "artifact": decorated.get("ok") is True,
+            "terminal": decorated.get("returnCode") is not None,
+            "returnCode": decorated.get("returnCode") in (0,),
+        },
+    )
+    return decorated
+
+
+def live_smoke_tier_aggregates(results):
+    aggregates = {}
+    for suite_id in (SYSTEMIC_ACCEPTANCE_SUITE, HISTORICAL_WORKFLOW_SUITE):
+        tier_results = [result for result in results if result.get("suiteTier") == suite_id]
+        aggregates[suite_id] = {
+            "total": len(tier_results),
+            "passed": sum(1 for result in tier_results if result.get("ok") is True),
+            "failed": sum(1 for result in tier_results if result.get("ok") is not True),
+        }
+    return aggregates
+
+
 def write_receipt(args, results):
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     unique = uuid.uuid4().hex[:8]
+    source_completed = fetch_server_source_identity(args.server)
+    source_binding = live_smoke_source_binding(
+        getattr(args, "server_source_start", {}),
+        source_completed,
+    )
+    suite = str(getattr(args, "suite", SYSTEMIC_ACCEPTANCE_SUITE) or SYSTEMIC_ACCEPTANCE_SUITE)
+    inventory = live_case_inventory(
+        include_artifact_cases=bool(getattr(args, "include_artifact_cases", False)),
+        include_source_vault_cases=bool(getattr(args, "include_source_vault_cases", False)),
+        include_local_evidence_cases=bool(getattr(args, "include_local_evidence_cases", False)),
+        suite=suite,
+    )
+    decorated_results = [
+        decorate_result_with_suite_metadata(result, inventory) for result in results
+    ]
+    expected_ids = list(inventory.get("defaultCaseIds") or [])
+    result_ids = [str(result.get("id") or "") for result in decorated_results]
+    exact_coverage = bool(
+        expected_ids
+        and len(result_ids) == len(set(result_ids))
+        and set(result_ids) == set(expected_ids)
+    )
+    focused = bool(getattr(args, "case", []))
+    expert = bool(getattr(args, "expert_conversation", False))
+    qualifying = bool(
+        suite == SYSTEMIC_ACCEPTANCE_SUITE
+        and not focused
+        and not expert
+        and exact_coverage
+    )
+    tier_aggregates = live_smoke_tier_aggregates(decorated_results)
+    legacy_shape_miss_count = sum(
+        int((result.get("diagnostics") or {}).get("legacyShapeMissCount") or 0)
+        for result in decorated_results
+    )
+    legacy_shape_miss_cases = sum(
+        1
+        for result in decorated_results
+        if int((result.get("diagnostics") or {}).get("legacyShapeMissCount") or 0)
+        > 0
+    )
+    failed_count = sum(1 for result in decorated_results if result.get("ok") is not True)
     receipt = {
+        "schemaVersion": LIVE_SMOKE_RECEIPT_SCHEMA_VERSION,
         "createdAt": time.time(),
         "server": args.server,
-        "includeArtifactCases": args.include_artifact_cases,
-        "includeSourceVaultCases": args.include_source_vault_cases,
-        "includeLocalEvidenceCases": args.include_local_evidence_cases,
-        "includeAttachmentEditCase": args.include_attachment_edit_case,
-        "includeSteeringCase": args.include_steering_case,
-        "expertConversation": args.expert_conversation,
+        "suite": suite,
+        "qualifying": qualifying,
+        "inventoryDigest": inventory.get("inventoryDigest"),
+        "inventoryVersion": inventory.get("inventoryVersion"),
+        "expectedCaseCount": len(expected_ids),
+        "exactCoverage": exact_coverage,
+        "tierCounts": inventory.get("tierCounts") or {},
+        "tierAggregates": tier_aggregates,
+        "sourceBinding": source_binding,
+        "includeArtifactCases": bool(getattr(args, "include_artifact_cases", False)),
+        "includeSourceVaultCases": bool(getattr(args, "include_source_vault_cases", False)),
+        "includeLocalEvidenceCases": bool(getattr(args, "include_local_evidence_cases", False)),
+        "includeAttachmentEditCase": bool(getattr(args, "include_attachment_edit_case", False)),
+        "includeSteeringCase": bool(getattr(args, "include_steering_case", False)),
+        "expertConversation": expert,
         "caseFilter": args.case,
-        "status": "pass" if sum(1 for result in results if not result["ok"]) == 0 else "fail",
-        "total": len(results),
-        "passed": sum(1 for result in results if result["ok"]),
-        "failed": sum(1 for result in results if not result["ok"]),
-        "results": results,
+        "status": "pass" if failed_count == 0 else "fail",
+        "total": len(decorated_results),
+        "passed": len(decorated_results) - failed_count,
+        "failed": failed_count,
+        "results": decorated_results,
+        "diagnostics": {
+            "legacyShapeMissCount": legacy_shape_miss_count,
+            "legacyShapeMissCaseCount": legacy_shape_miss_cases,
+        },
     }
-    if args.case:
+    if focused:
         case_slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", "-".join(args.case)).strip("-").lower()[:80] or "focused"
         receipt_suffix = f"{case_slug}-{unique}-live-feedback-smoke-focused.json"
+    elif suite != SYSTEMIC_ACCEPTANCE_SUITE:
+        receipt_suffix = f"{unique}-{suite}-live-feedback-smoke.json"
     else:
         receipt_suffix = f"{unique}-live-feedback-smoke.json"
     receipt_path = output_dir / f"{stamp}-{receipt_suffix}"
@@ -8309,6 +9442,12 @@ def main():
         action="store_true",
         help="Run the six-case cross-domain conversation-quality acceptance suite.",
     )
+    parser.add_argument(
+        "--suite",
+        choices=LIVE_SMOKE_SUITE_IDS,
+        default=SYSTEMIC_ACCEPTANCE_SUITE,
+        help="Select systemic acceptance (default), historical workflow fixtures, or both tiers.",
+    )
     parser.add_argument("--output-dir", default=str(APP_DIR / "data" / "live_feedback_smoke_results"))
     parser.add_argument("--json", action="store_true", help="Print the final receipt as JSON on stdout.")
     parser.add_argument("--list-cases", action="store_true", help="Print the planned case inventory without running live requests.")
@@ -8319,15 +9458,19 @@ def main():
             include_artifact_cases=args.include_artifact_cases,
             include_source_vault_cases=args.include_source_vault_cases,
             include_local_evidence_cases=args.include_local_evidence_cases,
+            suite=args.suite,
         )
         if args.json:
             print(json.dumps(inventory, indent=2, sort_keys=True))
         else:
             print(f"status: {inventory['status']}")
+            print(f"suite: {inventory['suite']}")
+            print(f"inventory digest: {inventory['inventoryDigest']}")
             print(f"default cases: {inventory['defaultCount']}")
             for case_id in inventory["defaultCaseIds"]:
                 print(case_id)
         return 0
+    args.server_source_start = fetch_server_source_identity(args.server)
     stdout_print = builtins.print
     if args.json:
         def progress_print(*values, **kwargs):
@@ -8372,12 +9515,22 @@ def main():
         include_source_vault_cases=args.include_source_vault_cases,
         include_local_evidence_cases=args.include_local_evidence_cases,
     ):
+        if args.suite != ALL_SUITES and case.get("suiteTier") != args.suite:
+            continue
         result = run_case(args.server, case, args.timeout, args.cwd)
         results.append(result)
         status = "PASS" if result["ok"] else "FAIL"
         print(f"{status} {result['id']} {result['durationMs']}ms route={result['route'].get('projectId')}")
         if not result["ok"]:
             print(json.dumps(result, indent=2))
+    if args.suite == HISTORICAL_WORKFLOW_SUITE:
+        receipt = write_receipt(args, results)
+        if args.json:
+            builtins.print = stdout_print
+            stdout_print(json.dumps(receipt, indent=2, sort_keys=True))
+        else:
+            print(f"RESULT {receipt['receiptPath']}")
+        return 0 if receipt["failed"] == 0 else 1
     result = run_generated_artifact_followup_case(args.server, generated_artifact_followup_case(), args.timeout, args.cwd)
     results.append(result)
     status = "PASS" if result["ok"] else "FAIL"

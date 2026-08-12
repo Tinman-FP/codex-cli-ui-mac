@@ -51,6 +51,7 @@ def base_payload(messages: list[dict], web_search: str = "disabled") -> dict:
         "friendlinessLevel": "warm",
         "humorLevel": "light",
         "webSearch": web_search,
+        "testRun": True,
         "messages": messages,
     }
 

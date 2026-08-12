@@ -179,6 +179,28 @@ Do not paste API keys into chat. Local Codex modes remain the right choice for f
 
 `Local Research` does not require an OpenAI API key. It uses DuckDuckGo/Bing HTML search, direct page fetches, a 24-hour local cache at `data/local_research_cache.sqlite3`, and Ollama on `127.0.0.1:11434`.
 
+### eBay listing research
+
+eBay shopping turns use a dedicated read-only marketplace path. It carries the
+product forward from conversational follow-ups, discovers exact `/itm/` pages,
+opens each candidate, compares price plus known shipping, condition, seller
+feedback, returns, photos, and item specifics, and rejects mismatches before
+ranking. Answers link to exact item pages and state which authenticity,
+warranty, tax, serial-number, or package-content details remain unverified.
+
+This works through free public eBay pages. An explicit request to search or
+check eBay listings authorizes that bounded read-only marketplace operation for
+the current turn even when the general `Web` toggle is off; it does not enable
+unrelated web research or transmit private runtime context. Optional official
+Browse API discovery can be enabled by setting `EBAY_CLIENT_ID`,
+`EBAY_CLIENT_SECRET`, and `EBAY_MARKETPLACE_ID`; production Buy API access may
+require eBay approval. Keep the secret outside source control. Run the focused
+offline regression with:
+
+```bash
+python3 tools/ebay_marketplace_smoke.py
+```
+
 Free local model installs used by the full no-pay setup:
 
 ```bash

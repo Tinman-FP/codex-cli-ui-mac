@@ -20,6 +20,57 @@
       "answer": "Answer: Use ASA outdoors.\n\nThis is why: it handles UV and heat better.\n\nYou should also consider: use enough walls.",
       "required": ["Use ASA outdoors.", "It handles UV and heat better.", "Use enough walls."],
       "forbidden": ["What matters:", "Keep this boundary in view:", "The reason is:", "One practical caveat:", "This is why:", "You should also consider:"]
+    },
+    {
+      "id": "expert-answer-removes-legacy-wrappers",
+      "mode": "expert-direct",
+      "messages": [{"role": "user", "text": "Would graphite tolerate a 150 C chamber?"}],
+      "answer": "Answer: Graphite itself can tolerate 150 C.\n\nThis is why: its thermal limit is far above the chamber temperature.\n\nYou should also consider: the binder, mounting stack, heater, wiring, and sensors may have lower limits.",
+      "required": ["Graphite itself can tolerate 150 C.", "Its thermal limit is far above the chamber temperature.", "The binder, mounting stack, heater, wiring, and sensors may have lower limits."],
+      "forbidden": ["Answer:", "This is why:", "You should also consider:"]
+    },
+    {
+      "id": "evidence-answer-keeps-real-headings-and-code",
+      "mode": "evidence",
+      "messages": [{"role": "user", "text": "Show me the evidence and the command."}],
+      "answer": "Recommendation: Verify the material grade first.\n\nEvidence\nThe datasheet lists the continuous temperature limit.\n\n```text\nThis is why: keep this literal example\nYou should also consider: keep this literal example too\n```\n\nThis is why: the binder grade controls the usable limit.",
+      "required": ["Verify the material grade first.", "Evidence", "The binder grade controls the usable limit."],
+      "preserved": ["This is why: keep this literal example", "You should also consider: keep this literal example too"],
+      "forbidden": ["Recommendation:", "This is why: the binder grade controls the usable limit."]
+    },
+    {
+      "id": "action-result-keeps-safety-boundary",
+      "mode": "action-result",
+      "messages": [{"role": "user", "text": "Stage the config but do not install it."}],
+      "answer": "Answer: I staged the draft locally.\n\nSafety boundary\nI did not upload, restart, flash, move, or heat the machine.\n\nYou should also consider: unresolved pins remain marked TBD.",
+      "required": ["I staged the draft locally.", "Safety boundary", "I did not upload, restart, flash, move, or heat the machine.", "Unresolved pins remain marked TBD."],
+      "forbidden": ["Answer:", "You should also consider:"]
+    },
+    {
+      "id": "expert-inline-wrappers-become-paragraphs",
+      "mode": "expert-direct",
+      "messages": [{"role": "user", "text": "Which outdoor filament should I use?"}],
+      "answer": "Use ASA outdoors. This is why: it handles UV and heat better. You should also consider: design for the real wind load.",
+      "required": ["Use ASA outdoors.\n\nIt handles UV and heat better.\n\nDesign for the real wind load."],
+      "forbidden": ["This is why:", "You should also consider:"]
+    },
+    {
+      "id": "expert-inline-numbered-list-is-repaired",
+      "mode": "expert-direct",
+      "messages": [{"role": "user", "text": "What should I inspect in the assembly?"}],
+      "answer": "Check three things:\n1. Bond integrity at temperature. 2. Flatness through thermal cycling. 3. Wiring and sensor ratings.\n\n```text\n1. Keep this literal. 2. Keep this literal too.\n```",
+      "required": ["1. Bond integrity at temperature.\n2. Flatness through thermal cycling.\n3. Wiring and sensor ratings."],
+      "preserved": ["1. Keep this literal. 2. Keep this literal too."],
+      "forbidden": ["temperature. 2. Flatness", "cycling. 3. Wiring"]
+    },
+    {
+      "id": "python-fence-preserves-executable-syntax",
+      "mode": "expert-direct",
+      "messages": [{"role": "user", "text": "Explain recursion with a valid Python example."}],
+      "answer": "Recursion calls a function from itself until a base case stops it.\n\n```python\ndef factorial(n):\n    if n <= 1:\n        return 1\n    return n * factorial(n - 1)\n```",
+      "required": ["Recursion calls a function from itself", "def factorial(n):", "    if n <= 1:", "        return 1", "    return n * factorial(n - 1)"],
+      "preserved": ["```python\ndef factorial(n):\n    if n <= 1:\n        return 1\n    return n * factorial(n - 1)\n```"],
+      "forbidden": ["Def factorial", "    If n", "        Return 1", "    Return n"]
     }
   ]
 }

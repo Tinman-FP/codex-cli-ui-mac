@@ -30,7 +30,8 @@ For a serious wrong answer, unsafe tool action, privacy leak, failed package, or
 
 ## Monitoring
 
-- `/api/package-health` is the primary local readiness signal.
+- `/api/readiness-health` is the fast, read-only signal that the running app can accept work. It skips live printers and mutation-heavy release checks.
+- `/api/package-health` remains the authoritative full release signal and must pass before publishing or calling a build release-ready.
 - `logs/server-exceptions.log` is the primary startup/runtime crash signal.
 - Feedback, Fix-this, self-healing, golden batch, and live smoke receipts are the answer-quality signals.
 - Model health and printer health are operational signals, but public release health must not depend on Tinman's private machines being online.
